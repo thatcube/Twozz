@@ -76,6 +76,32 @@ struct PlaybackService {
         return StreamPlayback(master: master, qualities: qualities)
     }
 
+    /// Best-effort fetch of the current live stream title for overlay UI.
+    /// Returns nil if the channel is offline/unavailable or if the request fails.
+    static func streamTitle(for channel: String) async -> String? {
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let query = "query StreamTitle($login: String!) { user(login: $login) { stream { title } } }"
+        let body: [String: Any] = [
+            "query": query,
+            "variables": ["login": channel.lowercased()],
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        guard let (data, response) = try? await URLSession.shared.data(for: req) else { return nil }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        guard let dataObj = json["data"] as? [String: Any] else { return nil }
+        guard let userObj = dataObj["user"] as? [String: Any] else { return nil }
+        guard let streamObj = userObj["stream"] as? [String: Any] else { return nil }
+        return streamObj["title"] as? String
+    }
+
     private static func fetchAccessToken(channel: String) async throws -> Token {
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"

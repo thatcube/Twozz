@@ -48,12 +48,13 @@ struct PlayerView: View {
     @State private var showQualityPicker = false
     @State private var showControls = false
     @State private var captionsOn = false
+    @State private var streamTitle: String = ""
     @State private var hideTask: Task<Void, Never>?
 
     @FocusState private var focus: Focusable?
     private enum Focusable: Hashable {
-        case video, quality, captions, exit, chatTab
-        case qualityOption(String)
+        case video, quality, captions, chatToggle, errorBack
+        case qualityOption(Int)
     }
 
     private let chatWidth: CGFloat = 460
@@ -70,8 +71,7 @@ struct PlayerView: View {
                     ChatView(
                         channel: channel,
                         messages: chat.messages,
-                        isConnected: chat.isConnected,
-                        onCollapse: { setChat(false) }
+                        isConnected: chat.isConnected
                     )
                     .frame(width: chatWidth)
                     .frame(maxHeight: .infinity)
@@ -80,10 +80,6 @@ struct PlayerView: View {
             }
             .ignoresSafeArea()
 
-            if !showChat {
-                collapsedChatButton
-            }
-
             if showQualityPicker {
                 qualityPicker
             }
@@ -91,6 +87,7 @@ struct PlayerView: View {
         .task {
             chat.connect(to: channel)
             await load()
+            await refreshStreamTitle()
             focus = .video
         }
         .onDisappear {
@@ -101,7 +98,8 @@ struct PlayerView: View {
         .onExitCommand {
             if showQualityPicker {
                 showQualityPicker = false
-                focus = .video
+                focus = .quality
+                scheduleHide()
             } else if showControls {
                 hideControls()
             } else {
@@ -113,7 +111,7 @@ struct PlayerView: View {
     // MARK: - Video + controls
 
     private var videoColumn: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .bottom) {
             VideoSurface(player: player)
                 .ignoresSafeArea()
 
@@ -139,70 +137,70 @@ struct PlayerView: View {
                     Text(errorMessage)
                         .foregroundStyle(.secondary)
                     Button("Back") { dismiss() }
-                        .focused($focus, equals: .exit)
+                        .focused($focus, equals: .errorBack)
                 }
                 .padding(40)
                 .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 24))
             } else if showControls && !showQualityPicker {
-                controlBar
+                bottomOverlay
                     .transition(.opacity)
             }
         }
     }
 
-    private var controlBar: some View {
-        HStack(spacing: 20) {
-            Button {
-                showQualityPicker = true
-                focus = .qualityOption(preferredQuality)
-                hideTask?.cancel()
-            } label: {
-                Label("Quality • \(preferredQuality)", systemImage: "gauge.with.dots.needle.67percent")
-            }
-            .focused($focus, equals: .quality)
-
-            Button {
-                captionsOn.toggle()
-                applyCaptions()
-                scheduleHide()
-            } label: {
-                Label(captionsOn ? "Captions On" : "Captions Off",
-                      systemImage: captionsOn ? "captions.bubble.fill" : "captions.bubble")
-            }
-            .focused($focus, equals: .captions)
+    private var bottomOverlay: some View {
+        HStack(alignment: .bottom, spacing: 24) {
+            Text(streamTitle.isEmpty ? channel : streamTitle)
+                .font(.headline)
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 860, alignment: .leading)
 
             Spacer()
+
+            HStack(spacing: 14) {
+                Button {
+                    showQualityPicker = true
+                    hideTask?.cancel()
+                } label: {
+                    Label("Quality", systemImage: "gauge.with.dots.needle.67percent")
+                        .labelStyle(.iconOnly)
+                }
+                .focused($focus, equals: .quality)
+
+                Button {
+                    captionsOn.toggle()
+                    applyCaptions()
+                    scheduleHide()
+                } label: {
+                    Label(captionsOn ? "Captions On" : "Captions Off",
+                          systemImage: captionsOn ? "captions.bubble.fill" : "captions.bubble")
+                        .labelStyle(.iconOnly)
+                }
+                .focused($focus, equals: .captions)
+
+                Button {
+                    showChat.toggle()
+                    scheduleHide()
+                } label: {
+                    Label(showChat ? "Hide Chat" : "Show Chat",
+                          systemImage: showChat ? "sidebar.right" : "bubble.left.and.bubble.right.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .focused($focus, equals: .chatToggle)
+            }
+            .buttonStyle(.bordered)
         }
-        .buttonStyle(.bordered)
         .padding(.horizontal, 48)
-        .padding(.top, 36)
+        .padding(.bottom, 42)
         .background(
-            LinearGradient(colors: [.black.opacity(0.6), .clear],
+            LinearGradient(colors: [.clear, .black.opacity(0.72)],
                            startPoint: .top, endPoint: .bottom)
-                .frame(height: 180)
+                .frame(height: 240)
                 .allowsHitTesting(false),
-            alignment: .top
+            alignment: .bottom
         )
-    }
-
-    /// Small focusable button pinned to the top-right that re-opens chat when
-    /// it's collapsed (mirrors the collapse button in the chat header).
-    private var collapsedChatButton: some View {
-        Button {
-            setChat(true)
-        } label: {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-        }
-        .buttonStyle(.bordered)
-        .focused($focus, equals: .chatTab)
-        .padding(.top, 36)
-        .padding(.trailing, 48)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-    }
-
-    private func setChat(_ shown: Bool) {
-        withAnimation(.easeInOut(duration: 0.25)) { showChat = shown }
-        focus = shown ? .video : .chatTab
     }
 
     // MARK: - Controls visibility
@@ -243,9 +241,9 @@ struct PlayerView: View {
                     .font(.title2).bold()
                     .padding(.bottom, 8)
 
-                ForEach(qualityOptions, id: \.self) { option in
+                ForEach(Array(qualityOptions.enumerated()), id: \.offset) { index, option in
                     Button {
-                        select(quality: option)
+                        selectQuality(at: index)
                     } label: {
                         HStack {
                             Text(option)
@@ -257,7 +255,7 @@ struct PlayerView: View {
                         .frame(width: 360)
                     }
                     .buttonStyle(.bordered)
-                    .focused($focus, equals: .qualityOption(option))
+                    .focused($focus, equals: .qualityOption(index))
                 }
             }
             .padding(40)
@@ -267,7 +265,7 @@ struct PlayerView: View {
         .onAppear {
             // Move focus into the picker once it's on screen; the underlying
             // control bar is hidden while the picker is open so it can't steal focus.
-            let target = qualityOptions.contains(preferredQuality) ? preferredQuality : (qualityOptions.first ?? "Auto")
+            let target = qualityOptions.firstIndex(of: preferredQuality) ?? 0
             focus = .qualityOption(target)
         }
     }
@@ -276,7 +274,9 @@ struct PlayerView: View {
         ["Auto"] + (playback?.qualities.map(\.name) ?? [])
     }
 
-    private func select(quality option: String) {
+    private func selectQuality(at index: Int) {
+        guard qualityOptions.indices.contains(index) else { return }
+        let option = qualityOptions[index]
         preferredQuality = option
         showQualityPicker = false
         if let url = url(for: option) {
@@ -292,6 +292,7 @@ struct PlayerView: View {
     private func load() async {
         isLoading = true
         errorMessage = nil
+        streamTitle = ""
         player.appliesMediaSelectionCriteriaAutomatically = false
         do {
             let resolved = try await PlaybackService.resolve(for: channel)
@@ -303,6 +304,12 @@ struct PlayerView: View {
         } catch {
             errorMessage = error.localizedDescription
             isLoading = false
+        }
+    }
+
+    private func refreshStreamTitle() async {
+        if let title = await PlaybackService.streamTitle(for: channel), !title.isEmpty {
+            streamTitle = title
         }
     }
 

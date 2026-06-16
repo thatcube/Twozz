@@ -154,21 +154,31 @@ actor BadgeCatalogService {
     }
 
     private func fetchGlobalBadges() async -> [String: URL] {
-        guard let url = URL(string: "https://badges.twitch.tv/v1/badges/global/display") else { return [:] }
-        guard let json = await fetchJSON(url: url) as? [String: Any] else { return [:] }
-        return parseBadgeDisplayJSON(json)
+        guard let url = URL(string: "https://api.ivr.fi/v2/twitch/badges/global") else { return [:] }
+        guard let json = await fetchJSON(url: url) else { return [:] }
+        return parseBadgeJSON(json)
     }
 
     private func fetchChannelBadges(twitchUserID: String?) async -> [String: URL] {
         guard let twitchUserID,
-              let url = URL(string: "https://badges.twitch.tv/v1/badges/channels/\(twitchUserID)/display") else {
+              let url = URL(string: "https://api.ivr.fi/v2/twitch/badges/channel?id=\(twitchUserID)") else {
             return [:]
         }
-        guard let json = await fetchJSON(url: url) as? [String: Any] else { return [:] }
-        return parseBadgeDisplayJSON(json)
+        guard let json = await fetchJSON(url: url) else { return [:] }
+        return parseBadgeJSON(json)
     }
 
-    private func parseBadgeDisplayJSON(_ json: [String: Any]) -> [String: URL] {
+    private func parseBadgeJSON(_ json: Any) -> [String: URL] {
+        if let dict = json as? [String: Any] {
+            return parseLegacyBadgeDisplayJSON(dict)
+        }
+        if let array = json as? [[String: Any]] {
+            return parseIVRBadgeArray(array)
+        }
+        return [:]
+    }
+
+    private func parseLegacyBadgeDisplayJSON(_ json: [String: Any]) -> [String: URL] {
         guard let sets = json["badge_sets"] as? [String: Any] else { return [:] }
         var out: [String: URL] = [:]
 
@@ -189,7 +199,35 @@ actor BadgeCatalogService {
         return out
     }
 
+    private func parseIVRBadgeArray(_ sets: [[String: Any]]) -> [String: URL] {
+        var out: [String: URL] = [:]
+
+        for set in sets {
+            guard let setID = set["set_id"] as? String,
+                  let versions = set["versions"] as? [[String: Any]] else { continue }
+
+            for version in versions {
+                guard let versionID = version["id"] as? String else { continue }
+                let urlString = (version["image_url_2x"] as? String)
+                    ?? (version["image_url_4x"] as? String)
+                    ?? (version["image_url_1x"] as? String)
+                guard let urlString, let url = URL(string: urlString) else { continue }
+                out["\(setID)/\(versionID)"] = url
+            }
+        }
+
+        return out
+    }
+
     private func twitchUserID(for login: String) async -> String? {
+        if let encoded = login.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+           let ivrURL = URL(string: "https://api.ivr.fi/v2/twitch/user?login=\(encoded)"),
+           let payload = await fetchJSON(url: ivrURL) as? [[String: Any]],
+           let id = payload.first?["id"] as? String,
+           !id.isEmpty {
+            return id
+        }
+
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
         req.setValue(clientID, forHTTPHeaderField: "Client-ID")
@@ -210,7 +248,9 @@ actor BadgeCatalogService {
     }
 
     private func fetchJSON(url: URL) async -> Any? {
-        guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: req) else { return nil }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else { return nil }
         return try? JSONSerialization.jsonObject(with: data)

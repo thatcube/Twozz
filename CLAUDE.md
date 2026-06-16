@@ -2,6 +2,18 @@
 
 Repository instructions for Claude-style agents.
 
+## Branch policy (single branch only)
+
+All work must stay on the current branch (normally `main`).
+
+Rules:
+1. Do not create new branches.
+2. Do not switch branches.
+3. Do not suggest branch-based workflows unless the user explicitly asks for branches.
+4. Commit and push only to the currently checked out branch.
+
+If a branch change is required, ask the user first.
+
 ## Deploy-to-device rule (always)
 
 After any code change that is successfully built, always deploy and launch the latest build on the paired Apple TV for immediate user testing.

@@ -116,19 +116,12 @@ struct RichChatLineView: View {
 
 private struct EmoteView: View {
     private static let emoteHeight: CGFloat = 34
-    private static let minAspectRatio: CGFloat = 0.5
-    private static let maxAspectRatio: CGFloat = 4.0
 
     let name: String
     let url: URL
     let fallbackColor: Color
 
     @State private var loadFailed = false
-    @State private var aspectRatio: CGFloat = 1
-
-    private var emoteWidth: CGFloat {
-        Self.emoteHeight * aspectRatio
-    }
 
     var body: some View {
         Group {
@@ -138,17 +131,13 @@ private struct EmoteView: View {
                     .foregroundStyle(fallbackColor)
             } else {
                 AnimatedImage(url: url)
-                    .onSuccess { image, _, _ in
-                        guard image.size.width > 0, image.size.height > 0 else { return }
-                        let ratio = image.size.width / image.size.height
-                        aspectRatio = min(max(ratio, Self.minAspectRatio), Self.maxAspectRatio)
-                    }
                     .onFailure { _ in
                         loadFailed = true
                     }
                     .resizable()
-                    .scaledToFit()
-                    .frame(width: emoteWidth, height: Self.emoteHeight)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: Self.emoteHeight)
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
     }

@@ -2,6 +2,18 @@
 
 Persistent workflow instructions for coding agents working in this repository.
 
+## Branch policy (single branch only)
+
+All work must stay on the current branch (normally `main`).
+
+Rules:
+1. Do not create new branches.
+2. Do not switch branches.
+3. Do not suggest branch-based workflows unless the user explicitly asks for branches.
+4. Commit and push only to the currently checked out branch.
+
+If a branch change is required, ask the user first.
+
 ## Always deploy after successful local build
 
 When code changes are made and a build succeeds, always deploy the newest build to the paired Apple TV so the user can test immediately.

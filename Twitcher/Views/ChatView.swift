@@ -11,28 +11,13 @@ struct ChatView: View {
     @State private var pendingScrollWork: DispatchWorkItem?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(.white.opacity(0.15))
-            messageList
-        }
+        messageList
         .background(Color(white: 0.07).opacity(0.96))
         .overlay(alignment: .leading) {
             Rectangle()
                 .fill(.white.opacity(0.12))
                 .frame(width: 1)
         }
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            Text(channel)
-                .font(.headline)
-                .lineLimit(1)
-            Spacer()
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 18)
     }
 
     private var messageList: some View {

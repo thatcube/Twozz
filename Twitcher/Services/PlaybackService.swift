@@ -39,6 +39,12 @@ struct StreamPlayback {
     let qualities: [StreamQuality]
 }
 
+struct ChannelMetadata {
+    let displayName: String
+    let title: String
+    let profileImageURL: URL?
+}
+
 struct PlaybackService {
     private static let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
     private static let accessTokenHash = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
@@ -80,13 +86,20 @@ struct PlaybackService {
     /// Best-effort fetch of the current live stream title for overlay UI.
     /// Returns nil if the channel is offline/unavailable or if the request fails.
     static func streamTitle(for channel: String) async -> String? {
+        guard let metadata = await channelMetadata(for: channel) else { return nil }
+        return metadata.title.isEmpty ? nil : metadata.title
+    }
+
+    /// Best-effort fetch of channel display metadata for overlay UI.
+    /// Returns nil if unavailable or if the request fails.
+    static func channelMetadata(for channel: String) async -> ChannelMetadata? {
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
         req.setValue(clientID, forHTTPHeaderField: "Client-ID")
         req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let query = "query StreamTitle($login: String!) { user(login: $login) { stream { title } } }"
+        let query = "query ChannelMetadata($login: String!) { user(login: $login) { displayName profileImageURL(width: 70) stream { title } } }"
         let body: [String: Any] = [
             "query": query,
             "variables": ["login": channel.lowercased()],
@@ -99,8 +112,18 @@ struct PlaybackService {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         guard let dataObj = json["data"] as? [String: Any] else { return nil }
         guard let userObj = dataObj["user"] as? [String: Any] else { return nil }
-        guard let streamObj = userObj["stream"] as? [String: Any] else { return nil }
-        return streamObj["title"] as? String
+
+        let displayName = (userObj["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let streamObj = userObj["stream"] as? [String: Any]
+        let title = (streamObj?["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let imageURLString = userObj["profileImageURL"] as? String
+        let profileImageURL = imageURLString.flatMap(URL.init(string:))
+
+        return ChannelMetadata(
+            displayName: (displayName?.isEmpty == false ? displayName! : channel),
+            title: title,
+            profileImageURL: profileImageURL
+        )
     }
 
     private static func fetchAccessToken(channel: String) async throws -> Token {

@@ -55,16 +55,21 @@ struct PlayerView: View {
     @State private var captionOptions: [AVMediaSelectionOption] = []
     @State private var captionSelectionKey: String?
     @State private var streamTitle: String = ""
+    @State private var channelDisplayName: String = ""
+    @State private var channelAvatarURL: URL?
     @State private var chatDraft: String = ""
     @State private var hideTask: Task<Void, Never>?
     @State private var latencyTask: Task<Void, Never>?
     @State private var wallClockLatencySeconds: Double?
     @State private var liveEdgeLatencySeconds: Double?
+    @State private var isPlaybackActive = false
     @State private var lastControlFocus: Focusable = .quality
+
+    private let controlsAutoHideSeconds: Double = 10
 
     @FocusState private var focus: Focusable?
     private enum Focusable: Hashable {
-        case video, quality, captions, chatToggle, chatInput, errorBack
+        case video, streamInfo, quality, captions, chatToggle, chatInput, errorBack
         case qualityOption(Int)
         case captionsOption(Int)
     }
@@ -97,8 +102,9 @@ struct PlayerView: View {
         .task {
             configurePlayerForLive()
             chat.connect(to: channel)
+            async let metadataTask: Void = refreshChannelMetadata()
             await load()
-            await refreshStreamTitle()
+            _ = await metadataTask
             focus = .video
         }
         .onAppear {
@@ -144,6 +150,7 @@ struct PlayerView: View {
 
             if let newFocus, isControlFocus(newFocus) {
                 lastControlFocus = newFocus
+                scheduleHide()
                 return
             }
 
@@ -160,7 +167,7 @@ struct PlayerView: View {
             VideoSurface(player: player)
                 .ignoresSafeArea()
 
-            if measuredLatencySeconds != nil {
+            if showControls, !showQualityPicker, !showCaptionsPicker, !isLoading, errorMessage == nil {
                 VStack {
                     HStack {
                         latencyBadge
@@ -209,12 +216,53 @@ struct PlayerView: View {
 
     private var bottomOverlay: some View {
         HStack(alignment: .bottom, spacing: 24) {
-            Text(streamTitle.isEmpty ? channel : streamTitle)
-                .font(.headline)
-                .foregroundStyle(.white)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 860, alignment: .leading)
+            HStack(spacing: 12) {
+                Button {
+                    scheduleHide()
+                } label: {
+                    Group {
+                        if let channelAvatarURL {
+                            AsyncImage(url: channelAvatarURL) { image in
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            } placeholder: {
+                                ZStack {
+                                    Circle().fill(.white.opacity(0.16))
+                                    Image(systemName: "person.crop.circle.fill")
+                                        .foregroundStyle(.white.opacity(0.85))
+                                }
+                            }
+                        } else {
+                            ZStack {
+                                Circle().fill(.white.opacity(0.16))
+                                Image(systemName: "person.crop.circle.fill")
+                                    .foregroundStyle(.white.opacity(0.85))
+                            }
+                        }
+                    }
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+                }
+                .buttonStyle(.bordered)
+                .focused($focus, equals: .streamInfo)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .right:
+                        focus = .quality
+                    default:
+                        break
+                    }
+                }
+
+                Text(streamTitle.isEmpty ? channelDisplayName : streamTitle)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: 860, alignment: .leading)
 
             Spacer()
 
@@ -231,8 +279,7 @@ struct PlayerView: View {
                 .onMoveCommand { direction in
                     switch direction {
                     case .left:
-                        // Left edge intentionally does nothing.
-                        break
+                        focus = .streamInfo
                     case .right:
                         focus = .captions
                     default:
@@ -337,11 +384,11 @@ struct PlayerView: View {
     private func scheduleHide() {
         hideTask?.cancel()
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(6))
+            try? await Task.sleep(for: .seconds(controlsAutoHideSeconds))
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard !showQualityPicker else { return }
-                guard focus != .chatInput else { return }
+                guard !showCaptionsPicker else { return }
                 hideControls()
             }
         }
@@ -349,7 +396,7 @@ struct PlayerView: View {
 
     private func isControlFocus(_ focus: Focusable) -> Bool {
         switch focus {
-        case .quality, .captions, .chatToggle, .chatInput:
+        case .streamInfo, .quality, .captions, .chatToggle, .chatInput:
             return true
         default:
             return false
@@ -560,19 +607,13 @@ struct PlayerView: View {
             playback = resolved
             player.replaceCurrentItem(with: makeItem(url: resolved.master))
             applyQualityPreference(preferredQuality)
-            player.play()
+            startPlayback()
             startLatencyMonitor()
             isLoading = false
         } catch {
             stopLatencyMonitor()
             errorMessage = error.localizedDescription
             isLoading = false
-        }
-    }
-
-    private func refreshStreamTitle() async {
-        if let title = await PlaybackService.streamTitle(for: channel), !title.isEmpty {
-            streamTitle = title
         }
     }
 
@@ -596,7 +637,7 @@ struct PlayerView: View {
         if match.isAudioOnly {
             player.replaceCurrentItem(with: makeItem(url: match.url))
             player.currentItem?.preferredPeakBitRate = 0
-            player.play()
+            startPlayback()
             return
         }
 
@@ -608,13 +649,13 @@ struct PlayerView: View {
     private func switchToMasterItemIfNeeded(_ masterURL: URL) {
         guard let asset = player.currentItem?.asset as? AVURLAsset else {
             player.replaceCurrentItem(with: makeItem(url: masterURL))
-            player.play()
+            startPlayback()
             return
         }
 
         guard asset.url != masterURL else { return }
         player.replaceCurrentItem(with: makeItem(url: masterURL))
-        player.play()
+        startPlayback()
     }
 
     private func makeItem(url: URL) -> AVPlayerItem {
@@ -623,8 +664,7 @@ struct PlayerView: View {
             options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
         )
         let item = AVPlayerItem(asset: asset)
-        // Keep live delay lower by avoiding a large prebuffer window.
-        item.preferredForwardBufferDuration = 1
+        item.preferredForwardBufferDuration = 0
         applyCaptions(to: item, retries: 12)
         return item
     }
@@ -641,13 +681,16 @@ struct PlayerView: View {
     }
 
     private var latencyLabel: String {
+        if !isPlaybackActive {
+            return "Latency: waiting for playback"
+        }
         if let wallClockLatencySeconds {
             return "Live latency \(formatLatencySeconds(wallClockLatencySeconds))"
         }
         if let liveEdgeLatencySeconds {
             return "Live edge \(formatLatencySeconds(liveEdgeLatencySeconds))"
         }
-        return "Measuring latency"
+        return "Latency: measuring..."
     }
 
     private func formatLatencySeconds(_ seconds: Double) -> String {
@@ -660,8 +703,12 @@ struct PlayerView: View {
     }
 
     private func configurePlayerForLive() {
-        // Prefer immediacy for live streams over additional anti-stall buffering.
-        player.automaticallyWaitsToMinimizeStalling = false
+        // Prefer reliable startup and steady playback on tvOS.
+        player.automaticallyWaitsToMinimizeStalling = true
+    }
+
+    private func startPlayback() {
+        player.playImmediately(atRate: 1.0)
     }
 
     private func startLatencyMonitor() {
@@ -681,10 +728,20 @@ struct PlayerView: View {
         latencyTask = nil
         wallClockLatencySeconds = nil
         liveEdgeLatencySeconds = nil
+        isPlaybackActive = false
     }
 
     private func updateLatencyMetrics() {
         guard let item = player.currentItem else {
+            wallClockLatencySeconds = nil
+            liveEdgeLatencySeconds = nil
+            isPlaybackActive = false
+            return
+        }
+
+        let isPlaying = player.timeControlStatus == .playing && player.rate > 0
+        isPlaybackActive = isPlaying
+        guard isPlaying else {
             wallClockLatencySeconds = nil
             liveEdgeLatencySeconds = nil
             return
@@ -708,6 +765,17 @@ struct PlayerView: View {
         } else {
             liveEdgeLatencySeconds = nil
         }
+    }
+
+    private func refreshChannelMetadata() async {
+        guard let metadata = await PlaybackService.channelMetadata(for: channel) else {
+            channelDisplayName = channel
+            channelAvatarURL = nil
+            return
+        }
+        channelDisplayName = metadata.displayName
+        channelAvatarURL = metadata.profileImageURL
+        streamTitle = metadata.title
     }
 
     /// Applies the current captions preference to the active item.

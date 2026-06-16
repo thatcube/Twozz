@@ -20,4 +20,6 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.twitcher
+        DEVELOPMENT_TEAM: N8Z5T4AK3X
+        CODE_SIGN_STYLE: Automatic
         # App icons added later; omitted so initial builds don't fail on missing assets.

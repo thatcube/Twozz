@@ -106,6 +106,16 @@ struct PlayerView: View {
                 dismiss()
             }
         }
+        .onMoveCommand { _ in
+            guard !showQualityPicker else { return }
+            if !showControls {
+                // Directional movement should immediately surface controls and
+                // land on chat toggle so moving off chat feels instant.
+                revealControls(preferredFocus: .chatToggle)
+            } else {
+                scheduleHide()
+            }
+        }
     }
 
     // MARK: - Video + controls
@@ -123,7 +133,7 @@ struct PlayerView: View {
                 .contentShape(Rectangle())
                 .focusable()
                 .focused($focus, equals: .video)
-                .onTapGesture { revealControls() }
+                .onTapGesture { revealControls(preferredFocus: .quality) }
 
             if isLoading {
                 ProgressView("Loading \(channel)…")
@@ -168,6 +178,12 @@ struct PlayerView: View {
                         .labelStyle(.iconOnly)
                 }
                 .focused($focus, equals: .quality)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .right: focus = .captions
+                    default: break
+                    }
+                }
 
                 Button {
                     captionsOn.toggle()
@@ -179,6 +195,13 @@ struct PlayerView: View {
                         .labelStyle(.iconOnly)
                 }
                 .focused($focus, equals: .captions)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .left: focus = .quality
+                    case .right: focus = .chatToggle
+                    default: break
+                    }
+                }
 
                 Button {
                     showChat.toggle()
@@ -189,8 +212,15 @@ struct PlayerView: View {
                         .labelStyle(.iconOnly)
                 }
                 .focused($focus, equals: .chatToggle)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .left: focus = .captions
+                    default: break
+                    }
+                }
             }
             .buttonStyle(.bordered)
+            .focusSection()
         }
         .padding(.horizontal, 48)
         .padding(.bottom, 42)
@@ -205,10 +235,10 @@ struct PlayerView: View {
 
     // MARK: - Controls visibility
 
-    private func revealControls() {
+    private func revealControls(preferredFocus: Focusable) {
         guard !showControls else { scheduleHide(); return }
         withAnimation(.easeInOut(duration: 0.2)) { showControls = true }
-        focus = .quality
+        focus = preferredFocus
         scheduleHide()
     }
 

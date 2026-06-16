@@ -158,29 +158,35 @@ struct PlaybackService {
         return parseMaster(text)
     }
 
-    /// Parses a Twitch HLS master playlist. Each video rendition is described by an
-    /// `#EXT-X-MEDIA:TYPE=VIDEO` line (GROUP-ID + NAME) followed by an
-    /// `#EXT-X-STREAM-INF` line referencing that group via `VIDEO="..."` and then the URL.
+    /// Parses a Twitch HLS master playlist. Each rendition is a single
+    /// `#EXT-X-STREAM-INF` line carrying `IVS-NAME="720p60"` (display name),
+    /// `IVS-VARIANT-SOURCE="source"` (marks the highest/source rendition) and
+    /// (for video) a `RESOLUTION=` attribute, immediately followed by the URL.
     static func parseMaster(_ text: String) -> [StreamQuality] {
-        var names: [String: String] = [:]   // group-id -> display name
         var ordered: [StreamQuality] = []
         let lines = text.components(separatedBy: .newlines)
 
-        var pendingGroup: String?
+        var pendingName: String?
+        var pendingID: String?
+        var pendingIsSource = false
+        var pendingHasResolution = false
         for raw in lines {
             let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("#EXT-X-MEDIA:") && line.contains("TYPE=VIDEO") {
-                if let group = attribute("GROUP-ID", in: line) {
-                    names[group] = attribute("NAME", in: line) ?? group
-                }
-            } else if line.hasPrefix("#EXT-X-STREAM-INF:") {
-                pendingGroup = attribute("VIDEO", in: line)
+            if line.hasPrefix("#EXT-X-STREAM-INF:") {
+                pendingID = attribute("STABLE-VARIANT-ID", in: line)
+                pendingName = attribute("IVS-NAME", in: line) ?? pendingID
+                pendingIsSource = attribute("IVS-VARIANT-SOURCE", in: line)?.lowercased() == "source"
+                pendingHasResolution = line.contains("RESOLUTION=")
             } else if !line.isEmpty, !line.hasPrefix("#"), let url = URL(string: line) {
-                let group = pendingGroup ?? "chunked"
-                let isAudio = group.lowercased().contains("audio")
-                let display = displayName(names[group] ?? group, group: group, isAudio: isAudio)
-                ordered.append(StreamQuality(id: group, name: display, url: url, isAudioOnly: isAudio))
-                pendingGroup = nil
+                let id = pendingID ?? pendingName ?? "source"
+                let nameLower = (pendingName ?? id).lowercased()
+                let isAudio = !pendingHasResolution || nameLower.contains("audio")
+                let display = displayName(pendingName ?? id, isSource: pendingIsSource, isAudio: isAudio)
+                ordered.append(StreamQuality(id: id, name: display, url: url, isAudioOnly: isAudio))
+                pendingName = nil
+                pendingID = nil
+                pendingIsSource = false
+                pendingHasResolution = false
             }
         }
         return ordered
@@ -202,14 +208,10 @@ struct PlaybackService {
     }
 
     /// Normalizes Twitch's rendition name into a clean display label.
-    private static func displayName(_ name: String, group: String, isAudio: Bool) -> String {
+    private static func displayName(_ name: String, isSource: Bool, isAudio: Bool) -> String {
         if isAudio { return "Audio Only" }
-        // The source rendition's group is "chunked"; tag it as Source.
-        if group == "chunked" {
-            let base = name.replacingOccurrences(of: " (source)", with: "")
-                           .replacingOccurrences(of: " (Source)", with: "")
-            return "\(base) (Source)"
-        }
-        return name
+        let base = name.replacingOccurrences(of: " (source)", with: "")
+                       .replacingOccurrences(of: " (Source)", with: "")
+        return isSource ? "\(base) (Source)" : base
     }
 }

@@ -6,6 +6,8 @@ struct ChatView: View {
     let channel: String
     let messages: [ChatMessage]
     var isConnected: Bool = false
+    /// Called when the user activates the collapse button on the panel.
+    var onCollapse: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,15 +25,17 @@ struct ChatView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Circle()
-                .fill(isConnected ? .green : .secondary)
-                .frame(width: 12, height: 12)
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .foregroundStyle(isConnected ? .green : .secondary)
             Text(channel)
                 .font(.headline)
                 .lineLimit(1)
             Spacer()
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-                .foregroundStyle(.secondary)
+            Button(action: onCollapse) {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.bordered)
+            .help("Hide chat")
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 18)

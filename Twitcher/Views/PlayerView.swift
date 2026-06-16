@@ -29,8 +29,10 @@ struct VideoSurface: UIViewRepresentable {
 
 /// Full-screen player for a live channel. Video sits on the left and the chat
 /// panel docks to the right at full height (the video shrinks to make room,
-/// never overlapping). Includes focusable controls to collapse/expand chat and
-/// pick a stream quality that persists across channels.
+/// never overlapping). We use a custom `AVPlayerLayer` surface with our own
+/// overlay UI rather than the native player transport — the native controls are
+/// VOD/scrubbing-oriented and unsuited to a live, side-by-side chat layout.
+/// Controls auto-hide and are revealed by pressing the remote.
 struct PlayerView: View {
     let channel: String
 
@@ -44,9 +46,15 @@ struct PlayerView: View {
     @State private var isLoading = true
     @State private var showChat = true
     @State private var showQualityPicker = false
+    @State private var showControls = false
+    @State private var captionsOn = false
+    @State private var hideTask: Task<Void, Never>?
 
     @FocusState private var focus: Focusable?
-    private enum Focusable: Hashable { case chatToggle, quality, exit }
+    private enum Focusable: Hashable {
+        case video, quality, captions, exit, chatTab
+        case qualityOption(String)
+    }
 
     private let chatWidth: CGFloat = 460
 
@@ -59,9 +67,17 @@ struct PlayerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 if showChat {
-                    ChatView(channel: channel, messages: chat.messages, isConnected: chat.isConnected)
-                        .frame(width: chatWidth)
-                        .frame(maxHeight: .infinity)
+                    ChatView(
+                        channel: channel,
+                        messages: chat.messages,
+                        isConnected: chat.isConnected,
+                        onCollapse: { setChat(false) }
+                    )
+                    .frame(width: chatWidth)
+                    .frame(maxHeight: .infinity)
+                    .transition(.move(edge: .trailing))
+                } else {
+                    collapsedChatTab
                         .transition(.move(edge: .trailing))
                 }
             }
@@ -74,14 +90,19 @@ struct PlayerView: View {
         .task {
             chat.connect(to: channel)
             await load()
+            focus = .video
         }
         .onDisappear {
+            hideTask?.cancel()
             player.pause()
             chat.disconnect()
         }
         .onExitCommand {
             if showQualityPicker {
                 showQualityPicker = false
+                focus = .video
+            } else if showControls {
+                hideControls()
             } else {
                 dismiss()
             }
@@ -94,6 +115,15 @@ struct PlayerView: View {
         ZStack(alignment: .top) {
             VideoSurface(player: player)
                 .ignoresSafeArea()
+
+            // Invisible full-area catcher: pressing the remote reveals controls.
+            Button(action: revealControls) {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focused($focus, equals: .video)
 
             if isLoading {
                 ProgressView("Loading \(channel)…")
@@ -111,8 +141,9 @@ struct PlayerView: View {
                 }
                 .padding(40)
                 .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 24))
-            } else {
+            } else if showControls {
                 controlBar
+                    .transition(.opacity)
             }
         }
     }
@@ -120,20 +151,23 @@ struct PlayerView: View {
     private var controlBar: some View {
         HStack(spacing: 20) {
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) { showChat.toggle() }
-            } label: {
-                Label(showChat ? "Hide Chat" : "Show Chat",
-                      systemImage: showChat ? "sidebar.right" : "bubble.left.and.bubble.right")
-            }
-            .focused($focus, equals: .chatToggle)
-
-            Button {
                 showQualityPicker = true
-                focus = .quality
+                focus = .qualityOption(preferredQuality)
+                hideTask?.cancel()
             } label: {
                 Label("Quality • \(preferredQuality)", systemImage: "gauge.with.dots.needle.67percent")
             }
             .focused($focus, equals: .quality)
+
+            Button {
+                captionsOn.toggle()
+                applyCaptions()
+                scheduleHide()
+            } label: {
+                Label(captionsOn ? "Captions On" : "Captions Off",
+                      systemImage: captionsOn ? "captions.bubble.fill" : "captions.bubble")
+            }
+            .focused($focus, equals: .captions)
 
             Spacer()
 
@@ -147,6 +181,64 @@ struct PlayerView: View {
         .buttonStyle(.bordered)
         .padding(.horizontal, 48)
         .padding(.top, 36)
+        .background(
+            LinearGradient(colors: [.black.opacity(0.6), .clear],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 180)
+                .allowsHitTesting(false),
+            alignment: .top
+        )
+    }
+
+    /// Thin focusable strip shown on the right edge when chat is collapsed.
+    private var collapsedChatTab: some View {
+        Button {
+            setChat(true)
+        } label: {
+            VStack(spacing: 12) {
+                Image(systemName: "chevron.left")
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+            }
+            .font(.title3)
+            .frame(maxHeight: .infinity)
+            .frame(width: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focus, equals: .chatTab)
+        .background(Color(white: 0.07).opacity(0.96))
+    }
+
+    private func setChat(_ shown: Bool) {
+        withAnimation(.easeInOut(duration: 0.25)) { showChat = shown }
+        focus = shown ? .video : .chatTab
+    }
+
+    // MARK: - Controls visibility
+
+    private func revealControls() {
+        guard !showControls else { scheduleHide(); return }
+        withAnimation(.easeInOut(duration: 0.2)) { showControls = true }
+        focus = .quality
+        scheduleHide()
+    }
+
+    private func hideControls() {
+        hideTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.2)) { showControls = false }
+        focus = .video
+    }
+
+    private func scheduleHide() {
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard !showQualityPicker else { return }
+                hideControls()
+            }
+        }
     }
 
     // MARK: - Quality picker
@@ -154,7 +246,6 @@ struct PlayerView: View {
     private var qualityPicker: some View {
         ZStack {
             Color.black.opacity(0.5).ignoresSafeArea()
-                .onTapGesture { showQualityPicker = false }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Quality")
@@ -175,6 +266,7 @@ struct PlayerView: View {
                         .frame(width: 360)
                     }
                     .buttonStyle(.bordered)
+                    .focused($focus, equals: .qualityOption(option))
                 }
             }
             .padding(40)
@@ -193,6 +285,8 @@ struct PlayerView: View {
             player.replaceCurrentItem(with: makeItem(url: url))
             player.play()
         }
+        focus = .quality
+        scheduleHide()
     }
 
     // MARK: - Loading
@@ -200,6 +294,7 @@ struct PlayerView: View {
     private func load() async {
         isLoading = true
         errorMessage = nil
+        player.appliesMediaSelectionCriteriaAutomatically = false
         do {
             let resolved = try await PlaybackService.resolve(for: channel)
             playback = resolved
@@ -228,6 +323,30 @@ struct PlayerView: View {
             url: url,
             options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
         )
-        return AVPlayerItem(asset: asset)
+        let item = AVPlayerItem(asset: asset)
+        applyCaptions(to: item)
+        return item
+    }
+
+    /// Applies the current captions preference to the active item.
+    private func applyCaptions() {
+        if let item = player.currentItem { applyCaptions(to: item) }
+    }
+
+    /// Turns the in-band/closed captions on or off for a given item. Twitch
+    /// streams carry CEA-608 captions in the legible selection group; we
+    /// explicitly deselect them so they default off and can be toggled.
+    private func applyCaptions(to item: AVPlayerItem) {
+        let wantCaptions = captionsOn
+        Task {
+            guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) else { return }
+            await MainActor.run {
+                if wantCaptions, let option = group.options.first {
+                    item.select(option, in: group)
+                } else {
+                    item.select(nil, in: group)
+                }
+            }
+        }
     }
 }

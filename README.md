@@ -62,6 +62,21 @@ xcodebuild \
 
 For real Apple TV deployment, use a valid signing team and a device destination.
 
+## Twitch Auth Setup (No Committed Secrets)
+
+Twitch device auth still needs a Twitch app `client_id`, but you do not need to commit it to this repo.
+
+1. Copy [Config/TwitchSecrets.xcconfig.local.example](Config/TwitchSecrets.xcconfig.local.example) to `Config/TwitchSecrets.xcconfig.local`.
+2. Set your value:
+
+```xcconfig
+TWITCH_CLIENT_ID = your_real_client_id
+```
+
+`Config/TwitchSecrets.xcconfig.local` is gitignored (`*.xcconfig.local`), so your ID stays local.
+
+On Apple TV, sign-in uses Twitch Device Code flow: start sign-in on TV, then complete approval on your phone/browser (including the Twitch mobile app browser flow) using the shown code/link.
+
 ## How Playback Works
 
 Apple TV has no official Twitch playback SDK. Twitcher resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.

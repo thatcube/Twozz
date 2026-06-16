@@ -59,13 +59,37 @@ struct PlayerView: View {
     @State private var channelAvatarURL: URL?
     @State private var chatDraft: String = ""
     @State private var hideTask: Task<Void, Never>?
+    @State private var focusRecoveryTask: Task<Void, Never>?
     @State private var latencyTask: Task<Void, Never>?
     @State private var wallClockLatencySeconds: Double?
     @State private var liveEdgeLatencySeconds: Double?
     @State private var isPlaybackActive = false
+    @State private var didRequestPlayback = false
+    @State private var lastHardCatchUpJumpAt = Date.distantPast
+    @State private var lastWallClockCatchUpAt = Date.distantPast
+    @State private var edgeLatencyLowConfidenceStreak = 0
+    @State private var wallClockHighLatencyStreak = 0
+    @State private var wallClockLowConfidenceStreak = 0
+    @State private var lastPlaybackDateSample: Date?
+    @State private var lastPlaybackTimeSampleSeconds: Double?
     @State private var lastControlFocus: Focusable = .quality
 
     private let controlsAutoHideSeconds: Double = 10
+    private let targetLiveEdgeSeconds: Double = 3.5
+    private let softCatchUpThresholdSeconds: Double = 8
+    private let hardCatchUpThresholdSeconds: Double = 14
+    private let hardCatchUpCooldownSeconds: Double = 20
+    private let maxCatchUpRate: Float = 1.04
+    private let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
+    private let edgeLatencyUnavailableSamples = 4
+    private let wallClockSoftCatchUpThresholdSeconds: Double = 12
+    private let wallClockHardCatchUpThresholdSeconds: Double = 16
+    private let wallClockHardCatchUpRequiredSamples = 10
+    private let wallClockHardCatchUpCooldownSeconds: Double = 90
+    private let targetWallClockSeconds: Double = 6.5
+    private let wallClockUnavailableSamples = 4
+    private let wallClockStaleDateDeltaEpsilonSeconds: Double = 0.08
+    private let wallClockStalePlaybackAdvanceThresholdSeconds: Double = 0.6
 
     @FocusState private var focus: Focusable?
     private enum Focusable: Hashable {
@@ -112,6 +136,7 @@ struct PlayerView: View {
         }
         .onDisappear {
             hideTask?.cancel()
+            focusRecoveryTask?.cancel()
             stopLatencyMonitor()
             player.pause()
             chat.disconnect()
@@ -149,13 +174,9 @@ struct PlayerView: View {
             guard showControls, !showQualityPicker, !showCaptionsPicker else { return }
 
             if let newFocus, isControlFocus(newFocus) {
+                focusRecoveryTask?.cancel()
                 lastControlFocus = newFocus
                 scheduleHide()
-                return
-            }
-
-            if newFocus == nil {
-                focus = lastControlFocus
             }
         }
     }
@@ -209,14 +230,13 @@ struct PlayerView: View {
                 .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 24))
             } else if showControls && !showQualityPicker {
                 bottomOverlay
-                    .transition(.opacity)
             }
         }
     }
 
     private var bottomOverlay: some View {
-        HStack(alignment: .bottom, spacing: 24) {
-            HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 24) {
+            HStack(alignment: .top, spacing: 12) {
                 Button {
                     scheduleHide()
                 } label: {
@@ -244,12 +264,14 @@ struct PlayerView: View {
                     .frame(width: 36, height: 36)
                     .clipShape(Circle())
                 }
-                .buttonStyle(.bordered)
+                .twitcherControlButtonStyle()
                 .focused($focus, equals: .streamInfo)
                 .onMoveCommand { direction in
                     switch direction {
                     case .right:
                         focus = .quality
+                    case .left:
+                        focus = .streamInfo
                     default:
                         break
                     }
@@ -260,11 +282,11 @@ struct PlayerView: View {
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
+                    .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: 860, alignment: .leading)
 
-            Spacer()
+            Spacer(minLength: 18)
 
             HStack(spacing: 14) {
                 Button {
@@ -324,21 +346,34 @@ struct PlayerView: View {
                     case .left:
                         focus = .captions
                     case .right:
-                        if showChat { focus = .chatInput }
+                        if showChat {
+                            focus = .chatInput
+                        }
                     default:
                         break
                     }
                 }
             }
-            .buttonStyle(.bordered)
+            .fixedSize(horizontal: true, vertical: false)
+            .twitcherControlButtonStyle()
             .focusSection()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 48)
+        .padding(.top, 12)
         .padding(.bottom, 42)
         .background(
-            LinearGradient(colors: [.clear, .black.opacity(0.72)],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 240)
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.0),
+                    .init(color: .black.opacity(0.72), location: 0.56),
+                    .init(color: .black.opacity(1.0), location: 1.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+                .frame(maxWidth: .infinity)
+                .frame(height: 280)
                 .allowsHitTesting(false),
             alignment: .bottom
         )
@@ -355,10 +390,16 @@ struct PlayerView: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(.white)
 
-            if wallClockLatencySeconds != nil, let edge = liveEdgeLatencySeconds {
-                Text("(edge \(formatLatencySeconds(edge)))")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.75))
+            if wallClockLatencySeconds != nil {
+                if let edge = liveEdgeLatencySeconds {
+                    Text("(edge \(formatLatencySeconds(edge)))")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.75))
+                } else {
+                    Text("(edge n/a)")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.75))
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -369,15 +410,21 @@ struct PlayerView: View {
     // MARK: - Controls visibility
 
     private func revealControls(preferredFocus: Focusable) {
-        guard !showControls else { scheduleHide(); return }
-        withAnimation(.easeInOut(duration: 0.2)) { showControls = true }
+        focusRecoveryTask?.cancel()
+        if !showControls {
+            showControls = true
+        }
+        if isControlFocus(preferredFocus) {
+            lastControlFocus = preferredFocus
+        }
         focus = preferredFocus
         scheduleHide()
     }
 
     private func hideControls() {
         hideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.2)) { showControls = false }
+        focusRecoveryTask?.cancel()
+        showControls = false
         focus = .video
     }
 
@@ -429,7 +476,8 @@ struct PlayerView: View {
                     switch direction {
                     case .left:
                         revealControls(preferredFocus: .chatToggle)
-                        focus = .chatToggle
+                    case .right:
+                        focus = .chatInput
                     default:
                         break
                     }
@@ -664,13 +712,13 @@ struct PlayerView: View {
             options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
         )
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 0
+        item.preferredForwardBufferDuration = 1
         applyCaptions(to: item, retries: 12)
         return item
     }
 
     private var measuredLatencySeconds: Double? {
-        wallClockLatencySeconds ?? liveEdgeLatencySeconds
+        liveEdgeLatencySeconds ?? wallClockLatencySeconds
     }
 
     private var latencyColor: Color {
@@ -684,13 +732,13 @@ struct PlayerView: View {
         if !isPlaybackActive {
             return "Latency: waiting for playback"
         }
-        if let wallClockLatencySeconds {
-            return "Live latency \(formatLatencySeconds(wallClockLatencySeconds))"
-        }
         if let liveEdgeLatencySeconds {
-            return "Live edge \(formatLatencySeconds(liveEdgeLatencySeconds))"
+            return "Live latency \(formatLatencySeconds(liveEdgeLatencySeconds))"
         }
-        return "Latency: measuring..."
+        if let wallClockLatencySeconds {
+            return "Estimated latency \(formatLatencySeconds(wallClockLatencySeconds))"
+        }
+        return "Latency unavailable"
     }
 
     private func formatLatencySeconds(_ seconds: Double) -> String {
@@ -703,11 +751,12 @@ struct PlayerView: View {
     }
 
     private func configurePlayerForLive() {
-        // Prefer reliable startup and steady playback on tvOS.
+        // Prefer reliable startup; latency is corrected by explicit catch-up logic.
         player.automaticallyWaitsToMinimizeStalling = true
     }
 
     private func startPlayback() {
+        didRequestPlayback = true
         player.playImmediately(atRate: 1.0)
     }
 
@@ -729,6 +778,12 @@ struct PlayerView: View {
         wallClockLatencySeconds = nil
         liveEdgeLatencySeconds = nil
         isPlaybackActive = false
+        didRequestPlayback = false
+        edgeLatencyLowConfidenceStreak = 0
+        wallClockHighLatencyStreak = 0
+        wallClockLowConfidenceStreak = 0
+        lastPlaybackDateSample = nil
+        lastPlaybackTimeSampleSeconds = nil
     }
 
     private func updateLatencyMetrics() {
@@ -736,34 +791,168 @@ struct PlayerView: View {
             wallClockLatencySeconds = nil
             liveEdgeLatencySeconds = nil
             isPlaybackActive = false
+            wallClockLowConfidenceStreak = 0
+            lastPlaybackDateSample = nil
+            lastPlaybackTimeSampleSeconds = nil
             return
         }
 
-        let isPlaying = player.timeControlStatus == .playing && player.rate > 0
-        isPlaybackActive = isPlaying
-        guard isPlaying else {
+        let status = player.timeControlStatus
+        let hasSeekableRange = item.seekableTimeRanges.last?.timeRangeValue != nil
+        let currentSeconds = CMTimeGetSeconds(item.currentTime())
+        let hasAdvancedTime = currentSeconds.isFinite && currentSeconds > 0
+
+        // Treat waiting/buffering as active once playback has been requested.
+        isPlaybackActive = status == .playing
+            || (didRequestPlayback && status == .waitingToPlayAtSpecifiedRate)
+            || hasSeekableRange
+            || hasAdvancedTime
+
+        if !isPlaybackActive {
             wallClockLatencySeconds = nil
             liveEdgeLatencySeconds = nil
-            return
         }
 
         if let playbackDate = item.currentDate() {
             let wallClock = Date().timeIntervalSince(playbackDate)
-            wallClockLatencySeconds = wallClock.isFinite ? max(0, wallClock) : nil
+            let playbackSeconds = CMTimeGetSeconds(item.currentTime())
+
+            if let lastDate = lastPlaybackDateSample,
+               let lastPlaybackSeconds = lastPlaybackTimeSampleSeconds,
+               playbackSeconds.isFinite,
+               lastPlaybackSeconds.isFinite {
+                let playbackAdvance = playbackSeconds - lastPlaybackSeconds
+                let dateAdvance = playbackDate.timeIntervalSince(lastDate)
+
+                if playbackAdvance >= wallClockStalePlaybackAdvanceThresholdSeconds,
+                   abs(dateAdvance) <= wallClockStaleDateDeltaEpsilonSeconds {
+                    wallClockLowConfidenceStreak += 1
+                } else if wallClockLowConfidenceStreak > 0 {
+                    wallClockLowConfidenceStreak -= 1
+                }
+            }
+
+            lastPlaybackDateSample = playbackDate
+            if playbackSeconds.isFinite {
+                lastPlaybackTimeSampleSeconds = playbackSeconds
+            }
+
+            let hasValidWallClock = wallClock.isFinite && wallClock >= 0
+            let hasReliableWallClock = hasValidWallClock
+                && wallClockLowConfidenceStreak < wallClockUnavailableSamples
+
+            if hasReliableWallClock {
+                wallClockLatencySeconds = wallClock
+            } else if !hasValidWallClock {
+                wallClockLatencySeconds = nil
+            } else {
+                // Wall-clock telemetry appears stale. Keep the last reliable
+                // value instead of counting up forever.
+            }
         } else {
             wallClockLatencySeconds = nil
+            wallClockLowConfidenceStreak = 0
+            lastPlaybackDateSample = nil
+            lastPlaybackTimeSampleSeconds = nil
         }
 
         if let range = item.seekableTimeRanges.last?.timeRangeValue {
             let liveEdge = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
             let current = CMTimeGetSeconds(item.currentTime())
             if liveEdge.isFinite, current.isFinite, liveEdge > 0 {
-                liveEdgeLatencySeconds = max(0, liveEdge - current)
+                let liveEdgeLatencyRaw = max(0, liveEdge - current)
+                if liveEdgeLatencyRaw <= edgeLatencyUnavailableEpsilonSeconds {
+                    edgeLatencyLowConfidenceStreak += 1
+                } else {
+                    edgeLatencyLowConfidenceStreak = 0
+                }
+
+                let liveEdgeLatency: Double? = edgeLatencyLowConfidenceStreak >= edgeLatencyUnavailableSamples
+                    ? nil
+                    : liveEdgeLatencyRaw
+                liveEdgeLatencySeconds = liveEdgeLatency
+                applyLiveLatencyCorrection(
+                    item: item,
+                    range: range,
+                    wallClockLatency: wallClockLatencySeconds,
+                    liveEdgeLatency: liveEdgeLatency
+                )
             } else {
                 liveEdgeLatencySeconds = nil
+                edgeLatencyLowConfidenceStreak = 0
             }
         } else {
             liveEdgeLatencySeconds = nil
+            edgeLatencyLowConfidenceStreak = 0
+            applyLiveLatencyCorrection(
+                item: item,
+                range: nil,
+                wallClockLatency: wallClockLatencySeconds,
+                liveEdgeLatency: nil
+            )
+        }
+    }
+
+    /// Keeps playback close to the live edge without constant hard seeks.
+    private func applyLiveLatencyCorrection(
+        item: AVPlayerItem,
+        range: CMTimeRange?,
+        wallClockLatency: Double?,
+        liveEdgeLatency: Double?
+    ) {
+        guard isPlaybackActive else { return }
+        let now = Date()
+
+        if let liveEdgeLatency {
+            // Ignore tiny/unstable values to avoid oscillation.
+            guard liveEdgeLatency >= 0.8 else {
+                if abs(player.rate - 1.0) > 0.01 {
+                    player.playImmediately(atRate: 1.0)
+                }
+                return
+            }
+
+            if liveEdgeLatency >= hardCatchUpThresholdSeconds {
+                guard now.timeIntervalSince(lastHardCatchUpJumpAt) >= hardCatchUpCooldownSeconds else { return }
+
+                guard let range else { return }
+
+                let edge = CMTimeRangeGetEnd(range)
+                let edgeSeconds = CMTimeGetSeconds(edge)
+                let floorSeconds = CMTimeGetSeconds(range.start)
+                let targetSeconds = max(floorSeconds, edgeSeconds - targetLiveEdgeSeconds)
+
+                guard targetSeconds.isFinite else { return }
+                let targetTime = CMTime(seconds: targetSeconds, preferredTimescale: edge.timescale == 0 ? 600 : edge.timescale)
+                player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
+                player.playImmediately(atRate: 1.0)
+                lastHardCatchUpJumpAt = now
+                wallClockHighLatencyStreak = 0
+                return
+            }
+
+            if liveEdgeLatency > softCatchUpThresholdSeconds {
+                // Mild speed-up only; prioritize smooth playback over aggressive chasing.
+                let overshoot = liveEdgeLatency - softCatchUpThresholdSeconds
+                let targetRate = min(maxCatchUpRate, 1.01 + Float(overshoot / 60.0))
+                if abs(player.rate - targetRate) > 0.01 {
+                    player.playImmediately(atRate: targetRate)
+                }
+                wallClockHighLatencyStreak = 0
+                return
+            }
+
+            wallClockHighLatencyStreak = 0
+            if liveEdgeLatency <= targetLiveEdgeSeconds + 0.8, abs(player.rate - 1.0) > 0.01 {
+                player.playImmediately(atRate: 1.0)
+            }
+            return
+        }
+
+        // Fallback for channels where seekable-range edge latency is unreliable.
+        wallClockHighLatencyStreak = 0
+        if abs(player.rate - 1.0) > 0.01 {
+            player.playImmediately(atRate: 1.0)
         }
     }
 
@@ -831,5 +1020,16 @@ struct PlayerView: View {
 
     private func setIdleTimer(disabled: Bool) {
         UIApplication.shared.isIdleTimerDisabled = disabled
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func twitcherControlButtonStyle() -> some View {
+        if #available(tvOS 26.0, *) {
+            self.buttonStyle(.glass)
+        } else {
+            self.buttonStyle(.automatic)
+        }
     }
 }

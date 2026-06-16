@@ -1,0 +1,4 @@
+// Shared project-level config.
+// Local secrets should be provided in TwitchSecrets.xcconfig.local (gitignored).
+TWITCH_CLIENT_ID =
+#include? "TwitchSecrets.xcconfig.local"

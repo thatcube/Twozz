@@ -10,7 +10,11 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "6.0"
     GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_TWITCH_CLIENT_ID: "$(TWITCH_CLIENT_ID)"
     TARGETED_DEVICE_FAMILY: "3" # Apple TV
+configFiles:
+  Debug: Config/App.xcconfig
+  Release: Config/App.xcconfig
 packages:
   SDWebImage:
     url: https://github.com/SDWebImage/SDWebImage.git

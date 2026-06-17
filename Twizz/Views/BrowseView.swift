@@ -6,9 +6,9 @@ struct BrowseView: View {
   let auth: TwitchAuthSession
   @Binding var selectedChannel: FollowedChannel?
   @Binding var pendingCategory: TwitchCategory?
+  @Binding var path: [TwitchCategory]
 
   @State private var service = BrowseService()
-  @State private var path: [TwitchCategory] = []
 
   private func open(_ category: TwitchCategory) {
     if path.last != category {

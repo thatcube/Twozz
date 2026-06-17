@@ -21,6 +21,7 @@ struct HomeView: View {
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var pendingBrowseCategory: TwitchCategory?
+  @State private var browsePath: [TwitchCategory] = []
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
 
@@ -77,7 +78,8 @@ struct HomeView: View {
         BrowseView(
           auth: auth,
           selectedChannel: $selectedChannel,
-          pendingCategory: $pendingBrowseCategory
+          pendingCategory: $pendingBrowseCategory,
+          path: $browsePath
         )
       }
       .tag(SidebarTab.browse)
@@ -132,6 +134,12 @@ struct HomeView: View {
       }
     }
     .onChange(of: selectedSidebarTab) { _, tab in
+      // tvOS SwiftUI bug: while the Browse tab's NavigationStack has a pushed
+      // detail, the sidebar won't switch tabs. Popping Browse to root as the
+      // selection leaves Browse lets the tab change take effect.
+      if tab != .browse && !browsePath.isEmpty {
+        browsePath.removeAll()
+      }
       guard tab == .home else { return }
       Task {
         await refreshFollowedChannelsIfNeeded(force: false)

@@ -237,6 +237,8 @@ private struct SettingPill: View {
   var subtitle: String? = nil
   let isSelected: Bool
 
+  private let accent = Color(red: 0.58, green: 0.41, blue: 0.96)
+
   var body: some View {
     HStack(spacing: 18) {
       Image(systemName: systemImage)
@@ -255,13 +257,9 @@ private struct SettingPill: View {
 
       Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
         .font(.body)
-        .foregroundStyle(isSelected ? Color.green : Color.secondary)
+        .foregroundStyle(isSelected ? accent : Color.secondary)
     }
     .padding(.horizontal, 26)
     .padding(.vertical, 16)
-    .overlay(
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
-    )
   }
 }

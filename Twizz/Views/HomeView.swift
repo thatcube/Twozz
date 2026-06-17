@@ -4,7 +4,7 @@ struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
   private let channelRailVerticalPadding: CGFloat = 20
-  private let peekCardFraction: CGFloat = 0.04
+  private let peekCardFraction: CGFloat = 0.08
   private let focusHorizontalInset: CGFloat = 18
   private let focusVerticalInset: CGFloat = 18
   private let cardCornerRadius: CGFloat = 22
@@ -174,7 +174,10 @@ struct HomeView: View {
 
   private var homeTab: some View {
     GeometryReader { proxy in
-      let rail = channelRailMetrics(for: proxy.size.width)
+      let rail = channelRailMetrics(
+        for: proxy.size.width,
+        trailingSafeArea: proxy.safeAreaInsets.trailing
+      )
 
       ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 40) {
@@ -383,11 +386,15 @@ struct HomeView: View {
     .accessibilityLabel("View settings")
   }
 
-  private func channelRailMetrics(for availableWidth: CGFloat) -> ChannelRailMetrics {
-    // Cards begin at the left page gutter and, because the horizontal rails
-    // disable scroll clipping, paint rightward all the way to the screen edge.
-    // So the visible region is the full width minus a single (left) gutter.
-    let visibleWidth = max(availableWidth - AppLayout.horizontalPadding, 1)
+  private func channelRailMetrics(for availableWidth: CGFloat, trailingSafeArea: CGFloat = 0) -> ChannelRailMetrics {
+    // `availableWidth` is the safe-area width. Cards begin at the left page
+    // gutter, but because the horizontal rails disable scroll clipping they
+    // paint rightward past the safe area, through the trailing overscan, all
+    // the way to the true screen edge. The real visible span is therefore the
+    // safe width, minus the single left gutter, plus the trailing overscan the
+    // cards bleed into. Without adding that overscan back, a fixed ~overscan
+    // slice of the next card always shows (a larger fraction on smaller cards).
+    let visibleWidth = max(availableWidth - AppLayout.horizontalPadding + trailingSafeArea, 1)
     let n = targetVisibleCards
     let peek = peekCardFraction
     let spacing = max(18, min(32, visibleWidth * 0.012))

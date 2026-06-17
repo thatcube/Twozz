@@ -10,6 +10,9 @@ struct SettingsView: View {
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
   @FocusState private var focusedTheme: AppTheme?
+  @FocusState private var focusedCardSize: StreamCardSize?
+
+  @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
 
   var body: some View {
     ZStack {
@@ -26,6 +29,7 @@ struct SettingsView: View {
             .font(.system(size: 56, weight: .bold))
 
           appearanceSection
+          streamCardSection
           accountSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -65,6 +69,39 @@ struct SettingsView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .focusSection()
     .defaultFocus($focusedTheme, AppTheme.system)
+  }
+
+  // MARK: - Stream cards
+
+  private var streamCardSection: some View {
+    VStack(alignment: .leading, spacing: 24) {
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Stream Cards")
+          .font(.title2.weight(.semibold))
+          .foregroundStyle(.secondary)
+
+        Text("Choose how large stream cards appear across Home and Browse.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+
+      HStack(spacing: 28) {
+        ForEach(StreamCardSize.allCases) { size in
+          Button {
+            streamCardSizeRaw = size.rawValue
+          } label: {
+            StreamCardSizeOptionCard(
+              size: size,
+              isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size
+            )
+          }
+          .buttonStyle(.card)
+          .focused($focusedCardSize, equals: size)
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .focusSection()
   }
 
   // MARK: - Account
@@ -168,6 +205,38 @@ private struct ThemeOptionCard: View {
 
       Text(theme.displayName)
         .font(.headline)
+
+      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+        .font(.title3)
+        .foregroundStyle(isSelected ? Color.green : Color.secondary)
+    }
+    .frame(width: 200, height: 200)
+    .overlay(
+      RoundedRectangle(cornerRadius: 22)
+        .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
+    )
+  }
+}
+
+// MARK: - Stream card size option card
+
+private struct StreamCardSizeOptionCard: View {
+  let size: StreamCardSize
+  let isSelected: Bool
+
+  var body: some View {
+    VStack(spacing: 16) {
+      Image(systemName: size.symbolName)
+        .font(.system(size: 40))
+        .frame(height: 48)
+
+      VStack(spacing: 2) {
+        Text(size.title)
+          .font(.headline)
+        Text(size.subtitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
 
       Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
         .font(.title3)

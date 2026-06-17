@@ -127,7 +127,14 @@ private struct BrowseStreamsView: View {
   @Environment(\.dismiss) private var dismiss
   @FocusState private var focusedStreamID: String?
 
-  private let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
+  @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
+
+  private var columns: [GridItem] {
+    Array(
+      repeating: GridItem(.flexible(), spacing: 20),
+      count: StreamCardSize.resolve(streamCardSizeRaw).visibleCardCount
+    )
+  }
   private let gridSpacing: CGFloat = 20
   private let gridBottomInset: CGFloat = 12
 

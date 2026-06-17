@@ -111,6 +111,7 @@ private struct BrowseCategoriesView: View {
         .padding(.vertical, 8)
         .focusSection()
       }
+      .padding(.horizontal, AppLayout.horizontalPadding)
       .padding(.bottom, 12)
     }
 

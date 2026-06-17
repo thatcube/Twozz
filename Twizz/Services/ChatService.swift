@@ -134,6 +134,26 @@ final class ChatService {
   /// Set when a raid USERNOTICE arrives. Cleared by the consumer after handling.
   var pendingRaid: RaidEvent?
 
+  /// Number of messages currently held back by stream-sync delay (not yet shown).
+  private(set) var pendingSyncMessageCount = 0
+
+  /// When true, incoming messages are held for `chatSyncDelaySeconds` before
+  /// becoming visible, so chat aligns with the delayed video stream.
+  private var chatSyncEnabled = false
+  /// How long (seconds) to hold incoming messages when sync is active.
+  private var chatSyncDelaySeconds: Double = 0
+  /// Minimum delay for sync to actually hold messages; below this it's a no-op.
+  private let chatSyncMinDelaySeconds: Double = 0.75
+
+  private struct PendingChatMessage {
+    let message: ChatMessage
+    let releaseAt: Date
+  }
+
+  /// Messages waiting out their sync delay before being shown (arrival order).
+  private var syncBuffer: [PendingChatMessage] = []
+  private var syncDrainTask: Task<Void, Never>?
+
   private let endpoint = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
 
   private var socket: URLSessionWebSocketTask?
@@ -156,6 +176,24 @@ final class ChatService {
     youtubeMergeEnabled = enabled
     youtubeChannelOrURL = channelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
     restartYouTubeLoopIfNeeded()
+  }
+
+  /// Configure stream-sync chat delay. When `enabled` and `delaySeconds` is
+  /// meaningful, incoming messages are held back so chat lines up with the
+  /// delayed video. Disabling (or a negligible delay) flushes any held
+  /// messages immediately so nothing is lost.
+  func configureChatSync(enabled: Bool, delaySeconds: Double) {
+    let clamped = max(0, delaySeconds)
+    let shouldHold = enabled && clamped >= chatSyncMinDelaySeconds
+
+    chatSyncDelaySeconds = clamped
+
+    if shouldHold {
+      chatSyncEnabled = true
+    } else if chatSyncEnabled || !syncBuffer.isEmpty {
+      chatSyncEnabled = false
+      flushSyncBuffer()
+    }
   }
 
   func applyReadabilitySettings(
@@ -218,6 +256,10 @@ final class ChatService {
     stopYouTubeLoop(clearStatus: true)
     isConnected = false
     messages.removeAll()
+    syncDrainTask?.cancel()
+    syncDrainTask = nil
+    syncBuffer.removeAll()
+    pendingSyncMessageCount = 0
     emoteURLs.removeAll()
     badgeURLs.removeAll()
     youtubeSeenMessageIDs.removeAll()
@@ -975,10 +1017,71 @@ final class ChatService {
       }
       return lhs.timestamp < rhs.timestamp
     }
+
+    if chatSyncEnabled, chatSyncDelaySeconds >= chatSyncMinDelaySeconds {
+      let releaseAt = Date().addingTimeInterval(chatSyncDelaySeconds)
+      for message in sorted {
+        syncBuffer.append(PendingChatMessage(message: message, releaseAt: releaseAt))
+      }
+      pendingSyncMessageCount = syncBuffer.count
+      startSyncDrainIfNeeded()
+    } else {
+      appendVisible(sorted)
+    }
+  }
+
+  private func appendVisible(_ sorted: [ChatMessage]) {
+    guard !sorted.isEmpty else { return }
     messages.append(contentsOf: sorted)
     if messages.count > maxBufferedMessages {
       messages.removeFirst(messages.count - maxBufferedMessages)
     }
+  }
+
+  private func startSyncDrainIfNeeded() {
+    guard syncDrainTask == nil else { return }
+    syncDrainTask = Task { [weak self] in
+      await self?.drainSyncBuffer()
+    }
+  }
+
+  /// Releases held messages to the visible buffer as each one's delay elapses,
+  /// preserving arrival order.
+  private func drainSyncBuffer() async {
+    while !Task.isCancelled {
+      guard let next = syncBuffer.first else { break }
+
+      let now = Date()
+      if next.releaseAt > now {
+        try? await Task.sleep(for: .seconds(next.releaseAt.timeIntervalSince(now)))
+        if Task.isCancelled { return }
+        continue
+      }
+
+      var released: [ChatMessage] = []
+      while let first = syncBuffer.first, first.releaseAt <= Date() {
+        released.append(first.message)
+        syncBuffer.removeFirst()
+      }
+      appendVisible(released)
+      pendingSyncMessageCount = syncBuffer.count
+    }
+    syncDrainTask = nil
+  }
+
+  /// Immediately surfaces every held message (used when sync is turned off or
+  /// the connection tears down) so no message is dropped.
+  private func flushSyncBuffer() {
+    syncDrainTask?.cancel()
+    syncDrainTask = nil
+    guard !syncBuffer.isEmpty else {
+      pendingSyncMessageCount = 0
+      return
+    }
+    let pending = syncBuffer.map(\.message)
+    syncBuffer.removeAll()
+    pendingSyncMessageCount = 0
+    appendVisible(pending)
   }
 }
 

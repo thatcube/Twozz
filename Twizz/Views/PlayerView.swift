@@ -49,6 +49,7 @@ struct PlayerView: View {
   @AppStorage("chatLineSpacing") private var chatLineSpacingRaw = ChatLineSpacingOption.normal.rawValue
   @AppStorage("chatWidthMode") private var chatWidthModeRaw = ChatWidthMode.medium.rawValue
   @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
+  @AppStorage("chatSyncToStream") private var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
   @AppStorage("experimentalYouTubeMergeChannelOrURL") private var experimentalYouTubeMergeChannelOrURL = ""
 
@@ -75,6 +76,11 @@ struct PlayerView: View {
   @State private var chatInputActivationToken: Int = 0
   @State private var isSendingChat = false
   @State private var chatSendError: String?
+  /// When chat sync is active, a sent message is held until it appears in the
+  /// delayed stream. This is the wall-clock moment it should surface.
+  @State private var chatSyncSendDeadline: Date?
+  @State private var chatSyncSendDelay: Double = 0
+  @State private var chatSyncSendClearTask: Task<Void, Never>?
   @State private var hideTask: Task<Void, Never>?
   @State private var focusRecoveryTask: Task<Void, Never>?
   @State private var latencyTask: Task<Void, Never>?
@@ -136,6 +142,7 @@ struct PlayerView: View {
     case chatLineSpacingOption(Int)
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
+    case chatSyncToggle
     case youtubeMergeToggle
     case youtubeMergeURL
     case raidFollow
@@ -261,6 +268,7 @@ struct PlayerView: View {
     .onDisappear {
       hideTask?.cancel()
       focusRecoveryTask?.cancel()
+      chatSyncSendClearTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
       player.pause()
@@ -622,6 +630,7 @@ struct PlayerView: View {
       .chatLineSpacingOption,
       .chatWidthOption,
       .chatLayoutOption,
+      .chatSyncToggle,
       .youtubeMergeToggle,
       .youtubeMergeURL:
       return true
@@ -812,6 +821,29 @@ struct PlayerView: View {
       }
 
       VStack(alignment: .leading, spacing: 7) {
+        Text("Stream Sync")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
+
+        settingsPill(
+          title: chatSyncToStream ? "Synced to Stream" : "Sync to Stream",
+          isSelected: chatSyncToStream,
+          focusTag: .chatSyncToggle
+        ) {
+          chatSyncToStream.toggle()
+          applyChatSyncSettings()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        Text(chatSyncStatusDescription)
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.6))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .focusSection()
+
+      VStack(alignment: .leading, spacing: 7) {
         Text("Experimental")
           .font(.caption.weight(.semibold))
           .foregroundStyle(.white.opacity(0.84))
@@ -954,6 +986,10 @@ struct PlayerView: View {
           .font(.caption)
           .foregroundStyle(.orange)
           .lineLimit(2)
+      }
+
+      if let deadline = chatSyncSendDeadline, chatSyncSendDelay > 0 {
+        ChatSyncSendIndicator(deadline: deadline, total: chatSyncSendDelay)
       }
 
       if auth.isAuthenticated {
@@ -1107,10 +1143,30 @@ struct PlayerView: View {
       do {
         try await auth.sendChatMessage(text, toChannel: activeChannel)
         chatDraft = ""
+        beginChatSyncSendIndicatorIfNeeded()
       } catch {
         chatSendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       }
       isSendingChat = false
+    }
+  }
+
+  /// When stream-sync is holding chat, a sent message won't appear until it
+  /// reaches the delayed video. Show a short progress countdown so the user
+  /// knows it was sent and roughly when it will surface.
+  private func beginChatSyncSendIndicatorIfNeeded() {
+    guard chatSyncToStream, let delay = measuredLatencySeconds, delay >= 0.75 else {
+      return
+    }
+    chatSyncSendClearTask?.cancel()
+    chatSyncSendDelay = delay
+    chatSyncSendDeadline = Date().addingTimeInterval(delay)
+    chatSyncSendClearTask = Task {
+      try? await Task.sleep(for: .seconds(delay))
+      guard !Task.isCancelled else { return }
+      await MainActor.run {
+        chatSyncSendDeadline = nil
+      }
     }
   }
 
@@ -1351,6 +1407,26 @@ struct PlayerView: View {
     )
   }
 
+  /// Push the current sync preference + measured latency into the chat service.
+  /// Called when the toggle changes and on each latency sample.
+  private func applyChatSyncSettings() {
+    chat.configureChatSync(
+      enabled: chatSyncToStream,
+      delaySeconds: measuredLatencySeconds ?? 0
+    )
+  }
+
+  /// Human-readable explanation shown under the Stream Sync toggle.
+  private var chatSyncStatusDescription: String {
+    guard chatSyncToStream else {
+      return "Chat shows in real time, so it runs ahead of the delayed video."
+    }
+    if let seconds = measuredLatencySeconds, seconds >= 0.75 {
+      return "Holding chat ~\(formatLatencySeconds(seconds)) to match the video."
+    }
+    return "Measuring stream delay… chat will sync once latency is known."
+  }
+
   // MARK: - Loading
 
   private enum LoadTimeoutError: LocalizedError {
@@ -1558,6 +1634,7 @@ struct PlayerView: View {
       while !Task.isCancelled {
         await MainActor.run {
           updateLatencyMetrics()
+          applyChatSyncSettings()
         }
         try? await Task.sleep(for: .seconds(1))
       }
@@ -2067,6 +2144,40 @@ private struct ChatInputField: UIViewRepresentable {
 
     @objc func editingChanged(_ field: UITextField) {
       text.wrappedValue = field.text ?? ""
+    }
+  }
+}
+
+/// A small progress pill shown after sending a chat message while stream-sync
+/// is holding chat back, counting down until the sent message reaches the
+/// delayed video on screen.
+private struct ChatSyncSendIndicator: View {
+  let deadline: Date
+  let total: Double
+
+  var body: some View {
+    TimelineView(.animation) { context in
+      let remaining = max(0, deadline.timeIntervalSince(context.date))
+      let progress = total > 0 ? min(1, max(0, 1 - remaining / total)) : 1
+      HStack(spacing: 10) {
+        Image(systemName: "clock.arrow.circlepath")
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.7))
+        VStack(alignment: .leading, spacing: 4) {
+          Text(remaining > 0.5
+            ? "Sent — appears in \(Int(remaining.rounded()))s"
+            : "Appearing now…")
+            .font(.caption2)
+            .foregroundStyle(.white.opacity(0.82))
+          ProgressView(value: progress)
+            .progressViewStyle(.linear)
+            .tint(.purple)
+        }
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
   }
 }

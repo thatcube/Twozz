@@ -4,7 +4,7 @@ struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
   private let channelRailVerticalPadding: CGFloat = 20
-  private let peekCardFraction: CGFloat = 0.2
+  private let peekCardFraction: CGFloat = 0.1
   private let focusHorizontalInset: CGFloat = 18
   private let focusVerticalInset: CGFloat = 18
   private let cardCornerRadius: CGFloat = 22

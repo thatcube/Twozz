@@ -1288,13 +1288,13 @@ struct PlayerView: View {
             selectQuality(at: index)
           } label: {
             HStack {
-              Text(option)
+              Text(qualityDisplayLabel(option))
               Spacer()
               if option == preferredQuality {
                 Image(systemName: "checkmark")
               }
             }
-            .frame(width: 360)
+            .frame(width: 420)
           }
           .buttonStyle(.bordered)
           .focused($focus, equals: .qualityOption(index))
@@ -1379,6 +1379,15 @@ struct PlayerView: View {
 
   private var qualityOptions: [String] {
     ["Auto"] + (playback?.qualities.map(\.name) ?? [])
+  }
+
+  /// Display label for a quality option. "Auto" is the adaptive-bitrate choice;
+  /// when the low-latency proxy is on it's also the low-latency choice (and,
+  /// because ABR can step down instead of stalling, the smoothest one), so we
+  /// surface that in the picker. The stored/compared value stays plain "Auto".
+  private func qualityDisplayLabel(_ option: String) -> String {
+    guard option == "Auto" else { return option }
+    return lowLatencyProxyEnabled ? "Auto (Low Latency)" : "Auto"
   }
 
   private func selectQuality(at index: Int) {
@@ -1640,12 +1649,18 @@ struct PlayerView: View {
     return item
   }
 
-  /// Best estimate of true "behind live" latency. Prefer the PROGRAM-DATE-TIME
-  /// wall-clock delay (actual glass-to-glass) over the seekable-edge distance:
-  /// the low-latency proxy extends the seekable window with prefetch segments,
-  /// which inflates the edge metric and made the old readout read far too high.
+  /// "Behind live" as the user experiences it: how far the playhead trails the
+  /// freshest segment we can actually fetch (the seekable-edge gap, ~2-6s).
+  ///
+  /// We deliberately do NOT lead with the PROGRAM-DATE-TIME wall-clock delay.
+  /// That measures distance from Twitch's *encoder* timestamp, which for a
+  /// standard-latency stream is ~18-20s — and every other client (including the
+  /// Twitch phone app) sits that far back too. So it reads "20s behind live"
+  /// while you're visually in sync with your phone, which is just confusing.
+  /// The edge gap is the number that tracks "am I near the freshest content."
+  /// Wall-clock is kept only as a fallback when the edge gap is unavailable.
   private var rawLatencySeconds: Double? {
-    wallClockLatencySeconds ?? liveEdgeLatencySeconds
+    liveEdgeLatencySeconds ?? wallClockLatencySeconds
   }
 
   /// Smoothed value actually shown in the UI, to stop the number jumping around.

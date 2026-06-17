@@ -847,7 +847,6 @@ struct PlayerView: View {
       RoundedRectangle(cornerRadius: 22, style: .continuous)
         .stroke(.white.opacity(0.20), lineWidth: 1)
     )
-    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
     .focusSection()
   }
@@ -895,7 +894,7 @@ struct PlayerView: View {
           )
       )
     }
-    .buttonStyle(.plain)
+    .buttonStyle(ChatSettingsPillButtonStyle())
     .focusEffectDisabled()
     .focused($focus, equals: focusTag)
   }
@@ -939,7 +938,6 @@ struct PlayerView: View {
           // Reserve trailing text space only when the send button is visible.
           .padding(.trailing, hasChatDraft ? 108 : 0)
           .frame(maxWidth: .infinity)
-          .clipped()
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
             switch direction {
@@ -1002,7 +1000,6 @@ struct PlayerView: View {
         .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
         .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
         .frame(maxWidth: .infinity)
-        .clipped()
         .focused($focus, equals: .chatInput)
         .onMoveCommand { direction in
           switch direction {
@@ -1768,6 +1765,13 @@ extension View {
   }
 }
 
+private struct ChatSettingsPillButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .opacity(configuration.isPressed ? 0.92 : 1.0)
+  }
+}
+
 /// A fully custom chat input backed by a `UITextField` so we control the
 /// background (clear — no native focus platter) and vertically center the text.
 /// SwiftUI's `TextField` on tvOS draws its own opaque focus platter that can't
@@ -1789,7 +1793,6 @@ private struct ChatInputField: UIViewRepresentable {
     field.font = .preferredFont(forTextStyle: .callout)
     field.contentVerticalAlignment = .center
     field.adjustsFontForContentSizeCategory = true
-    field.clipsToBounds = true
     field.attributedPlaceholder = NSAttributedString(
       string: placeholder,
       attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.45)]

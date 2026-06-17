@@ -193,10 +193,10 @@ struct HomeView: View {
   }
 
   private func followingSection(rail: ChannelRailMetrics) -> some View {
-    VStack(alignment: .leading, spacing: 24) {
+    VStack(alignment: .leading, spacing: 2) {
       HStack {
         Text(follows.isUsingDemoData ? "Trending" : "Following")
-          .font(.title.weight(.bold))
+          .font(.system(size: 32, weight: .bold))
 
         if follows.isLoading {
           ProgressView()
@@ -272,10 +272,10 @@ struct HomeView: View {
     let recommended = recommendations.channels.filter { !followedIDs.contains($0.id) }
 
     if !recommended.isEmpty {
-      VStack(alignment: .leading, spacing: 24) {
+      VStack(alignment: .leading, spacing: 2) {
         HStack {
           Text("Recommended channels")
-            .font(.title.weight(.bold))
+            .font(.system(size: 32, weight: .bold))
 
           if recommendations.isLoading {
             ProgressView()
@@ -330,9 +330,9 @@ struct HomeView: View {
     if !recommendations.categories.isEmpty {
       let categoryWidth = max(180, min(240, rail.mediaWidth * 0.6))
 
-      VStack(alignment: .leading, spacing: 24) {
+      VStack(alignment: .leading, spacing: 2) {
         Text("Recommended categories")
-          .font(.title.weight(.bold))
+          .font(.system(size: 32, weight: .bold))
 
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: rail.spacing) {

@@ -71,8 +71,19 @@ Required workflow after any code change:
 
 Critical detail:
 - For Apple TV validation, always run a fresh device build immediately before install:
-	`xcodebuild -project Twizz.xcodeproj -scheme Twizz -destination "platform=tvOS,id=<DEVICE_ID>" build`
+	`./tools/xcbuild.sh -project Twizz.xcodeproj -scheme Twizz -destination "platform=tvOS,id=<DEVICE_ID>" build`
 - Do not install from `CODESIGNING_FOLDER_PATH` without that preceding device build, or a stale bundle may be deployed.
+
+## Always build through `tools/xcbuild.sh`
+
+Always invoke `xcodebuild` via the `./tools/xcbuild.sh` wrapper (it accepts the
+exact same arguments). The desktop app this repo is developed in injects
+`GIT_CONFIG_* (safe.bareRepository=explicit)` into every shell, which makes git
+refuse Swift Package Manager's bare dependency repos and breaks `xcodebuild`
+during "Resolve Package Graph" with `fatal: cannot use bare repository … (safe.bareRepository is 'explicit')`.
+The wrapper relaxes only that one value back to git's default for the build
+subprocess. If a raw `xcodebuild` ever fails with that error, run it through
+`tools/xcbuild.sh` instead.
 
 ## Apple TV deployment command pattern
 
@@ -80,7 +91,7 @@ Use this reliable pattern to avoid stale DerivedData paths:
 
 ```bash
 DEVICE_ID='DE913871-CC2D-5F75-B4F2-0D6F44AA30DE' && \
-APP_PATH=$(xcodebuild -project Twizz.xcodeproj -scheme Twizz -destination "platform=tvOS,id=$DEVICE_ID" -showBuildSettings | awk -F' = ' '/CODESIGNING_FOLDER_PATH/ {print $2; exit}') && \
+APP_PATH=$(./tools/xcbuild.sh -project Twizz.xcodeproj -scheme Twizz -destination "platform=tvOS,id=$DEVICE_ID" -showBuildSettings | awk -F' = ' '/CODESIGNING_FOLDER_PATH/ {print $2; exit}') && \
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist") && \
 xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH" && \
 xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID"

@@ -45,7 +45,7 @@ struct SettingsView: View {
   private var appearanceSection: some View {
     VStack(alignment: .leading, spacing: 24) {
       Text("Appearance")
-        .font(.title2.weight(.semibold))
+        .font(.system(size: 32, weight: .bold))
         .foregroundStyle(.secondary)
 
       HStack(spacing: 28) {
@@ -77,7 +77,7 @@ struct SettingsView: View {
     VStack(alignment: .leading, spacing: 24) {
       VStack(alignment: .leading, spacing: 6) {
         Text("Stream Cards")
-          .font(.title2.weight(.semibold))
+          .font(.system(size: 32, weight: .bold))
           .foregroundStyle(.secondary)
 
         Text("Choose how large stream cards appear across Home and Browse.")
@@ -109,7 +109,7 @@ struct SettingsView: View {
   private var accountSection: some View {
     VStack(alignment: .leading, spacing: 24) {
       Text("Account")
-        .font(.title2.weight(.semibold))
+        .font(.system(size: 32, weight: .bold))
         .foregroundStyle(.secondary)
 
       if auth.isAuthenticated {

@@ -170,6 +170,8 @@ struct SettingsView: View {
             showSignOutConfirm = true
           }
           .font(.headline)
+          .buttonStyle(.borderedProminent)
+          .tint(.red)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -209,6 +211,8 @@ struct SettingsView: View {
             onRequestSignIn()
           }
           .font(.headline)
+          .buttonStyle(.borderedProminent)
+          .tint(Color(red: 0.58, green: 0.41, blue: 0.96))
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -234,7 +238,7 @@ private struct SettingPill: View {
   let isSelected: Bool
 
   var body: some View {
-    HStack(spacing: 12) {
+    HStack(spacing: 18) {
       Image(systemName: systemImage)
         .font(.title3)
         .frame(width: 30)
@@ -253,7 +257,7 @@ private struct SettingPill: View {
         .font(.body)
         .foregroundStyle(isSelected ? Color.green : Color.secondary)
     }
-    .padding(.horizontal, 22)
+    .padding(.horizontal, 26)
     .padding(.vertical, 16)
     .overlay(
       RoundedRectangle(cornerRadius: 18, style: .continuous)

@@ -76,7 +76,6 @@ struct SettingsView: View {
           themeManager.theme = theme
         } label: {
           SettingPill(
-            systemImage: theme.symbolName,
             title: theme.displayName,
             isSelected: themeManager.theme == theme
           )
@@ -98,7 +97,6 @@ struct SettingsView: View {
           streamCardSizeRaw = size.rawValue
         } label: {
           SettingPill(
-            systemImage: size.symbolName,
             title: size.title,
             subtitle: size.subtitle,
             isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size
@@ -232,7 +230,6 @@ struct SettingsView: View {
 /// title (with optional secondary line) and a trailing selection indicator
 /// that never shifts layout between selected/unselected states.
 private struct SettingPill: View {
-  let systemImage: String
   let title: String
   var subtitle: String? = nil
   let isSelected: Bool
@@ -241,10 +238,6 @@ private struct SettingPill: View {
 
   var body: some View {
     HStack(spacing: 18) {
-      Image(systemName: systemImage)
-        .font(.title3)
-        .frame(width: 30)
-
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
           .font(.headline)

@@ -40,6 +40,19 @@ targets:
         product: SDWebImageWebPCoder
       - target: TopShelfExtension
         embed: true
+    postBuildScripts:
+      - name: Set build number from git commit count
+        basedOnDependencyAnalysis: false
+        script: |
+          # Derive an auto-incrementing build number from the git history so
+          # CFBundleVersion revises on every commit without manual edits. Runs
+          # before code signing so the patched Info.plist stays validly signed.
+          set -e
+          buildNumber=$(git -C "$SRCROOT" rev-list --count HEAD 2>/dev/null || echo 1)
+          plist="${BUILT_PRODUCTS_DIR}/${INFOPLIST_PATH}"
+          if [ -f "$plist" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $buildNumber" "$plist"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Twizz

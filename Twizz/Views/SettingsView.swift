@@ -1,4 +1,6 @@
+import CoreImage.CIFilterBuiltins
 import SwiftUI
+import UIKit
 
 /// Settings tab: appearance (theme) controls plus account sign-in / sign-out.
 ///
@@ -240,10 +242,14 @@ struct SettingsView: View {
 
 // MARK: - About
 
-/// Footer panel showing app identity and version. Made focusable so the
-/// tvOS focus engine can scroll it into view at the bottom of the list.
+/// Footer panel showing app identity, version, open-source info, and a QR
+/// code linking to the GitHub repo (tvOS has no browser, so a scannable code
+/// is the way to hand a URL to a phone). Focusable so the tvOS focus engine
+/// can scroll it into view at the bottom of the list.
 private struct AboutSection: View {
   @FocusState private var isFocused: Bool
+
+  private static let repoURL = "https://github.com/thatcube/Twizz"
 
   private var version: String {
     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
@@ -254,22 +260,34 @@ private struct AboutSection: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("About")
-        .font(.system(size: 32, weight: .bold))
+    HStack(alignment: .top, spacing: 32) {
+      VStack(alignment: .leading, spacing: 16) {
+        Text("About")
+          .font(.system(size: 32, weight: .bold))
 
-      VStack(alignment: .leading, spacing: 10) {
-        infoRow("Name", "Twizz")
-        infoRow("Version", version)
-        infoRow("Build", build)
+        VStack(alignment: .leading, spacing: 10) {
+          infoRow("Name", "Twizz")
+          infoRow("Version", version)
+          infoRow("Build", build)
+        }
+
+        Text("Twizz is free and open source. It's an unofficial Twitch client for Apple TV, not affiliated with or endorsed by Twitch.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
 
-      Text("Twizz is an unofficial Twitch client for Apple TV. Not affiliated with or endorsed by Twitch.")
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+      VStack(spacing: 12) {
+        QRCodeView(string: Self.repoURL)
+          .frame(width: 160, height: 160)
+
+        Text("Scan for source\n& to contribute")
+          .font(.caption)
+          .multilineTextAlignment(.center)
+          .foregroundStyle(.secondary)
+      }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(28)
     .glassPanel()
     .overlay(
@@ -291,6 +309,37 @@ private struct AboutSection: View {
       Spacer(minLength: 0)
     }
     .font(.headline)
+  }
+}
+
+/// Renders a QR code for an arbitrary string using CoreImage. The generated
+/// image is nearest-neighbor scaled so the code stays crisp at display size.
+private struct QRCodeView: View {
+  let string: String
+
+  var body: some View {
+    if let image = Self.makeQRCode(from: string) {
+      Image(uiImage: image)
+        .resizable()
+        .interpolation(.none)
+        .scaledToFit()
+        .padding(10)
+        .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    } else {
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.secondary.opacity(0.2))
+    }
+  }
+
+  private static func makeQRCode(from string: String) -> UIImage? {
+    let context = CIContext()
+    guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+    filter.setValue(Data(string.utf8), forKey: "inputMessage")
+    filter.setValue("M", forKey: "inputCorrectionLevel")
+    guard let output = filter.outputImage else { return nil }
+    let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+    guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+    return UIImage(cgImage: cgImage)
   }
 }
 

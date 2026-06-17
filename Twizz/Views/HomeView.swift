@@ -265,6 +265,7 @@ struct HomeView: View {
           .stroke(Color.white.opacity(0.12), lineWidth: 1)
       )
       .padding(.top, 12)
+      .focusSection()
     }
   }
 

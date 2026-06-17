@@ -814,7 +814,7 @@ struct PlayerView: View {
       .padding(.horizontal, 20)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(width: 500)
+    .frame(width: 560)
     .frame(maxHeight: 680)
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     .overlay(

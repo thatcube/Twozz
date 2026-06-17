@@ -255,7 +255,7 @@ private struct CategoryCard: View {
         Color.primary.opacity(0.08)
       }
       .aspectRatio(artRatio, contentMode: .fit)
-      .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 2))
+      .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 4))
 
       VStack(alignment: .leading, spacing: 4) {
         Text(category.name)
@@ -273,9 +273,10 @@ private struct CategoryCard: View {
             .hidden()
         }
       }
-      .padding(.horizontal, 8)
-      .padding(.bottom, 10)
+      .padding(.horizontal, 4)
+      .padding(.bottom, 2)
     }
+    .padding(8)
     .background {
       RoundedRectangle(cornerRadius: cornerRadius)
         .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))

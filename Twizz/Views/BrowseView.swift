@@ -203,13 +203,9 @@ private struct BrowseStreamsView: View {
                     }
                     .padding(.vertical, 8)
 
-                    // Load-more trigger: appears when scrolled near the bottom
-                    if service.hasMoreStreams {
+                    if service.isLoadingStreams && !service.categoryStreams.isEmpty {
                         ProgressView()
                             .padding(.vertical, 24)
-                            .onAppear {
-                                Task { await service.loadMoreStreams(for: category) }
-                            }
                     }
                 }
                 .scrollClipDisabled()
@@ -219,6 +215,16 @@ private struct BrowseStreamsView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: focusedStreamID) { _, newID in
+            // On tvOS, scrolling is driven by focus movement, so load more pages
+            // as focus approaches the end of the loaded grid.
+            guard let newID,
+                  let index = service.categoryStreams.firstIndex(where: { $0.id == newID })
+            else { return }
+            if index >= service.categoryStreams.count - 8 {
+                Task { await service.loadMoreStreams(for: category) }
+            }
+        }
         .onChange(of: service.categoryStreams) { _, streams in
             if focusedStreamID == nil, let first = streams.first {
                 Task {

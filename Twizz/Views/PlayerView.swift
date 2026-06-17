@@ -301,8 +301,41 @@ struct PlayerView: View {
       }
 
       if isLoading {
-        ProgressView("Loading \(channel)…")
-          .font(.title3)
+        VStack(spacing: 32) {
+          ZStack {
+            // Outer rotating ring
+            Circle()
+              .stroke(
+                LinearGradient(
+                  gradient: Gradient(colors: [
+                    .white.opacity(0.8),
+                    .white.opacity(0.2)
+                  ]),
+                  startPoint: .topLeading,
+                  endPoint: .bottomTrailing
+                ),
+                lineWidth: 4
+              )
+              .frame(width: 80, height: 80)
+              .rotationEffect(.degrees(Double(Date().timeIntervalSince1970) * 360))
+
+            // Inner pulsing dot
+            Circle()
+              .fill(.white)
+              .frame(width: 12, height: 12)
+              .opacity(0.5 + 0.5 * sin(Double(Date().timeIntervalSince1970) * 2 * .pi))
+          }
+
+          VStack(spacing: 8) {
+            Text("Loading \(channel)")
+              .font(.title2.weight(.semibold))
+              .foregroundStyle(.white)
+            Text("Getting ready…")
+              .font(.caption)
+              .foregroundStyle(.white.opacity(0.6))
+          }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
 
       if let errorMessage {

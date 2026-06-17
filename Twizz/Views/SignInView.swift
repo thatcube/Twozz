@@ -69,7 +69,7 @@ struct SignInView: View {
           dismiss()
         }
         .padding(.top, 8)
-        .padding(.bottom, 24)
+        .padding(.bottom, 48)
       }
     }
     .padding(.horizontal, 96)

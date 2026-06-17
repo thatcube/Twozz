@@ -111,8 +111,8 @@ struct PlayerView: View {
     case chatSettingsButton
     case qualityOption(Int)
     case captionsOption(Int)
-    case chatSettingsModeOption(Int)
-    case chatWidthOption(Int)
+    case chatDensityPicker
+    case chatWidthPicker
   }
 
   private var chatReadabilityMode: ChatReadabilityMode {
@@ -548,76 +548,64 @@ struct PlayerView: View {
   }
 
   private var chatSettingsPanel: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      VStack(alignment: .leading, spacing: 8) {
-        Text("Readability")
+    VStack(alignment: .leading, spacing: 28) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Message Density")
           .font(.headline)
           .foregroundStyle(.white)
 
-        HStack(spacing: 10) {
-          ForEach(Array(ChatReadabilityMode.allCases.enumerated()), id: \.offset) { index, mode in
-            Button {
-              selectChatReadabilityMode(at: index)
-            } label: {
-              Text(mode.title)
-                .font(.callout)
-            }
-            .buttonStyle(.bordered)
-            .background(
-              mode == chatReadabilityMode
-                ? Color.accentColor.opacity(0.35) : Color.clear,
-              in: RoundedRectangle(cornerRadius: 12)
-            )
-            .focused($focus, equals: .chatSettingsModeOption(index))
+        Picker("Message Density", selection: chatDensitySelection) {
+          ForEach(ChatReadabilityMode.allCases, id: \.self) { mode in
+            Text(mode.title).tag(mode)
           }
         }
-        .focusSection()
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .focused($focus, equals: .chatDensityPicker)
       }
 
-      VStack(alignment: .leading, spacing: 8) {
+      VStack(alignment: .leading, spacing: 12) {
         Text("Chat Width")
           .font(.headline)
           .foregroundStyle(.white)
 
-        HStack(spacing: 10) {
-          ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.offset) { index, mode in
-            Button {
-              selectChatWidthMode(at: index)
-            } label: {
-              Text(mode.title)
-                .font(.callout)
-            }
-            .buttonStyle(.bordered)
-            .background(
-              mode == chatWidthMode
-                ? Color.accentColor.opacity(0.35) : Color.clear,
-              in: RoundedRectangle(cornerRadius: 12)
-            )
-            .focused($focus, equals: .chatWidthOption(index))
+        Picker("Chat Width", selection: chatWidthSelection) {
+          ForEach(ChatWidthMode.allCases, id: \.self) { mode in
+            Text(mode.title).tag(mode)
           }
         }
-        .focusSection()
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .focused($focus, equals: .chatWidthPicker)
       }
     }
-    .padding(24)
-    .frame(width: 360, alignment: .leading)
-    .background(Color(white: 0.12).opacity(0.98), in: RoundedRectangle(cornerRadius: 22))
+    .padding(28)
+    .frame(width: 620, alignment: .leading)
+    .background(Color(white: 0.12).opacity(0.98), in: RoundedRectangle(cornerRadius: 24))
     .focusSection()
+  }
+
+  private var chatDensitySelection: Binding<ChatReadabilityMode> {
+    Binding(
+      get: { chatReadabilityMode },
+      set: { chatReadabilityModeRaw = $0.rawValue }
+    )
+  }
+
+  private var chatWidthSelection: Binding<ChatWidthMode> {
+    Binding(
+      get: { chatWidthMode },
+      set: { chatWidthModeRaw = $0.rawValue }
+    )
   }
 
   private func toggleChatSettings() {
     showChatSettings.toggle()
     if showChatSettings {
-      let selected = ChatReadabilityMode.allCases.firstIndex(of: chatReadabilityMode) ?? 0
-      focus = .chatSettingsModeOption(selected)
+      focus = .chatDensityPicker
     } else {
       focus = .chatSettingsButton
     }
-  }
-
-  private func selectChatWidthMode(at index: Int) {
-    guard ChatWidthMode.allCases.indices.contains(index) else { return }
-    chatWidthModeRaw = ChatWidthMode.allCases[index].rawValue
   }
 
   private var chatComposerBar: some View {
@@ -750,11 +738,6 @@ struct PlayerView: View {
 
   private var qualityOptions: [String] {
     ["Auto"] + (playback?.qualities.map(\.name) ?? [])
-  }
-
-  private func selectChatReadabilityMode(at index: Int) {
-    guard ChatReadabilityMode.allCases.indices.contains(index) else { return }
-    chatReadabilityModeRaw = ChatReadabilityMode.allCases[index].rawValue
   }
 
   private func selectQuality(at index: Int) {

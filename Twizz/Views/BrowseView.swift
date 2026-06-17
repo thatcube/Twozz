@@ -9,31 +9,37 @@ struct BrowseView: View {
 
     @State private var service = BrowseService()
     @State private var selectedCategory: TwitchCategory?
+    @State private var lastSelectedCategoryID: String?
 
     var body: some View {
-        if let category = selectedCategory {
-            BrowseStreamsView(
-                category: category,
-                service: service,
-                selectedChannel: $selectedChannel,
-                onBack: {
-                    selectedCategory = nil
-                }
-            )
-        } else {
-            BrowseCategoriesView(
-                service: service,
-                onSelectCategory: { category in
-                    selectedCategory = category
-                    Task { await service.loadStreams(for: category) }
-                }
-            )
-            .task {
-                if service.categories.isEmpty {
-                    await service.loadCategories()
+        Group {
+            if let category = selectedCategory {
+                BrowseStreamsView(
+                    category: category,
+                    service: service,
+                    selectedChannel: $selectedChannel,
+                    onBack: {
+                        selectedCategory = nil
+                    }
+                )
+            } else {
+                BrowseCategoriesView(
+                    service: service,
+                    preferredFocusedID: lastSelectedCategoryID,
+                    onSelectCategory: { category in
+                        lastSelectedCategoryID = category.id
+                        selectedCategory = category
+                        Task { await service.loadStreams(for: category) }
+                    }
+                )
+                .task {
+                    if service.categories.isEmpty {
+                        await service.loadCategories()
+                    }
                 }
             }
         }
+        .padding(.horizontal, -(pagePadding / 2))
     }
 }
 
@@ -41,6 +47,7 @@ struct BrowseView: View {
 
 private struct BrowseCategoriesView: View {
     let service: BrowseService
+    let preferredFocusedID: String?
     let onSelectCategory: (TwitchCategory) -> Void
 
     @FocusState private var focusedID: String?
@@ -48,6 +55,15 @@ private struct BrowseCategoriesView: View {
     private let columns = [
         GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 24)
     ]
+
+    private func initialFocusID(from categories: [TwitchCategory]) -> String? {
+        if let preferredFocusedID,
+           categories.contains(where: { $0.id == preferredFocusedID })
+        {
+            return preferredFocusedID
+        }
+        return categories.first?.id
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -100,11 +116,22 @@ private struct BrowseCategoriesView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            guard focusedID == nil,
+                  let targetID = initialFocusID(from: service.categories)
+            else { return }
+            Task {
+                try? await Task.sleep(for: .milliseconds(150))
+                await MainActor.run { focusedID = targetID }
+            }
+        }
         .onChange(of: service.categories) { _, categories in
-            if focusedID == nil, let first = categories.first {
+            if focusedID == nil,
+               let targetID = initialFocusID(from: categories)
+            {
                 Task {
                     try? await Task.sleep(for: .milliseconds(150))
-                    await MainActor.run { focusedID = first.id }
+                    await MainActor.run { focusedID = targetID }
                 }
             }
         }

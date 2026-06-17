@@ -33,14 +33,6 @@ struct SettingsView: View {
         .padding(.vertical, 60)
       }
       .scrollClipDisabled()
-      .onAppear {
-        // Mirrors the BrowseCategoriesView pattern: a short async delay lets
-        // tvOS finish laying out and registering focus nodes before we ask the
-        // focus engine to move to the selected theme card.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-          focusedTheme = themeManager.theme
-        }
-      }
     }
   }
 

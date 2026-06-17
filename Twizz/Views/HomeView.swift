@@ -78,6 +78,14 @@ struct HomeView: View {
       .tabItem { Text("Settings") }
       .tag(TopTab.settings)
     }
+    .background(
+      LinearGradient(
+        colors: resolvedPalette.backgroundColors,
+        startPoint: .top,
+        endPoint: .bottom
+      )
+      .ignoresSafeArea()
+    )
     .environment(\.themePalette, resolvedPalette)
     .preferredColorScheme(themeManager.theme.preferredColorScheme)
     .task {

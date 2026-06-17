@@ -12,7 +12,9 @@ struct BrowseView: View {
 
     private func open(_ category: TwitchCategory) {
         if path.last != category {
-            path.append(category)
+            withAnimation(.easeInOut(duration: 0.35)) {
+                path.append(category)
+            }
         }
     }
 

@@ -46,17 +46,17 @@ struct SettingsView: View {
 
       HStack(spacing: 28) {
         ForEach(AppTheme.allCases) { theme in
-          ThemeOptionCard(
-            theme: theme,
-            isSelected: themeManager.theme == theme,
-            isFocused: focusedTheme == theme
-          )
-          .focusable(true)
-          .focused($focusedTheme, equals: theme)
-          .focusEffectDisabled()
-          .onTapGesture {
+          Button {
             themeManager.theme = theme
+          } label: {
+            ThemeOptionCard(
+              theme: theme,
+              isSelected: themeManager.theme == theme,
+              isFocused: focusedTheme == theme
+            )
           }
+          .buttonStyle(.plain)
+          .focused($focusedTheme, equals: theme)
         }
       }
       .focusSection()

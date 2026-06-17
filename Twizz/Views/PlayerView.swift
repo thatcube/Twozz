@@ -114,8 +114,10 @@ struct PlayerView: View {
   /// can sit much closer to the edge; without it we keep a safer cushion.
   private var targetLiveEdgeSeconds: Double { lowLatencyProxyEnabled ? 2.0 : 3.5 }
   private var softCatchUpThresholdSeconds: Double { lowLatencyProxyEnabled ? 5 : 8 }
-  private let hardCatchUpThresholdSeconds: Double = 14
-  private let hardCatchUpCooldownSeconds: Double = 20
+  /// In low-latency mode, snap to the edge much sooner (and re-snap more often)
+  /// so we don't sit parked several seconds back relying only on mild speed-ups.
+  private var hardCatchUpThresholdSeconds: Double { lowLatencyProxyEnabled ? 7 : 14 }
+  private var hardCatchUpCooldownSeconds: Double { lowLatencyProxyEnabled ? 12 : 20 }
   private let maxCatchUpRate: Float = 1.04
   private let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
   private let edgeLatencyUnavailableSamples = 4

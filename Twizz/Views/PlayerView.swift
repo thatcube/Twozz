@@ -698,6 +698,10 @@ struct PlayerView: View {
     }
   }
 
+  private var hasChatDraft: Bool {
+    !chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
   private var chatComposerBar: some View {
     VStack(alignment: .leading, spacing: 8) {
       if let chatSendError {
@@ -711,6 +715,7 @@ struct PlayerView: View {
         HStack(spacing: 12) {
           TextField("Send a message", text: $chatDraft)
             .textFieldStyle(.plain)
+            .font(.callout)
             .focused($focus, equals: .chatInput)
             .onMoveCommand { direction in
               switch direction {
@@ -719,38 +724,42 @@ struct PlayerView: View {
               case .up:
                 focus = .chatSettingsButton
               case .right:
-                focus = .chatSend
+                if hasChatDraft { focus = .chatSend }
               default:
                 break
               }
             }
 
-          Button {
-            submitChatMessage()
-          } label: {
-            if isSendingChat {
-              ProgressView()
-                .frame(width: 24, height: 24)
-            } else {
-              Image(systemName: "paperplane.fill")
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 24, height: 24)
+          if hasChatDraft {
+            Button {
+              submitChatMessage()
+            } label: {
+              if isSendingChat {
+                ProgressView()
+                  .frame(width: 24, height: 24)
+              } else {
+                Image(systemName: "paperplane.fill")
+                  .font(.system(size: 20, weight: .semibold))
+                  .frame(width: 24, height: 24)
+              }
             }
-          }
-          .buttonStyle(.bordered)
-          .disabled(isSendingChat || chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-          .focused($focus, equals: .chatSend)
-          .onMoveCommand { direction in
-            switch direction {
-            case .left:
-              focus = .chatInput
-            case .up:
-              focus = .chatSettingsButton
-            default:
-              break
+            .TwizzControlButtonStyle()
+            .disabled(isSendingChat)
+            .focused($focus, equals: .chatSend)
+            .onMoveCommand { direction in
+              switch direction {
+              case .left:
+                focus = .chatInput
+              case .up:
+                focus = .chatSettingsButton
+              default:
+                break
+              }
             }
+            .transition(.opacity.combined(with: .scale))
           }
         }
+        .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
         Text("Sign in to send messages")
           .font(.callout)
@@ -768,7 +777,6 @@ struct PlayerView: View {
   private func submitChatMessage() {
     let text = chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty, !isSendingChat else { return }
-
     isSendingChat = true
     chatSendError = nil
     Task {

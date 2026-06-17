@@ -4,7 +4,6 @@ struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
   private let channelRailVerticalPadding: CGFloat = 20
-  private let targetVisibleCards: CGFloat = 4
   private let peekCardFraction: CGFloat = 0.15
   private let focusHorizontalInset: CGFloat = 18
   private let focusVerticalInset: CGFloat = 18
@@ -25,6 +24,8 @@ struct HomeView: View {
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
 
+  @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
+
   @Environment(\.colorScheme) private var systemColorScheme
   @FocusState private var focusedItemID: String?
 
@@ -32,6 +33,14 @@ struct HomeView: View {
 
   private var resolvedPalette: ThemePalette {
     themeManager.theme.palette(systemColorScheme: systemColorScheme)
+  }
+
+  private var streamCardSize: StreamCardSize {
+    StreamCardSize.resolve(streamCardSizeRaw)
+  }
+
+  private var targetVisibleCards: CGFloat {
+    CGFloat(streamCardSize.visibleCardCount)
   }
 
   // Removed private so it can be accessed by the custom components below
@@ -194,6 +203,8 @@ struct HomeView: View {
             requestFocusIfPossible(force: true)
           }
         }
+
+        streamCardSettingsMenu
       }
 
       if let errorMessage = follows.errorMessage {
@@ -339,6 +350,22 @@ struct HomeView: View {
       }
       .focusSection()
     }
+  }
+
+  private var streamCardSettingsMenu: some View {
+    Menu {
+      Picker("Card Size", selection: $streamCardSizeRaw) {
+        ForEach(StreamCardSize.allCases) { size in
+          Label("\(size.title) · \(size.subtitle)", systemImage: size.symbolName)
+            .tag(size.rawValue)
+        }
+      }
+      // Future: a "Search" entry point can be added here as another menu item.
+    } label: {
+      Image(systemName: "slider.horizontal.3")
+        .font(.headline)
+    }
+    .accessibilityLabel("View settings")
   }
 
   private func channelRailMetrics(for availableWidth: CGFloat) -> ChannelRailMetrics {

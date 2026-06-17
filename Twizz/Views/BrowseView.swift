@@ -114,7 +114,23 @@ private struct BrowseCategoriesView: View {
       .padding(.horizontal, AppLayout.horizontalPadding)
       .padding(.bottom, 12)
     }
-
+    .onAppear {
+      guard focusedID == nil, let first = service.categories.first else { return }
+      Task {
+        try? await Task.sleep(for: .milliseconds(150))
+        await MainActor.run { focusedID = first.id }
+      }
+    }
+    .onChange(of: service.categories) { _, categories in
+      guard let first = categories.first else { return }
+      if let focusedID, categories.contains(where: { $0.id == focusedID }) {
+        return
+      }
+      Task {
+        try? await Task.sleep(for: .milliseconds(150))
+        await MainActor.run { focusedID = first.id }
+      }
+    }
   }
 }
 
@@ -205,7 +221,7 @@ private struct BrowseStreamsView: View {
             LazyVGrid(columns: columns, spacing: gridSpacing) {
               ForEach(service.categoryStreams) { channel in
                 let isFocused = focusedStreamID == channel.id
-                BrowseChannelCard(
+                StreamChannelCard(
                   channel: channel,
                   isFocused: isFocused
                 )
@@ -287,84 +303,6 @@ private struct CategoryCard: View {
     .padding(10)
     .background {
       RoundedRectangle(cornerRadius: cornerRadius)
-        .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
-    }
-  }
-}
-
-// MARK: - Browse Channel Card
-
-private struct BrowseChannelCard: View {
-  let channel: FollowedChannel
-  let isFocused: Bool
-
-  @Environment(\.themePalette) private var palette
-
-  private let cardCornerRadius: CGFloat = 16
-  private let mediaCornerRadius: CGFloat = 12
-  private let focusInset: CGFloat = 14
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      ZStack(alignment: .bottomLeading) {
-        Color.primary.opacity(0.08)
-
-        AsyncImage(url: channel.thumbnailURL) { img in
-          img.resizable().scaledToFill()
-        } placeholder: {
-          Color.clear
-        }
-
-        LinearGradient(
-          colors: [Color.clear, Color.black.opacity(0.82)],
-          startPoint: .top,
-          endPoint: .bottom
-        )
-
-        HStack(spacing: 8) {
-          Circle()
-            .fill(Color.red)
-            .frame(width: 8, height: 8)
-          if let viewerCount = channel.viewerCount {
-            Text("\(viewerCount) watching")
-              .font(.caption2)
-              .foregroundStyle(Color.white.opacity(0.78))
-          }
-        }
-        .padding(12)
-      }
-      .frame(maxWidth: .infinity)
-      .aspectRatio(16 / 9, contentMode: .fit)
-      .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
-
-      HStack(alignment: .top, spacing: 10) {
-        AsyncImage(url: channel.profileImageURL) { img in
-          img.resizable().scaledToFill()
-        } placeholder: {
-          Circle()
-            .fill(Color.primary.opacity(0.14))
-        }
-        .frame(width: 68, height: 68)
-        .clipShape(Circle())
-
-        VStack(alignment: .leading, spacing: 4) {
-          Text(channel.displayName)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
-            .lineLimit(1)
-
-          Text(channel.title.isEmpty ? "No title" : channel.title)
-            .font(.footnote)
-            .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
-            .lineLimit(2, reservesSpace: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-      }
-    }
-    .padding(focusInset)
-    .background {
-      RoundedRectangle(cornerRadius: cardCornerRadius)
         .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
     }
   }

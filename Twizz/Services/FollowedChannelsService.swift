@@ -134,7 +134,14 @@ final class FollowedChannelsService {
     do {
       let followed = try await fetchFollowedStreamsDirect(
         clientID: clientID, accessToken: accessToken, userID: userID)
-      return followed.map(mapStream)
+      let profileImagesByUserID = try await fetchProfileImagesByUserID(
+        clientID: clientID,
+        accessToken: accessToken,
+        userIDs: followed.map(\.userID)
+      )
+      return followed.map { stream in
+        mapStream(stream, profileImageURL: profileImagesByUserID[stream.userID])
+      }
     } catch let error as TwitchHelixRequestError {
       guard error.status == 404 else {
         throw error
@@ -152,12 +159,17 @@ final class FollowedChannelsService {
           accessToken: accessToken,
           broadcasterIDs: follows.map(\.broadcasterID)
         )
+        let profileImagesByUserID = try await fetchProfileImagesByUserID(
+          clientID: clientID,
+          accessToken: accessToken,
+          userIDs: follows.map(\.broadcasterID)
+        )
 
         return follows.compactMap { followed in
           guard let stream = liveByBroadcasterID[followed.broadcasterID] else {
             return nil
           }
-          return mapStream(stream)
+          return mapStream(stream, profileImageURL: profileImagesByUserID[followed.broadcasterID])
         }
       } catch let fallbackError as TwitchHelixRequestError {
         // Some clients/tokens occasionally fail for /channels/followed but
@@ -177,7 +189,14 @@ final class FollowedChannelsService {
           accessToken: accessToken,
           userID: resolvedUserID
         )
-        return followed.map(mapStream)
+        let profileImagesByUserID = try await fetchProfileImagesByUserID(
+          clientID: clientID,
+          accessToken: accessToken,
+          userIDs: followed.map(\.userID)
+        )
+        return followed.map { stream in
+          mapStream(stream, profileImageURL: profileImagesByUserID[stream.userID])
+        }
       }
     }
   }
@@ -277,7 +296,41 @@ final class FollowedChannelsService {
     return Dictionary(uniqueKeysWithValues: streams.map { ($0.userID, $0) })
   }
 
-  private func mapStream(_ stream: HelixStream) -> FollowedChannel {
+  private func fetchProfileImagesByUserID(
+    clientID: String, accessToken: String, userIDs: [String]
+  ) async throws -> [String: URL] {
+    guard !userIDs.isEmpty else { return [:] }
+
+    let cappedIDs = Array(Set(userIDs)).prefix(100)
+    var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
+    components.queryItems = cappedIDs.map { URLQueryItem(name: "id", value: $0) }
+
+    var req = URLRequest(url: components.url!)
+    req.httpMethod = "GET"
+    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+    req.setValue("application/json", forHTTPHeaderField: "Accept")
+    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+
+    let (data, status) = try await performHelixRequest(req)
+    guard (200...299).contains(status) else {
+      throw makeHelixError(context: "loading streamer profile images", status: status, data: data)
+    }
+
+    let payload = try JSONDecoder().decode(HelixUsersEnvelope.self, from: data)
+    return Dictionary(
+      uniqueKeysWithValues: payload.data.compactMap { user in
+        guard let rawProfileURL = user.profileImageURL,
+              !rawProfileURL.isEmpty,
+              let profileURL = URL(string: rawProfileURL)
+        else {
+          return nil
+        }
+        return (user.id, profileURL)
+      })
+  }
+
+  private func mapStream(_ stream: HelixStream, profileImageURL: URL?) -> FollowedChannel {
     let thumb = stream.thumbnailURL
       .replacingOccurrences(of: "{width}", with: "640")
       .replacingOccurrences(of: "{height}", with: "360")
@@ -290,7 +343,7 @@ final class FollowedChannelsService {
       gameName: stream.gameName,
       viewerCount: stream.viewerCount,
       thumbnailURL: URL(string: thumb),
-      profileImageURL: nil,
+      profileImageURL: profileImageURL,
       isLive: stream.type == "live"
     )
   }
@@ -328,6 +381,7 @@ final class FollowedChannelsService {
       struct Broadcaster: Decodable {
         let login: String?
         let displayName: String?
+        let profileImageURL: String?
       }
 
       struct Game: Decodable {
@@ -363,6 +417,7 @@ final class FollowedChannelsService {
               broadcaster {
                 login
                 displayName
+                profileImageURL(width: 70)
               }
               game {
                 displayName
@@ -404,6 +459,7 @@ final class FollowedChannelsService {
       let gameName =
         node.game?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Live"
       let previewURL = node.previewImageURL.flatMap { URL(string: $0) }
+      let profileURL = node.broadcaster?.profileImageURL.flatMap { URL(string: $0) }
 
       guard !login.isEmpty else { return nil }
 
@@ -415,7 +471,7 @@ final class FollowedChannelsService {
         gameName: gameName,
         viewerCount: node.viewersCount,
         thumbnailURL: previewURL,
-        profileImageURL: nil,
+        profileImageURL: profileURL,
         isLive: true
       )
     }
@@ -511,6 +567,12 @@ private struct HelixUsersEnvelope: Decodable {
 
 private struct HelixUser: Decodable {
   let id: String
+  let profileImageURL: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case profileImageURL = "profile_image_url"
+  }
 }
 
 private struct FollowedBroadcaster: Decodable {

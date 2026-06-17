@@ -108,6 +108,7 @@ struct PlayerView: View {
   private let startupPlaybackPollMilliseconds: UInt64 = 500
   private let stalledPlaybackThresholdSamples = 6
   private let playbackWatchdogIntervalSeconds: Double = 2
+  private let chatComposerRowHeight: CGFloat = 62
   private let chatInputFocusedHeight: CGFloat = 62
   private let chatInputUnfocusedHeight: CGFloat = 54
 
@@ -731,35 +732,34 @@ struct PlayerView: View {
             }
           }
 
-          if hasChatDraft {
-            Button {
-              submitChatMessage()
-            } label: {
-              if isSendingChat {
-                ProgressView()
-                  .frame(width: 24, height: 24)
-              } else {
-                Image(systemName: "paperplane.fill")
-                  .font(.system(size: 20, weight: .semibold))
-                  .frame(width: 24, height: 24)
-              }
+          Button {
+            submitChatMessage()
+          } label: {
+            if isSendingChat {
+              ProgressView()
+                .frame(width: 24, height: 24)
+            } else {
+              Image(systemName: "paperplane.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .frame(width: 24, height: 24)
             }
-            .TwizzControlButtonStyle()
-            .disabled(isSendingChat)
-            .focused($focus, equals: .chatSend)
-            .transition(.opacity)
-            .onMoveCommand { direction in
-              switch direction {
-              case .left:
-                focus = .chatInput
-              case .up:
-                focus = .chatSettingsButton
-              default:
-                break
-              }
+          }
+          .TwizzControlButtonStyle()
+          .disabled(isSendingChat || !hasChatDraft)
+          .opacity(hasChatDraft ? 1 : 0)
+          .focused($focus, equals: .chatSend)
+          .onMoveCommand { direction in
+            switch direction {
+            case .left:
+              focus = .chatInput
+            case .up:
+              focus = .chatSettingsButton
+            default:
+              break
             }
           }
         }
+        .frame(height: chatComposerRowHeight)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
         Text("Sign in to send messages")

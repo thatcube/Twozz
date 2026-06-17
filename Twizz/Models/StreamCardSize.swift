@@ -7,6 +7,7 @@ import Foundation
 /// Persisted under ``StreamCardSize/storageKey`` and read in every surface
 /// that lays out stream cards, so changing it anywhere updates the whole app.
 enum StreamCardSize: String, CaseIterable, Identifiable {
+  case extraLarge
   case large
   case medium
   case small
@@ -15,6 +16,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
 
   var title: String {
     switch self {
+    case .extraLarge: return "Extra Large"
     case .large: return "Large"
     case .medium: return "Medium"
     case .small: return "Small"
@@ -25,6 +27,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
   /// => bigger cards.
   var visibleCardCount: Int {
     switch self {
+    case .extraLarge: return 2
     case .large: return 3
     case .medium: return 4
     case .small: return 5
@@ -38,6 +41,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
 
   var symbolName: String {
     switch self {
+    case .extraLarge: return "rectangle"
     case .large: return "rectangle.grid.1x2"
     case .medium: return "square.grid.2x2"
     case .small: return "square.grid.3x3"
@@ -48,7 +52,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
   static let storageKey = "streamCardSize"
 
   /// Default used when no preference has been saved.
-  static let fallback: StreamCardSize = .medium
+  static let fallback: StreamCardSize = .large
 
   static func resolve(_ rawValue: String) -> StreamCardSize {
     StreamCardSize(rawValue: rawValue) ?? .fallback

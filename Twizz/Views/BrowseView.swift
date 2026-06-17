@@ -202,28 +202,13 @@ private struct BrowseStreamsView: View {
                         }
                     }
                     .focusSection()
-
-                    if service.isLoadingStreams && !service.categoryStreams.isEmpty {
-                        ProgressView()
-                            .padding(.vertical, 24)
-                    }
                 }
             }
+            .padding(.horizontal, 18)
             .padding(.vertical, 8)
         }
-        .scrollClipDisabled()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onExitCommand { onBack() }
-        .onChange(of: focusedStreamID) { _, newID in
-            // On tvOS, scrolling is driven by focus movement, so load more pages
-            // as focus approaches the end of the loaded grid.
-            guard let newID,
-                  let index = service.categoryStreams.firstIndex(where: { $0.id == newID })
-            else { return }
-            if index >= service.categoryStreams.count - 8 {
-                Task { await service.loadMoreStreams(for: category) }
-            }
-        }
         .onChange(of: service.categoryStreams) { _, streams in
             if focusedStreamID == nil, let first = streams.first {
                 Task {

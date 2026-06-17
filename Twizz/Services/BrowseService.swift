@@ -11,8 +11,6 @@ final class BrowseService {
     private(set) var categoryStreams: [FollowedChannel] = []
     private(set) var isLoadingStreams = false
     private(set) var streamsErrorMessage: String?
-    private(set) var hasMoreStreams = false
-    private var loadedFullStreams = false
 
     // MARK: - Public API
 
@@ -32,35 +30,15 @@ final class BrowseService {
         isLoadingStreams = true
         streamsErrorMessage = nil
         categoryStreams = []
-        loadedFullStreams = false
-        hasMoreStreams = false
         defer { isLoadingStreams = false }
 
         do {
-            // Fast initial batch for instant render. Twitch's anonymous GQL
-            // client rejects cursor pagination (integrity challenge), so we
-            // fetch a small first page, then the full set (capped at 100).
-            categoryStreams = try await fetchStreams(for: category, limit: 30)
-            hasMoreStreams = categoryStreams.count >= 30
+            // Twitch's anonymous GQL client rejects cursor pagination (integrity
+            // challenge), so fetch the full set in one request. 100 is the max
+            // the API allows for `first`.
+            categoryStreams = try await fetchStreams(for: category, limit: 100)
         } catch {
             streamsErrorMessage = "Could not load streams for \(category.name)."
-        }
-    }
-
-    func loadMoreStreams(for category: TwitchCategory) async {
-        guard hasMoreStreams, !loadedFullStreams, !isLoadingStreams else { return }
-        isLoadingStreams = true
-        loadedFullStreams = true
-        hasMoreStreams = false
-        defer { isLoadingStreams = false }
-
-        do {
-            let full = try await fetchStreams(for: category, limit: 100)
-            let existingIDs = Set(categoryStreams.map(\.id))
-            let additions = full.filter { !existingIDs.contains($0.id) }
-            categoryStreams.append(contentsOf: additions)
-        } catch {
-            // Keep the initial batch already on screen.
         }
     }
 

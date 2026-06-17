@@ -45,23 +45,21 @@ final class BrowseService {
         struct GameNode: Decodable {
             let id: String?
             let name: String?
-            let displayName: String?
             let boxArtURL: String?
             let viewersCount: Int?
         }
         struct GameEdge: Decodable { let node: GameNode? }
         struct TopGamesConn: Decodable { let edges: [GameEdge]? }
-        struct GQLData: Decodable { let topGames: TopGamesConn? }
+        struct GQLData: Decodable { let games: TopGamesConn? }
         struct GQLEnvelope: Decodable { let data: GQLData? }
 
         let query = """
             query TopGames($first: Int!) {
-              topGames(first: $first) {
+              games(first: $first) {
                 edges {
                   node {
                     id
                     name
-                    displayName
                     boxArtURL(width: 285, height: 380)
                     viewersCount
                   }
@@ -73,12 +71,12 @@ final class BrowseService {
         let responseData = try await performGQL(
             query: query, variables: ["first": limit])
         let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
-        let edges = decoded.data?.topGames?.edges ?? []
+        let edges = decoded.data?.games?.edges ?? []
 
         return edges.compactMap { edge -> TwitchCategory? in
             guard let node = edge.node,
                   let id = node.id,
-                  let name = (node.displayName ?? node.name)?.trimmingCharacters(in: .whitespaces),
+                  let name = node.name?.trimmingCharacters(in: .whitespaces),
                   !name.isEmpty
             else { return nil }
 

@@ -9,6 +9,7 @@ struct SettingsView: View {
 
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
+  @FocusState private var focusedTheme: AppTheme?
 
   var body: some View {
     ZStack {
@@ -47,8 +48,13 @@ struct SettingsView: View {
         ForEach(AppTheme.allCases) { theme in
           ThemeOptionCard(
             theme: theme,
-            isSelected: themeManager.theme == theme
-          ) {
+            isSelected: themeManager.theme == theme,
+            isFocused: focusedTheme == theme
+          )
+          .focusable(true)
+          .focused($focusedTheme, equals: theme)
+          .focusEffectDisabled()
+          .onTapGesture {
             themeManager.theme = theme
           }
         }
@@ -149,36 +155,31 @@ struct SettingsView: View {
 private struct ThemeOptionCard: View {
   let theme: AppTheme
   let isSelected: Bool
-  let action: () -> Void
-
-  @FocusState private var isFocused: Bool
+  let isFocused: Bool
 
   var body: some View {
-    Button(action: action) {
-      VStack(spacing: 16) {
-        Image(systemName: theme.symbolName)
-          .font(.system(size: 40))
-          .frame(height: 48)
+    VStack(spacing: 16) {
+      Image(systemName: theme.symbolName)
+        .font(.system(size: 40))
+        .frame(height: 48)
 
-        Text(theme.displayName)
-          .font(.headline)
+      Text(theme.displayName)
+        .font(.headline)
 
-        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-          .font(.title3)
-          .foregroundStyle(isSelected ? Color.green : Color.secondary)
-      }
-      .frame(width: 200, height: 200)
-      .background(
-        RoundedRectangle(cornerRadius: 22)
-          .fill(isFocused ? Color.primary.opacity(0.18) : Color.primary.opacity(0.07))
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: 22)
-          .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
-      )
+      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+        .font(.title3)
+        .foregroundStyle(isSelected ? Color.green : Color.secondary)
     }
-    .buttonStyle(.plain)
-    .focused($isFocused)
+    .frame(width: 200, height: 200)
+    .contentShape(RoundedRectangle(cornerRadius: 22))
+    .background(
+      RoundedRectangle(cornerRadius: 22)
+        .fill(isFocused ? Color.primary.opacity(0.18) : Color.primary.opacity(0.07))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 22)
+        .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
+    )
     .scaleEffect(isFocused ? 1.06 : 1)
     .animation(.easeOut(duration: 0.14), value: isFocused)
   }

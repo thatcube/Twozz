@@ -8,6 +8,8 @@ struct RichChatLineView: View {
     let badgeURLs: [String: URL]
     var textSize: ChatTextSizeOption = .medium
     var lineHeight: ChatLineHeightOption = .normal
+    /// Overrides the default white body color (used by the light side-chat).
+    var bodyColorOverride: Color? = nil
 
     private enum Segment: Hashable {
         case text(String)
@@ -15,7 +17,8 @@ struct RichChatLineView: View {
     }
 
     private var bodyColor: Color {
-        message.isAction ? nameColor : .white
+        if message.isAction { return nameColor }
+        return bodyColorOverride ?? .white
     }
 
     private var resolvedBadgeURLs: [URL] {

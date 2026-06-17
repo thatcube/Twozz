@@ -76,7 +76,7 @@ struct HomeView: View {
           }
         }
       )
-      .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+      .tabItem { Text("Settings") }
       .tag(TopTab.settings)
     }
     .environment(\.themePalette, resolvedPalette)
@@ -110,6 +110,7 @@ struct HomeView: View {
     }
     .fullScreenCover(item: $selectedChannel) { channel in
       PlayerView(channel: channel.login, auth: auth)
+        .environment(\.themePalette, resolvedPalette)
     }
     .fullScreenCover(isPresented: $showSignIn) {
       SignInView(auth: auth) {

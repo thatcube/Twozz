@@ -83,12 +83,21 @@ struct ThemePalette: Equatable {
   let liftPrimaryText: Color
   /// Secondary text drawn on top of `liftSurface`.
   let liftSecondaryText: Color
+  /// Backdrop behind the video / side-chat letterbox in the player.
+  let playerBackdrop: Color
+  /// Background of the side-layout chat panel (only differs in light themes).
+  let chatSideSurface: Color
+  /// Primary message text on the side-layout chat panel.
+  let chatSidePrimaryText: Color
 
   static let oled = ThemePalette(
     backgroundColors: [.black, .black],
     liftSurface: .white,
     liftPrimaryText: .black.opacity(0.92),
-    liftSecondaryText: .black.opacity(0.62)
+    liftSecondaryText: .black.opacity(0.62),
+    playerBackdrop: .black,
+    chatSideSurface: Color(white: 0.07).opacity(0.96),
+    chatSidePrimaryText: .white
   )
 
   static let dark = ThemePalette(
@@ -98,7 +107,10 @@ struct ThemePalette: Equatable {
     ],
     liftSurface: .white,
     liftPrimaryText: .black.opacity(0.92),
-    liftSecondaryText: .black.opacity(0.62)
+    liftSecondaryText: .black.opacity(0.62),
+    playerBackdrop: .black,
+    chatSideSurface: Color(white: 0.07).opacity(0.96),
+    chatSidePrimaryText: .white
   )
 
   static let light = ThemePalette(
@@ -108,7 +120,10 @@ struct ThemePalette: Equatable {
     ],
     liftSurface: Color(red: 0.16, green: 0.16, blue: 0.18),
     liftPrimaryText: .white.opacity(0.95),
-    liftSecondaryText: .white.opacity(0.70)
+    liftSecondaryText: .white.opacity(0.70),
+    playerBackdrop: Color(red: 0.90, green: 0.90, blue: 0.92),
+    chatSideSurface: Color(white: 0.97).opacity(0.98),
+    chatSidePrimaryText: Color(white: 0.12)
   )
 }
 

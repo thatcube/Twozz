@@ -16,7 +16,14 @@ struct ChatView: View {
     var useGlassBackground: Bool = false
     /// When true, use a lighter non-glass background for overlay mode.
     var useLighterOverlayBackground: Bool = false
+    @Environment(\.themePalette) private var palette
     @State private var pendingScrollWork: DispatchWorkItem?
+
+    /// Side layout is the only non-glass, non-overlay mode; it follows the
+    /// app theme so light mode paints a light chat panel with dark text.
+    private var isSideLayout: Bool {
+        !useGlassBackground && !useLighterOverlayBackground
+    }
 
     private var messageSpacingValue: CGFloat {
         switch messageSpacing {
@@ -48,7 +55,7 @@ struct ChatView: View {
             ? AnyShapeStyle(Color.black.opacity(0.22))
             : (useLighterOverlayBackground
                 ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
-                : AnyShapeStyle(Color(white: 0.07).opacity(0.96))))
+                : AnyShapeStyle(palette.chatSideSurface)))
     }
 
     private var messageList: some View {
@@ -97,7 +104,8 @@ struct ChatView: View {
             globalEmoteURLs: emoteURLs,
             badgeURLs: badgeURLs,
             textSize: textSize,
-            lineHeight: lineHeight
+            lineHeight: lineHeight,
+            bodyColorOverride: isSideLayout ? palette.chatSidePrimaryText : nil
         )
     }
 

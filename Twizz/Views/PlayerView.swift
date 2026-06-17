@@ -43,6 +43,7 @@ struct PlayerView: View {
   @State private var activeChannel: String = ""
 
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.themePalette) private var palette
   @AppStorage("preferredQuality") private var preferredQuality = "Auto"
   @AppStorage("chatTextSize") private var chatTextSizeRaw = ChatTextSizeOption.medium.rawValue
   @AppStorage("chatLineHeight") private var chatLineHeightRaw = ChatLineHeightOption.normal.rawValue
@@ -200,7 +201,7 @@ struct PlayerView: View {
 
   var body: some View {
     ZStack {
-      Color.black.ignoresSafeArea()
+      palette.playerBackdrop.ignoresSafeArea()
 
       if chatLayoutMode.isOverlay {
         videoColumn

@@ -1,4 +1,5 @@
 import CoreImage.CIFilterBuiltins
+import SDWebImage
 import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
@@ -101,6 +102,8 @@ struct SignInView: View {
           Text(displayURL)
             .font(.system(size: 84, weight: .heavy, design: .rounded))
             .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
         }
 
         VStack(spacing: 6) {
@@ -265,7 +268,7 @@ private struct SignInWaitingView: View {
     Line(text: "We're so back", emote: "FeelsAmazingMan"),
     Line(text: "No rush, chat", emote: "FeelsGoodMan"),
     Line(text: "Easy clap", emote: "EZ"),
-    Line(text: "Nice one", emote: "Clap"),
+    Line(text: "Hop in already", emote: "AYAYA"),
     Line(text: "Vibing till you're in", emote: "ffzJam"),
     Line(text: "Let's gooo", emote: "PepePls"),
   ]
@@ -279,19 +282,27 @@ private struct SignInWaitingView: View {
   private var line: Line { Self.lines[index % Self.lines.count] }
 
   var body: some View {
-    HStack(spacing: 18) {
-      Text(line.text)
-        .font(.system(size: 38, weight: .semibold))
-        .foregroundStyle(.secondary)
+    HStack(spacing: 24) {
+      PulsingDots()
 
-      emoteView
+      HStack(spacing: 18) {
+        Text(line.text)
+          .font(.system(size: 38, weight: .semibold))
+          .foregroundStyle(.secondary)
+
+        emoteView
+      }
+      .opacity(visible ? 1 : 0)
+      .animation(.easeInOut(duration: 0.35), value: visible)
     }
-    .opacity(visible ? 1 : 0)
-    .animation(.easeInOut(duration: 0.35), value: visible)
-    .animation(.easeInOut(duration: 0.35), value: index)
     .frame(minHeight: 64)
     .task {
-      emoteURLs = await EmoteCatalogService.shared.globalCatalog()
+      let catalog = await EmoteCatalogService.shared.globalCatalog()
+      emoteURLs = catalog
+      // Warm the image cache up front so emotes appear instantly as they cycle,
+      // rather than downloading on first display.
+      let urls = Self.lines.compactMap { catalog[$0.emote] }
+      SDWebImagePrefetcher.shared.prefetchURLs(urls)
     }
     .onReceive(timer) { _ in
       withAnimation(.easeInOut(duration: 0.35)) { visible = false }
@@ -310,11 +321,33 @@ private struct SignInWaitingView: View {
         .aspectRatio(contentMode: .fit)
         .frame(height: 56)
         .fixedSize(horizontal: true, vertical: false)
-    } else {
-      Text(line.emote)
-        .font(.system(size: 38, weight: .semibold))
-        .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
     }
+  }
+}
+
+/// Three dots that fade and scale in sequence to signal ongoing background work
+/// (e.g. polling Twitch for authorization).
+private struct PulsingDots: View {
+  private let dotCount = 3
+  @State private var isAnimating = false
+
+  var body: some View {
+    HStack(spacing: 10) {
+      ForEach(0..<dotCount, id: \.self) { index in
+        Circle()
+          .fill(Color(red: 0.58, green: 0.41, blue: 0.96))
+          .frame(width: 14, height: 14)
+          .scaleEffect(isAnimating ? 1.0 : 0.4)
+          .opacity(isAnimating ? 1.0 : 0.3)
+          .animation(
+            .easeInOut(duration: 0.6)
+              .repeatForever(autoreverses: true)
+              .delay(Double(index) * 0.2),
+            value: isAnimating
+          )
+      }
+    }
+    .onAppear { isAnimating = true }
   }
 }
 

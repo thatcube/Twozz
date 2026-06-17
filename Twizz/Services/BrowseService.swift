@@ -109,6 +109,7 @@ final class BrowseService {
             struct Broadcaster: Decodable {
                 let login: String?
                 let displayName: String?
+                let profileImageURL: String?
             }
         }
         struct StreamEdge: Decodable {
@@ -134,6 +135,7 @@ final class BrowseService {
                       broadcaster {
                         login
                         displayName
+                                                profileImageURL(width: 70)
                       }
                     }
                   }
@@ -158,6 +160,7 @@ final class BrowseService {
             let displayName = broadcaster.displayName?.trimmingCharacters(in: .whitespaces) ?? login
             let title = node.title?.trimmingCharacters(in: .whitespaces) ?? "Live now"
             let previewURL = node.previewImageURL.flatMap { URL(string: $0) }
+            let profileURL = broadcaster.profileImageURL.flatMap { URL(string: $0) }
 
             return FollowedChannel(
                 id: streamID,
@@ -167,7 +170,7 @@ final class BrowseService {
                 gameName: category.name,
                 viewerCount: node.viewersCount,
                 thumbnailURL: previewURL,
-                profileImageURL: nil,
+                profileImageURL: profileURL,
                 isLive: true
             )
         }

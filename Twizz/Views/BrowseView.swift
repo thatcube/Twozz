@@ -204,7 +204,6 @@ private struct BrowseStreamsView: View {
                     .focusSection()
                 }
             }
-            .padding(.horizontal, 18)
             .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -243,12 +242,16 @@ private struct CategoryCard: View {
                 Text(category.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
-                    .lineLimit(2)
+                    .lineLimit(2, reservesSpace: true)
 
                 if let viewers = category.viewerCount {
                     Text("\(viewers) watching")
                         .font(.caption2)
                         .foregroundStyle(isFocused ? Color.black.opacity(0.6) : Color.secondary)
+                } else {
+                    Text(" ")
+                        .font(.caption2)
+                        .hidden()
                 }
             }
             .padding(.horizontal, 8)
@@ -304,16 +307,30 @@ private struct BrowseChannelCard: View {
             .aspectRatio(16 / 9, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
 
-            Text(channel.displayName)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
-                .lineLimit(1)
+            HStack(alignment: .top, spacing: 10) {
+                AsyncImage(url: channel.profileImageURL) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Circle()
+                        .fill(Color.white.opacity(0.14))
+                }
+                .frame(width: 34, height: 34)
+                .clipShape(Circle())
 
-            Text(channel.title.isEmpty ? "No title" : channel.title)
-                .font(.footnote)
-                .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
-                .lineLimit(2, reservesSpace: true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(channel.displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
+                        .lineLimit(1)
+
+                    Text(channel.title.isEmpty ? "No title" : channel.title)
+                        .font(.footnote)
+                        .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
+                        .lineLimit(2, reservesSpace: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(focusInset)
         .background {

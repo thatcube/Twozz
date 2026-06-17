@@ -630,7 +630,8 @@ private struct CustomTopTabBar: View {
             }
         }
         .padding(8)
-        .background(.ultraThickMaterial, in: Capsule())
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.15), radius: 20, y: 10)
         .padding(.top, 40)
     }
 }
@@ -662,12 +663,12 @@ private struct CustomTopTabBarButton: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .foregroundStyle(isFocused ? Color.black : (isSelected ? Color.primary : Color.secondary))
+            .foregroundStyle(isFocused ? Color.primary : (isSelected ? Color.primary : Color.secondary))
             .background {
                 if isFocused {
                     Capsule()
-                        .fill(Color.white)
-                        .shadow(color: Color.black.opacity(0.15), radius: 8, y: 4)
+                        .fill(Material.regularMaterial)
+                        .shadow(color: Color.black.opacity(0.1), radius: 8, y: 4)
                         .matchedGeometryEffect(id: "focusRing", in: namespace)
                 } else if isSelected {
                     Capsule()
@@ -677,8 +678,8 @@ private struct CustomTopTabBarButton: View {
         }
         .buttonStyle(.plain)
         .focused($isFocused)
-        .scaleEffect(isFocused ? 1.05 : 1.0)
-        .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.7, blendDuration: 0.2), value: isFocused)
+        .scaleEffect(isFocused ? 1.02 : 1.0)
+        .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.8, blendDuration: 0.2), value: isFocused)
         .animation(.easeOut(duration: 0.2), value: isSelected)
     }
     

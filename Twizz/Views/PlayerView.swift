@@ -320,29 +320,30 @@ struct PlayerView: View {
       }
 
       if isLoading {
-        VStack(spacing: 32) {
+        VStack(spacing: 40) {
           ZStack {
-            // Outer rotating ring
+            // Multi-ring spinner (Apple Maps style)
+            // Outer ring
             Circle()
-              .stroke(
-                LinearGradient(
-                  gradient: Gradient(colors: [
-                    .white.opacity(0.8),
-                    .white.opacity(0.2)
-                  ]),
-                  startPoint: .topLeading,
-                  endPoint: .bottomTrailing
-                ),
-                lineWidth: 4
-              )
-              .frame(width: 80, height: 80)
+              .stroke(.white.opacity(0.3), lineWidth: 3)
+              .frame(width: 100, height: 100)
+            
+            // Middle ring
+            Circle()
+              .stroke(.white.opacity(0.5), lineWidth: 3)
+              .frame(width: 70, height: 70)
               .rotationEffect(.degrees(loadingRotation))
-
-            // Inner pulsing dot
+            
+            // Inner ring
+            Circle()
+              .stroke(.white.opacity(0.8), lineWidth: 3)
+              .frame(width: 40, height: 40)
+              .rotationEffect(.degrees(-loadingRotation * 1.5))
+            
+            // Center dot
             Circle()
               .fill(.white)
-              .frame(width: 12, height: 12)
-              .opacity(0.5 + 0.5 * sin(loadingRotation * .pi / 180))
+              .frame(width: 8, height: 8)
           }
 
           VStack(spacing: 8) {

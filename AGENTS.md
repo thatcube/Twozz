@@ -34,6 +34,30 @@ this first:
 
 If a branch change is required in either mode, ask the user first.
 
+## Parallel feature development (multiple agents / worktrees at once)
+
+Several AI agents may be building different features simultaneously, each in its
+own worktree/branch off `main`. There is only **one** Apple TV to test on, which
+makes it the real bottleneck. Follow these rules to keep things integrated and
+avoid clobbering:
+
+1. **One feature per worktree/branch.** Keep features small and short-lived to
+   minimize how far each branch drifts from `main`.
+2. **Serialize merges.** Merge only one feature into `main` at a time. Never
+   interleave two in-flight merges.
+3. **Re-sync after every merge.** Immediately after a feature lands on `main`,
+   the other active worktrees should pull/merge `main` back in so they keep
+   building against the latest code. This surfaces conflicts early instead of at
+   the end.
+4. **The Apple TV is a lock — only one agent deploys at a time.** Installing
+   replaces the app on the device, so two simultaneous deploys clobber each
+   other and make test results meaningless. Agents may freely *compile* to catch
+   build errors, but only the agent whose turn it is should install/launch on
+   the device.
+5. **Smoke-test integrated `main` after each merge.** A feature passing on its
+   own branch does not prove it works once merged with everything else. After a
+   merge, do one real on-device test of the resulting `main` before moving on.
+
 ## Always deploy after successful local build
 
 When code changes are made and a build succeeds, always deploy the newest build to the paired Apple TV so the user can test immediately.

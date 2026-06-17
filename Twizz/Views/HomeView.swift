@@ -20,18 +20,25 @@ struct HomeView: View {
   @State private var auth = TwitchAuthSession()
   @State private var follows = FollowedChannelsService()
   @State private var recommendations = RecommendationsService()
+  @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var pendingBrowseCategory: TwitchCategory?
   @State private var firstFocusRequested = false
+  @State private var showSignIn = false
 
+  @Environment(\.colorScheme) private var systemColorScheme
   @FocusState private var focusedItemID: String?
 
   private let firstLaunchSignInPromptKey = "hasPromptedFirstLaunchSignIn"
 
+  private var resolvedPalette: ThemePalette {
+    themeManager.theme.palette(systemColorScheme: systemColorScheme)
+  }
+
   private enum TopTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case browse = "Browse"
-    case account = "Account"
+    case settings = "Settings"
 
     var id: String { rawValue }
   }
@@ -58,15 +65,22 @@ struct HomeView: View {
       .tabItem { Text("Browse") }
       .tag(TopTab.browse)
 
-      SignInView(auth: auth, isEmbedded: true) {
-        Task {
-          await refreshFollowedChannelsIfNeeded(force: true)
-          requestFocusIfPossible(force: true)
+      SettingsView(
+        themeManager: themeManager,
+        auth: auth,
+        onRequestSignIn: { showSignIn = true },
+        onAccountChanged: {
+          Task {
+            await refreshFollowedChannelsIfNeeded(force: true)
+            requestFocusIfPossible(force: true)
+          }
         }
-      }
-      .tabItem { Label("Account", systemImage: "person.crop.circle") }
-      .tag(TopTab.account)
+      )
+      .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+      .tag(TopTab.settings)
     }
+    .environment(\.themePalette, resolvedPalette)
+    .preferredColorScheme(themeManager.theme.preferredColorScheme)
     .task {
       auth.restore()
       promptFirstLaunchSignInIfNeeded()
@@ -97,13 +111,23 @@ struct HomeView: View {
     .fullScreenCover(item: $selectedChannel) { channel in
       PlayerView(channel: channel.login, auth: auth)
     }
+    .fullScreenCover(isPresented: $showSignIn) {
+      SignInView(auth: auth) {
+        Task {
+          await refreshFollowedChannelsIfNeeded(force: true)
+          requestFocusIfPossible(force: true)
+        }
+      }
+      .environment(\.themePalette, resolvedPalette)
+      .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    }
   }
 
   @ViewBuilder
   private func tabContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
     ZStack {
       LinearGradient(
-        colors: [Color.black, Color(red: 0.09, green: 0.08, blue: 0.14)],
+        colors: resolvedPalette.backgroundColors,
         startPoint: .top,
         endPoint: .bottom
       )
@@ -338,7 +362,7 @@ struct HomeView: View {
         Spacer(minLength: 24)
 
         Button("Sign In") {
-          selectedTopTab = .account
+          showSignIn = true
         }
         .font(.headline)
       }
@@ -351,23 +375,24 @@ struct HomeView: View {
       )
       .overlay(
         RoundedRectangle(cornerRadius: 28)
-          .stroke(Color.white.opacity(0.12), lineWidth: 1)
+          .stroke(Color.primary.opacity(0.12), lineWidth: 1)
       )
       .padding(.top, 12)
       .focusSection()
     }
   }
 
-  /// On the very first app launch (and only then), nudge a signed-out viewer to
-  /// the Account tab so they can connect their Twitch account. The flag is
-  /// persisted so we never prompt again, even if they skip signing in.
+  /// On the very first app launch (and only then), present the Twitch sign-in
+  /// screen to a signed-out viewer. The flag is persisted so we never prompt
+  /// again, even if they skip signing in (they can still sign in via Settings
+  /// or the Home banner).
   private func promptFirstLaunchSignInIfNeeded() {
     let defaults = UserDefaults.standard
     guard !defaults.bool(forKey: firstLaunchSignInPromptKey) else { return }
     defaults.set(true, forKey: firstLaunchSignInPromptKey)
 
     guard !auth.isAuthenticated else { return }
-    selectedTopTab = .account
+    showSignIn = true
   }
 
   private func requestFocusIfPossible(force: Bool) {
@@ -453,6 +478,8 @@ private struct FollowedChannelCard: View {
   let cardCornerRadius: CGFloat
   let mediaCornerRadius: CGFloat
 
+  @Environment(\.themePalette) private var palette
+
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       ZStack(alignment: .bottomLeading) {
@@ -461,7 +488,7 @@ private struct FollowedChannelCard: View {
             .resizable()
             .scaledToFill()
         } placeholder: {
-          Color.white.opacity(0.08)
+          Color.primary.opacity(0.08)
         }
         .frame(width: mediaWidth, height: mediaHeight)
         .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
@@ -490,18 +517,18 @@ private struct FollowedChannelCard: View {
 
       Text(channel.displayName)
         .font(.subheadline.weight(.semibold))
-        .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
+        .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
         .lineLimit(1)
 
       Text(channel.title.isEmpty ? "No title" : channel.title)
         .font(.footnote)
-        .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
+        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
         .lineLimit(2)
         .frame(height: 38, alignment: .topLeading)
 
       Text(channel.gameName)
         .font(.caption2)
-        .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
+        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
         .lineLimit(1)
     }
     .padding(.horizontal, focusHorizontalInset)
@@ -509,7 +536,7 @@ private struct FollowedChannelCard: View {
     .frame(width: mediaWidth + (focusHorizontalInset * 2), alignment: .leading)
     .background {
       RoundedRectangle(cornerRadius: cardCornerRadius)
-        .fill(isFocused ? Color.white.opacity(0.94) : Color.clear)
+        .fill(isFocused ? palette.liftSurface : Color.clear)
     }
     .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
     .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
@@ -521,6 +548,8 @@ private struct HomeCategoryCard: View {
   let isFocused: Bool
   let width: CGFloat
 
+  @Environment(\.themePalette) private var palette
+
   private let cornerRadius: CGFloat = 16
   private let artRatio: CGFloat = 285.0 / 380.0
 
@@ -531,7 +560,7 @@ private struct HomeCategoryCard: View {
           .resizable()
           .scaledToFill()
       } placeholder: {
-        Color.white.opacity(0.08)
+        Color.primary.opacity(0.08)
       }
       .frame(width: width, height: width / artRatio)
       .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 2))
@@ -539,13 +568,13 @@ private struct HomeCategoryCard: View {
       VStack(alignment: .leading, spacing: 4) {
         Text(category.name)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
+          .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
           .lineLimit(2, reservesSpace: true)
 
         if let viewers = category.viewerCount {
           Text("\(viewers) watching")
             .font(.caption2)
-            .foregroundStyle(isFocused ? Color.black.opacity(0.6) : Color.secondary)
+            .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
         } else {
           Text(" ")
             .font(.caption2)
@@ -559,7 +588,7 @@ private struct HomeCategoryCard: View {
     .frame(width: width + 20)
     .background {
       RoundedRectangle(cornerRadius: cornerRadius)
-        .fill(isFocused ? Color.white : Color.white.opacity(0.07))
+        .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
     }
     .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
   }

@@ -11,6 +11,7 @@ struct SignInView: View {
   var onSignedIn: () -> Void = {}
 
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
 
   private let displayURL = "twitch.tv/activate"
@@ -18,7 +19,7 @@ struct SignInView: View {
   var body: some View {
     ZStack {
       LinearGradient(
-        colors: [Color.black, Color(red: 0.09, green: 0.08, blue: 0.14)],
+        colors: palette.backgroundColors,
         startPoint: .top,
         endPoint: .bottom
       )

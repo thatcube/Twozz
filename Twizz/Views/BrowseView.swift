@@ -197,7 +197,7 @@ private struct BrowseStreamsView: View {
                                 .padding(.vertical, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 10)
-                                        .fill(Color.white.opacity(0.1))
+                                        .fill(Color.primary.opacity(0.1))
                                 )
                             }
                             .buttonStyle(.plain)
@@ -206,7 +206,7 @@ private struct BrowseStreamsView: View {
                                 AsyncImage(url: url) { img in
                                     img.resizable().scaledToFill()
                                 } placeholder: {
-                                    Color.white.opacity(0.08)
+                                    Color.primary.opacity(0.08)
                                 }
                                 .frame(width: 40, height: 53)
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -305,6 +305,8 @@ private struct CategoryCard: View {
     let category: TwitchCategory
     let isFocused: Bool
 
+    @Environment(\.themePalette) private var palette
+
     private let cornerRadius: CGFloat = 14
     private let artRatio: CGFloat = 285.0 / 380.0
 
@@ -313,7 +315,7 @@ private struct CategoryCard: View {
             AsyncImage(url: category.boxArtURL) { img in
                 img.resizable().scaledToFill()
             } placeholder: {
-                Color.white.opacity(0.08)
+                Color.primary.opacity(0.08)
             }
             .aspectRatio(artRatio, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 2))
@@ -321,13 +323,13 @@ private struct CategoryCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(category.name)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
+                    .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
                     .lineLimit(2, reservesSpace: true)
 
                 if let viewers = category.viewerCount {
                     Text("\(viewers) watching")
                         .font(.caption2)
-                        .foregroundStyle(isFocused ? Color.black.opacity(0.6) : Color.secondary)
+                        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
                 } else {
                     Text(" ")
                         .font(.caption2)
@@ -339,7 +341,7 @@ private struct CategoryCard: View {
         }
         .background {
             RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(isFocused ? Color.white : Color.white.opacity(0.07))
+                .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
         }
     }
 }
@@ -350,6 +352,8 @@ private struct BrowseChannelCard: View {
     let channel: FollowedChannel
     let isFocused: Bool
 
+    @Environment(\.themePalette) private var palette
+
     private let cardCornerRadius: CGFloat = 16
     private let mediaCornerRadius: CGFloat = 12
     private let focusInset: CGFloat = 14
@@ -357,7 +361,7 @@ private struct BrowseChannelCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomLeading) {
-                Color.white.opacity(0.08)
+                Color.primary.opacity(0.08)
 
                 AsyncImage(url: channel.thumbnailURL) { img in
                     img.resizable().scaledToFill()
@@ -392,7 +396,7 @@ private struct BrowseChannelCard: View {
                     img.resizable().scaledToFill()
                 } placeholder: {
                     Circle()
-                        .fill(Color.white.opacity(0.14))
+                        .fill(Color.primary.opacity(0.14))
                 }
                 .frame(width: 68, height: 68)
                 .clipShape(Circle())
@@ -400,12 +404,12 @@ private struct BrowseChannelCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(channel.displayName)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isFocused ? Color.black.opacity(0.92) : Color.primary)
+                        .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
                         .lineLimit(1)
 
                     Text(channel.title.isEmpty ? "No title" : channel.title)
                         .font(.footnote)
-                        .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
+                        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
                         .lineLimit(2, reservesSpace: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -415,7 +419,7 @@ private struct BrowseChannelCard: View {
         .padding(focusInset)
         .background {
             RoundedRectangle(cornerRadius: cardCornerRadius)
-                .fill(isFocused ? Color.white : Color.white.opacity(0.07))
+                .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
         }
     }
 }

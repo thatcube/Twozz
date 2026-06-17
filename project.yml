@@ -38,9 +38,26 @@ targets:
         product: SDWebImageSwiftUI
       - package: SDWebImageWebPCoder
         product: SDWebImageWebPCoder
+      - target: TopShelfExtension
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Twizz
         DEVELOPMENT_TEAM: N8Z5T4AK3X
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Twizz/App/Twizz.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  TopShelfExtension:
+    type: com.apple.product-type.tv-app-extension
+    platform: tvOS
+    sources:
+      - path: TopShelfExtension/ContentProvider.swift
+      - path: Twizz/Shared/TopShelfSnapshot.swift
+      - path: Twizz/Shared/TopShelfStore.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Twizz.TopShelfExtension
+        DEVELOPMENT_TEAM: N8Z5T4AK3X
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: TopShelfExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TopShelfExtension/TopShelfExtension.entitlements

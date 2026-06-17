@@ -59,9 +59,12 @@ final class RecommendationsService {
         struct GQLData: Decodable { let streams: StreamsConn? }
         struct GQLEnvelope: Decodable { let data: GQLData? }
 
+        // `broadcasterLanguages` is a GQL enum (e.g. EN), not a string, so it
+        // is inlined from a whitelist below — never interpolated from raw input.
+        let language = Self.preferredTwitchLanguage()
         let query = """
             query RecommendedStreams($first: Int!) {
-              streams(first: $first) {
+              streams(first: $first, options: {sort: VIEWER_COUNT, broadcasterLanguages: [\(language)]}) {
                 edges {
                   node {
                     id
@@ -167,7 +170,6 @@ final class RecommendationsService {
     // MARK: - GQL Transport
 
     private func performGQL(query: String, variables: [String: Any]) async throws -> Data {
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("kimne78kx3ncx6brgo4mv6wki5h1ko", forHTTPHeaderField: "Client-Id")

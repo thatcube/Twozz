@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Twizz Top Shelf</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -18,30 +20,14 @@
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key>
-            <string>com.thatcube.Twizz.deeplink</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>twizz</string>
-            </array>
-        </dict>
-    </array>
-    <key>LSRequiresIPhoneOS</key>
-    <true/>
     <key>MinimumOSVersion</key>
     <string>$(TVOS_DEPLOYMENT_TARGET)</string>
-    <key>TWITCH_CLIENT_ID</key>
-    <string>$(TWITCH_CLIENT_ID)</string>
-    <key>UIDeviceFamily</key>
-    <array>
-        <integer>3</integer>
-    </array>
-    <key>UIRequiredDeviceCapabilities</key>
-    <array>
-        <string>arm64</string>
-    </array>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.tv-top-shelf</string>
+        <key>NSExtensionPrincipalClass</key>
+        <string>$(PRODUCT_MODULE_NAME).ContentProvider</string>
+    </dict>
 </dict>
 </plist>

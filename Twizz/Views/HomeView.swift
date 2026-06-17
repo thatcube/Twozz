@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct HomeView: View {
+  let deepLinkRouter: DeepLinkRouter
+
   private let pagePadding: CGFloat = 28
   private let channelRailVerticalPadding: CGFloat = 20
   private let targetVisibleCards: CGFloat = 4
@@ -67,6 +69,7 @@ struct HomeView: View {
       await refreshFollowedChannelsIfNeeded(force: true)
       await refreshRecommendationsIfNeeded(force: true)
       requestFocusIfPossible(force: true)
+      openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)
@@ -83,6 +86,9 @@ struct HomeView: View {
         await refreshFollowedChannelsIfNeeded(force: false)
         await refreshRecommendationsIfNeeded(force: false)
       }
+    }
+    .onChange(of: deepLinkRouter.pendingChannelLogin) { _, login in
+      openDeepLinkedChannelIfNeeded(login)
     }
     .fullScreenCover(item: $selectedChannel) { channel in
       PlayerView(channel: channel.login, auth: auth)
@@ -424,11 +430,48 @@ struct HomeView: View {
   private func refreshFollowedChannelsIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshFollowedChannels() else { return }
     await follows.refresh(using: auth)
+    publishTopShelfSnapshot()
   }
 
   private func refreshRecommendationsIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshRecommendations() else { return }
     await recommendations.refresh()
+    publishTopShelfSnapshot()
+  }
+
+  private func publishTopShelfSnapshot() {
+    TopShelfPublisher.publish(
+      followed: follows.channels,
+      isUsingDemoData: follows.isUsingDemoData,
+      recommended: recommendations.channels
+    )
+  }
+
+  /// Presents the player for a channel requested via deep link (Top Shelf).
+  /// Prefers a fully-populated channel from loaded data, otherwise builds a
+  /// minimal placeholder — the player only needs the login to start playback.
+  private func openDeepLinkedChannelIfNeeded(_ login: String?) {
+    guard let login = login?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !login.isEmpty
+    else { return }
+
+    let match = (follows.channels + recommendations.channels).first {
+      $0.login.caseInsensitiveCompare(login) == .orderedSame
+    }
+
+    selectedChannel = match ?? FollowedChannel(
+      id: login,
+      login: login,
+      displayName: login,
+      title: "",
+      gameName: "",
+      viewerCount: nil,
+      thumbnailURL: nil,
+      profileImageURL: nil,
+      isLive: true
+    )
+
+    deepLinkRouter.pendingChannelLogin = nil
   }
 
   private func shouldAutoRefreshFollowedChannels() -> Bool {
@@ -567,5 +610,5 @@ private struct HomeCategoryCard: View {
 }
 
 #Preview {
-  HomeView()
+  HomeView(deepLinkRouter: DeepLinkRouter())
 }

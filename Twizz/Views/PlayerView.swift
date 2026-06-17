@@ -770,10 +770,7 @@ struct PlayerView: View {
         .frame(height: chatComposerRowHeight)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
-        Button {
-          showSignInSheet = true
-          scheduleHide()
-        } label: {
+        ZStack {
           ChatInputField(
             text: .constant(""),
             placeholder: "Sign in to send messages",
@@ -785,8 +782,13 @@ struct PlayerView: View {
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
           .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .focusable()
         .focused($focus, equals: .chatInput)
+        .onTapGesture {
+          showSignInSheet = true
+          scheduleHide()
+        }
         .onMoveCommand { direction in
           switch direction {
           case .left:
@@ -799,7 +801,8 @@ struct PlayerView: View {
         }
         .frame(height: chatComposerRowHeight)
         .accessibilityLabel("Sign in to send messages")
-          .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityAddTraits(.isButton)
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
     .padding(.horizontal, 16)

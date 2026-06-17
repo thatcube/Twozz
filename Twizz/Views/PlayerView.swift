@@ -711,7 +711,7 @@ struct PlayerView: View {
             placeholder: "Send a message",
             isFocused: focus == .chatInput
           )
-          .frame(height: 44)
+          .frame(height: 54)
           .frame(maxWidth: .infinity)
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in

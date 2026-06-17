@@ -125,6 +125,8 @@ struct PlayerView: View {
   @State private var diagLastPlayheadSeconds: Double?
   @State private var diagLastSampleAt: Date?
   @State private var diagWasStalled = false
+  @State private var diagIsFrozen = false
+  @State private var diagFrozenSince: Date?
   @State private var diagSessionStartedAt: Date?
 
   private let controlsAutoHideSeconds: Double = 10
@@ -300,6 +302,11 @@ struct PlayerView: View {
     }
     .onAppear {
       setIdleTimer(disabled: true)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) { notification in
+      guard let stalledItem = notification.object as? AVPlayerItem else { return }
+      guard stalledItem == player.currentItem else { return }
+      markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
     }
     .onDisappear {
       hideTask?.cancel()
@@ -695,6 +702,12 @@ struct PlayerView: View {
 
     let edge = liveEdgeLatencySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "—"
     let wall = wallClockLatencySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "—"
+    if diagIsFrozen {
+      let frozenFor = diagFrozenSince.map { max(0, Int(Date().timeIntervalSince($0).rounded())) } ?? 0
+      lines.append("State: FROZEN (\(frozenFor)s) · Waiting: \(diagWaitingReasonDescription())")
+    } else {
+      lines.append("State: Playing/waiting · Waiting: \(diagWaitingReasonDescription())")
+    }
     lines.append("Edge gap: \(edge) · Encoder: \(wall)")
     lines.append("Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
 
@@ -729,11 +742,38 @@ struct PlayerView: View {
     return "—"
   }
 
+  private func diagWaitingReasonDescription() -> String {
+    if player.timeControlStatus == .playing { return "none" }
+    if let reason = player.reasonForWaitingToPlay {
+      if reason == .toMinimizeStalls { return "toMinimizeStalls" }
+      if reason == .evaluatingBufferingRate { return "evaluatingBufferingRate" }
+      if reason == .noItemToPlay { return "noItemToPlay" }
+      return String(describing: reason)
+    }
+    if player.currentItem?.isPlaybackBufferEmpty == true { return "bufferEmpty" }
+    if player.currentItem?.isPlaybackLikelyToKeepUp == false { return "notLikelyToKeepUp" }
+    return "unknown"
+  }
+
   /// Records a diagnostics event, keeping only the most recent few (newest first).
   private func logDiagnosticsEvent(_ text: String) {
     diagEvents.insert(DiagnosticsEvent(at: Date(), text: text), at: 0)
     if diagEvents.count > 6 {
       diagEvents.removeLast(diagEvents.count - 6)
+    }
+  }
+
+  private func markDiagnosticsStall(reason: String) {
+    if !diagIsFrozen {
+      diagIsFrozen = true
+      diagFrozenSince = Date()
+    }
+    if !diagWasStalled {
+      diagWasStalled = true
+      diagStallCount += 1
+      if showLatencyDiagnostics {
+        logDiagnosticsEvent("stall (\(reason))")
+      }
     }
   }
 
@@ -769,6 +809,12 @@ struct PlayerView: View {
         diagJumpCount += 1
         logDiagnosticsEvent("jump \(diagFormat(advanced, decimals: 1))s back")
       }
+
+      if advanced >= 0.05 {
+        diagIsFrozen = false
+        diagFrozenSince = nil
+        diagWasStalled = false
+      }
     }
 
     diagLastPlayheadSeconds = playhead
@@ -783,6 +829,8 @@ struct PlayerView: View {
     diagLastPlayheadSeconds = nil
     diagLastSampleAt = nil
     diagWasStalled = false
+    diagIsFrozen = false
+    diagFrozenSince = nil
     diagSessionStartedAt = Date()
   }
 
@@ -1743,7 +1791,6 @@ struct PlayerView: View {
     // live regardless, so the only cost is a few seconds of latency — which the
     // user has ranked below freeze-free, smooth, sharp playback.
     item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 5 : 1
-    applyCaptions(to: item, retries: 12)
     return item
   }
 
@@ -1831,6 +1878,8 @@ struct PlayerView: View {
     wallClockLowConfidenceStreak = 0
     lastPlaybackDateSample = nil
     lastPlaybackTimeSampleSeconds = nil
+    diagIsFrozen = false
+    diagFrozenSince = nil
   }
 
   private func startPlaybackWatchdog() {
@@ -1888,14 +1937,12 @@ struct PlayerView: View {
 
       if stalled {
         stalledPlaybackSamples += 1
-        if !diagWasStalled {
-          diagWasStalled = true
-          diagStallCount += 1
-          if showLatencyDiagnostics { logDiagnosticsEvent("stall (playback froze)") }
-        }
+        markDiagnosticsStall(reason: "watchdog")
       } else {
         stalledPlaybackSamples = 0
         diagWasStalled = false
+        diagIsFrozen = false
+        diagFrozenSince = nil
       }
     }
 

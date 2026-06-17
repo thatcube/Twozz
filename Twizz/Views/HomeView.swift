@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HomeView: View {
-  private let pagePadding: CGFloat = 52
+  private let pagePadding: CGFloat = 28
   private let channelRailVerticalPadding: CGFloat = 20
   private let targetVisibleCards: CGFloat = 4
   private let peekCardFraction: CGFloat = 0.15
@@ -52,7 +52,6 @@ struct HomeView: View {
         } else if selectedTopTab == .browse {
           BrowseView(
             auth: auth,
-            pagePadding: pagePadding,
             selectedChannel: $selectedChannel
           )
         }

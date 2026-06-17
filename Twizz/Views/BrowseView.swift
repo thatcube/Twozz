@@ -4,7 +4,6 @@ import SwiftUI
 
 struct BrowseView: View {
     let auth: TwitchAuthSession
-    let pagePadding: CGFloat
     @Binding var selectedChannel: FollowedChannel?
 
     @State private var service = BrowseService()
@@ -39,7 +38,6 @@ struct BrowseView: View {
                 }
             }
         }
-        .padding(.horizontal, -(pagePadding / 2))
     }
 }
 

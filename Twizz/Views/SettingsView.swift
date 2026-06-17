@@ -24,9 +24,9 @@ struct SettingsView: View {
       .ignoresSafeArea()
 
       ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 56) {
+        VStack(alignment: .leading, spacing: 36) {
           Text("Settings")
-            .font(.system(size: 56, weight: .bold))
+            .font(.system(size: 40, weight: .bold))
 
           appearanceSection
           streamCardSection
@@ -34,7 +34,7 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.horizontal, AppLayout.horizontalPadding)
-        .padding(.vertical, 60)
+        .padding(.vertical, 36)
       }
       .scrollClipDisabled()
     }
@@ -43,12 +43,12 @@ struct SettingsView: View {
   // MARK: - Appearance
 
   private var appearanceSection: some View {
-    VStack(alignment: .leading, spacing: 24) {
+    VStack(alignment: .leading, spacing: 16) {
       Text("Appearance")
-        .font(.title2.weight(.semibold))
+        .font(.title3.weight(.semibold))
         .foregroundStyle(.secondary)
 
-      HStack(spacing: 28) {
+      HStack(spacing: 24) {
         ForEach(AppTheme.allCases) { theme in
           Button {
             themeManager.theme = theme
@@ -74,10 +74,10 @@ struct SettingsView: View {
   // MARK: - Stream cards
 
   private var streamCardSection: some View {
-    VStack(alignment: .leading, spacing: 24) {
-      VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: 16) {
+      VStack(alignment: .leading, spacing: 4) {
         Text("Stream Cards")
-          .font(.title2.weight(.semibold))
+          .font(.title3.weight(.semibold))
           .foregroundStyle(.secondary)
 
         Text("Choose how large stream cards appear across Home and Browse.")
@@ -85,7 +85,7 @@ struct SettingsView: View {
           .foregroundStyle(.secondary)
       }
 
-      HStack(spacing: 28) {
+      HStack(spacing: 24) {
         ForEach(StreamCardSize.allCases) { size in
           Button {
             streamCardSizeRaw = size.rawValue
@@ -107,13 +107,13 @@ struct SettingsView: View {
   // MARK: - Account
 
   private var accountSection: some View {
-    VStack(alignment: .leading, spacing: 24) {
+    VStack(alignment: .leading, spacing: 16) {
       Text("Account")
-        .font(.title2.weight(.semibold))
+        .font(.title3.weight(.semibold))
         .foregroundStyle(.secondary)
 
       if auth.isAuthenticated {
-        HStack(spacing: 24) {
+        HStack(spacing: 20) {
           AsyncImage(url: auth.profileImageURL) { image in
             image.resizable().scaledToFill()
           } placeholder: {
@@ -122,7 +122,7 @@ struct SettingsView: View {
               .scaledToFit()
               .foregroundStyle(.secondary)
           }
-          .frame(width: 88, height: 88)
+          .frame(width: 64, height: 64)
           .clipShape(Circle())
 
           VStack(alignment: .leading, spacing: 6) {
@@ -140,10 +140,10 @@ struct SettingsView: View {
           }
           .font(.headline)
         }
-        .padding(28)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-          RoundedRectangle(cornerRadius: 24)
+          RoundedRectangle(cornerRadius: 20)
             .fill(Color.primary.opacity(0.07))
         )
         .focusSection()
@@ -159,14 +159,14 @@ struct SettingsView: View {
           Button("Cancel", role: .cancel) {}
         }
       } else {
-        HStack(spacing: 28) {
+        HStack(spacing: 24) {
           Image(systemName: "person.crop.circle.badge.plus")
-            .font(.system(size: 44))
+            .font(.system(size: 40))
             .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
 
           VStack(alignment: .leading, spacing: 6) {
             Text("Sign in with Twitch")
-              .font(.title2.weight(.bold))
+              .font(.title3.weight(.bold))
             Text("Connect your account to see the channels you follow and join the chat.")
               .font(.callout)
               .foregroundStyle(.secondary)
@@ -179,10 +179,10 @@ struct SettingsView: View {
           }
           .font(.headline)
         }
-        .padding(28)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-          RoundedRectangle(cornerRadius: 24)
+          RoundedRectangle(cornerRadius: 20)
             .fill(Color.primary.opacity(0.07))
         )
         .focusSection()
@@ -198,10 +198,10 @@ private struct ThemeOptionCard: View {
   let isSelected: Bool
 
   var body: some View {
-    VStack(spacing: 16) {
+    VStack(spacing: 12) {
       Image(systemName: theme.symbolName)
-        .font(.system(size: 40))
-        .frame(height: 48)
+        .font(.system(size: 34))
+        .frame(height: 40)
 
       Text(theme.displayName)
         .font(.headline)
@@ -210,7 +210,8 @@ private struct ThemeOptionCard: View {
         .font(.title3)
         .foregroundStyle(isSelected ? Color.green : Color.secondary)
     }
-    .frame(width: 200, height: 200)
+    .frame(width: 190)
+    .padding(.vertical, 22)
     .overlay(
       RoundedRectangle(cornerRadius: 22)
         .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
@@ -225,10 +226,10 @@ private struct StreamCardSizeOptionCard: View {
   let isSelected: Bool
 
   var body: some View {
-    VStack(spacing: 16) {
+    VStack(spacing: 12) {
       Image(systemName: size.symbolName)
-        .font(.system(size: 40))
-        .frame(height: 48)
+        .font(.system(size: 34))
+        .frame(height: 40)
 
       VStack(spacing: 2) {
         Text(size.title)
@@ -242,7 +243,8 @@ private struct StreamCardSizeOptionCard: View {
         .font(.title3)
         .foregroundStyle(isSelected ? Color.green : Color.secondary)
     }
-    .frame(width: 200, height: 200)
+    .frame(width: 190)
+    .padding(.vertical, 22)
     .overlay(
       RoundedRectangle(cornerRadius: 22)
         .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)

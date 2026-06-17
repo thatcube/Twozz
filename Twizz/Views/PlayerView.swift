@@ -137,6 +137,23 @@ struct PlayerView: View {
     chatWidthMode.width
   }
 
+  /// Trailing inset for the bottom control bar so its right-aligned buttons
+  /// stay clear of (to the left of) the chat panel when chat floats over the
+  /// full-width video in overlay/glass mode. In side mode the controls live in
+  /// the shrunken video column, so the default edge padding is enough.
+  private var controlsTrailingInset: CGFloat {
+    guard showChat, chatLayoutMode.isOverlay else { return 48 }
+    let gap: CGFloat = 24
+    switch chatLayoutMode {
+    case .glass:
+      return chatWidth + GlassChatPaneStyle.edgeInset + gap
+    case .overlay:
+      return chatWidth + gap
+    case .side:
+      return 48
+    }
+  }
+
   var body: some View {
     ZStack {
       Color.black.ignoresSafeArea()
@@ -427,7 +444,8 @@ struct PlayerView: View {
       .focusSection()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 48)
+    .padding(.leading, 48)
+    .padding(.trailing, controlsTrailingInset)
     .padding(.top, 12)
     .padding(.bottom, 42)
     .background(
@@ -1482,6 +1500,9 @@ extension View {
 private struct GlassChatPaneStyle: ViewModifier {
   let enabled: Bool
 
+  /// Inset between the glass panel and the screen edges.
+  static let edgeInset: CGFloat = 24
+
   private var shape: RoundedRectangle {
     RoundedRectangle(cornerRadius: 32, style: .continuous)
   }
@@ -1490,8 +1511,8 @@ private struct GlassChatPaneStyle: ViewModifier {
   func body(content: Content) -> some View {
     if enabled {
       glassBody(content)
-        .padding(.vertical, 36)
-        .padding(.trailing, 36)
+        .padding(.vertical, GlassChatPaneStyle.edgeInset)
+        .padding(.trailing, GlassChatPaneStyle.edgeInset)
     } else {
       content.frame(maxHeight: .infinity)
     }

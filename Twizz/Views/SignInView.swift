@@ -7,6 +7,7 @@ import UIKit
 /// in oversized type so it can be read and scanned from across the room.
 struct SignInView: View {
   let auth: TwitchAuthSession
+  var isEmbedded: Bool = false
   var onSignedIn: () -> Void = {}
 
   @Environment(\.dismiss) private var dismiss
@@ -37,7 +38,7 @@ struct SignInView: View {
     .onChange(of: auth.isAuthenticated) { _, signedIn in
       if signedIn {
         onSignedIn()
-        dismiss()
+        if !isEmbedded { dismiss() }
       }
     }
   }
@@ -80,11 +81,13 @@ struct SignInView: View {
 
       statusArea
 
-      Button("Cancel") {
-        auth.cancelSignIn()
-        dismiss()
+      if !isEmbedded {
+        Button("Cancel") {
+          auth.cancelSignIn()
+          dismiss()
+        }
+        .padding(.top, 8)
       }
-      .padding(.top, 8)
     }
     .padding(80)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -165,8 +168,10 @@ struct SignInView: View {
       }
 
       HStack(spacing: 24) {
-        Button("Done") {
-          dismiss()
+        if !isEmbedded {
+          Button("Done") {
+            dismiss()
+          }
         }
 
         Button("Sign Out") {

@@ -23,13 +23,13 @@ struct HomeView: View {
   @State private var selectedChannel: FollowedChannel?
   @State private var pendingBrowseCategory: TwitchCategory?
   @State private var firstFocusRequested = false
-  @State private var showAccount = false
 
   @FocusState private var focusedItemID: String?
 
   private enum TopTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case browse = "Browse"
+    case account = "Account"
 
     var id: String { rawValue }
   }
@@ -41,28 +41,29 @@ struct HomeView: View {
   }
 
   var body: some View {
-    ZStack {
-      LinearGradient(
-        colors: [Color.black, Color(red: 0.09, green: 0.08, blue: 0.14)],
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
+    TabView(selection: $selectedTopTab) {
+      tabContainer { homeTab }
+        .tabItem { Text("Home") }
+        .tag(TopTab.home)
 
-      VStack(alignment: .leading, spacing: 30) {
-        topTabs
+      tabContainer {
+        BrowseView(
+          auth: auth,
+          selectedChannel: $selectedChannel,
+          pendingCategory: $pendingBrowseCategory
+        )
+      }
+      .tabItem { Text("Browse") }
+      .tag(TopTab.browse)
 
-        if selectedTopTab == .home {
-          homeTab
-        } else if selectedTopTab == .browse {
-          BrowseView(
-            auth: auth,
-            selectedChannel: $selectedChannel,
-            pendingCategory: $pendingBrowseCategory
-          )
+      SignInView(auth: auth, isEmbedded: true) {
+        Task {
+          await refreshFollowedChannelsIfNeeded(force: true)
+          requestFocusIfPossible(force: true)
         }
       }
-      .padding(pagePadding)
+      .tabItem { Label("Account", systemImage: "person.crop.circle") }
+      .tag(TopTab.account)
     }
     .task {
       auth.restore()
@@ -93,83 +94,23 @@ struct HomeView: View {
     .fullScreenCover(item: $selectedChannel) { channel in
       PlayerView(channel: channel.login, auth: auth)
     }
-    .fullScreenCover(isPresented: $showAccount) {
-      SignInView(auth: auth) {
-        Task {
-          await refreshFollowedChannelsIfNeeded(force: true)
-          requestFocusIfPossible(force: true)
-        }
-      }
-    }
   }
 
-  private var topTabs: some View {
-    HStack(spacing: 16) {
-      ForEach(TopTab.allCases) { tab in
-        Button {
-          selectedTopTab = tab
-        } label: {
-          Text(tab.rawValue)
-            .font(.title3.weight(.semibold))
-            .padding(.horizontal, 24)
-            .padding(.vertical, 10)
-            .background(
-              RoundedRectangle(cornerRadius: 14)
-                .fill(selectedTopTab == tab ? Color.white.opacity(0.2) : Color.white.opacity(0.06))
-            )
-        }
-        .buttonStyle(.plain)
-      }
-
-      Spacer()
-
-      profileButton
-    }
-    .padding(.horizontal, 14)
-    .padding(.vertical, 10)
-    .background {
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .fill(.ultraThinMaterial)
-        .overlay(
-          RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-    }
-  }
-
-  private var profileButton: some View {
-    Button {
-      showAccount = true
-    } label: {
-      Group {
-        if auth.isAuthenticated, let imageURL = auth.profileImageURL {
-          AsyncImage(url: imageURL) { image in
-            image
-              .resizable()
-              .scaledToFill()
-          } placeholder: {
-            Image(systemName: "person.crop.circle.fill")
-              .resizable()
-              .scaledToFit()
-              .foregroundStyle(.secondary)
-          }
-        } else {
-          Image(systemName: "person.crop.circle")
-            .resizable()
-            .scaledToFit()
-            .foregroundStyle(.primary)
-        }
-      }
-      .frame(width: 56, height: 56)
-      .clipShape(Circle())
-      .overlay(
-        Circle()
-          .stroke(Color.white.opacity(0.25), lineWidth: 2)
+  @ViewBuilder
+  private func tabContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    ZStack {
+      LinearGradient(
+        colors: [Color.black, Color(red: 0.09, green: 0.08, blue: 0.14)],
+        startPoint: .top,
+        endPoint: .bottom
       )
-      .padding(8)
+      .ignoresSafeArea()
+
+      content()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, pagePadding)
+        .padding(.top, 12)
     }
-    .buttonStyle(.plain)
-    .accessibilityLabel(auth.isAuthenticated ? "Account" : "Sign in")
   }
 
   private var homeTab: some View {
@@ -394,7 +335,7 @@ struct HomeView: View {
         Spacer(minLength: 24)
 
         Button("Sign In") {
-          showAccount = true
+          selectedTopTab = .account
         }
         .font(.headline)
       }

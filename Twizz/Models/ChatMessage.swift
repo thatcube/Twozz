@@ -18,6 +18,9 @@ struct ChatMessage: Identifiable {
     /// Message-scoped native Twitch emotes parsed from IRC `emotes` tag.
     /// Key = emote token in this message, value = CDN image URL.
     let twitchEmoteURLs: [String: URL]
+    /// Message-scoped YouTube emotes parsed from live chat message runs.
+    /// Key = emote token in this message, value = CDN image URL.
+    let youtubeEmoteURLs: [String: URL]
     /// True for `/me` action messages (rendered in the user's color).
     let isAction: Bool
     /// The platform this message came from (Twitch or YouTube).
@@ -81,17 +84,24 @@ extension ChatMessage {
         self.badgeKeys = badges
         self.text = message
         self.twitchEmoteURLs = twitchEmoteURLs
+        self.youtubeEmoteURLs = [:]
         self.isAction = action
         self.source = .twitch
         self.timestamp = Date()
     }
 
-    init(youtubeAuthor: String, text: String, timestamp: Date = Date()) {
+    init(
+        youtubeAuthor: String,
+        text: String,
+        youtubeEmoteURLs: [String: URL],
+        timestamp: Date = Date()
+    ) {
         self.username = youtubeAuthor
         self.colorHex = nil
         self.badgeKeys = []
         self.text = text
         self.twitchEmoteURLs = [:]
+        self.youtubeEmoteURLs = youtubeEmoteURLs
         self.isAction = false
         self.source = .youtube
         self.timestamp = timestamp

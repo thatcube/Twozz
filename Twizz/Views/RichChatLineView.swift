@@ -175,7 +175,7 @@ struct RichChatLineView: View {
                 output.append(.text(String(leading)))
             }
 
-            if let url = message.twitchEmoteURLs[core] ?? globalEmoteURLs[core] {
+            if let url = message.twitchEmoteURLs[core] ?? message.youtubeEmoteURLs[core] ?? globalEmoteURLs[core] {
                 output.append(.emote(name: core, url: url))
             } else {
                 output.append(.text(core))

@@ -581,9 +581,9 @@ final class ChatService {
       guard
         let id = renderer["id"] as? String,
         let author = Self.extractSimpleOrRunsText(from: renderer["authorName"]),
-        let text = Self.extractMessageText(from: renderer),
+        let payload = Self.extractMessagePayload(from: renderer),
         !author.isEmpty,
-        !text.isEmpty
+        !payload.text.isEmpty
       else {
         continue
       }
@@ -597,7 +597,12 @@ final class ChatService {
         timestamp = Date()
       }
 
-      let message = ChatMessage(youtubeAuthor: author, text: text, timestamp: timestamp)
+      let message = ChatMessage(
+        youtubeAuthor: author,
+        text: payload.text,
+        youtubeEmoteURLs: payload.emotes,
+        timestamp: timestamp
+      )
       out.append(YouTubePollEntry(id: id, message: message))
     }
 
@@ -645,16 +650,81 @@ final class ChatService {
     return nil
   }
 
-  private static func extractMessageText(from renderer: [String: Any]) -> String? {
-    if let message = extractSimpleOrRunsText(from: renderer["message"]), !message.isEmpty {
+  private static func extractMessagePayload(from renderer: [String: Any]) -> (
+    text: String, emotes: [String: URL]
+  )? {
+    if let message = extractMessageAndEmotes(from: renderer["message"]), !message.text.isEmpty {
       return message
     }
+
     if let amount = extractSimpleOrRunsText(from: renderer["purchaseAmountText"]), !amount.isEmpty {
-      return amount
+      return (amount, [:])
     }
+
     if let header = extractSimpleOrRunsText(from: renderer["headerSubtext"]), !header.isEmpty {
-      return header
+      return (header, [:])
     }
+
+    return nil
+  }
+
+  private static func extractMessageAndEmotes(from value: Any?) -> (text: String, emotes: [String: URL])? {
+    guard let dictionary = value as? [String: Any] else { return nil }
+
+    if let simple = dictionary["simpleText"] as? String {
+      return simple.isEmpty ? nil : (simple, [:])
+    }
+
+    guard let runs = dictionary["runs"] as? [[String: Any]] else { return nil }
+
+    var parts: [String] = []
+    var emotes: [String: URL] = [:]
+
+    for run in runs {
+      if let runText = run["text"] as? String {
+        parts.append(runText)
+        continue
+      }
+
+      guard let emoji = run["emoji"] as? [String: Any] else { continue }
+      let token = (emoji["shortcuts"] as? [String])?.first(where: { !$0.isEmpty })
+        ?? (emoji["emojiId"] as? String)
+        ?? ""
+      guard !token.isEmpty else { continue }
+
+      parts.append(token)
+      if let url = extractYouTubeEmojiURL(from: emoji) {
+        emotes[token] = url
+      }
+    }
+
+    let text = parts.joined()
+    return text.isEmpty ? nil : (text, emotes)
+  }
+
+  private static func extractYouTubeEmojiURL(from emoji: [String: Any]) -> URL? {
+    guard
+      let image = emoji["image"] as? [String: Any],
+      let thumbnails = image["thumbnails"] as? [[String: Any]],
+      !thumbnails.isEmpty
+    else {
+      return nil
+    }
+
+    let best = thumbnails.max { lhs, rhs in
+      let lw = lhs["width"] as? Int ?? 0
+      let rw = rhs["width"] as? Int ?? 0
+      return lw < rw
+    }
+
+    if let bestURL = best?["url"] as? String, let url = URL(string: bestURL) {
+      return url
+    }
+
+    if let firstURL = thumbnails.first?["url"] as? String, let url = URL(string: firstURL) {
+      return url
+    }
+
     return nil
   }
 

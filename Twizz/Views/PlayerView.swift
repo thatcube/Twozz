@@ -760,10 +760,6 @@ struct PlayerView: View {
             .transition(.opacity.combined(with: .scale))
           }
         }
-        .frame(height: 68)
-        .padding(.leading, 24)
-        .padding(.trailing, hasChatDraft ? 12 : 24)
-        .background(composerInputBackground)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
         Text("Sign in to send messages")
@@ -774,24 +770,6 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
-  }
-
-  private var composerInputShape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 32, style: .continuous)
-  }
-
-  @ViewBuilder
-  private var composerInputBackground: some View {
-    let shape = composerInputShape
-    if chatLayoutMode == .glass {
-      shape
-        .fill(Color.white.opacity(0.08))
-        .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 1))
-    } else {
-      shape
-        .fill(Color(white: 0.16))
-        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 1))
-    }
   }
 
   private func submitChatMessage() {

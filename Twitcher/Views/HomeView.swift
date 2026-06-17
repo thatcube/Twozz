@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct HomeView: View {
-  private let pagePadding: CGFloat = 44
-  private let channelRailVerticalPadding: CGFloat = 16
+  private let pagePadding: CGFloat = 52
+  private let channelRailVerticalPadding: CGFloat = 20
   private let channelRailSpacing: CGFloat = 52
   private let focusedCardScale: CGFloat = 1.02
 
@@ -217,6 +217,9 @@ struct HomeView: View {
 }
 
 private struct FollowedChannelCard: View {
+  private let cardCornerRadius: CGFloat = 22
+  private let mediaCornerRadius: CGFloat = 18
+
   let channel: FollowedChannel
   let isFocused: Bool
 
@@ -230,16 +233,18 @@ private struct FollowedChannelCard: View {
         } placeholder: {
           Color.white.opacity(0.08)
         }
-        .frame(width: 560, height: 315)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .frame(maxWidth: .infinity)
+        .frame(height: 315)
+        .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
 
         LinearGradient(
           colors: [Color.clear, Color.black.opacity(0.82)],
           startPoint: .top,
           endPoint: .bottom
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
 
+      .frame(maxWidth: .infinity)
         HStack(spacing: 8) {
           Circle()
             .fill(channel.isLive ? Color.red : Color.gray)
@@ -276,9 +281,10 @@ private struct FollowedChannelCard: View {
     .padding(.vertical, 10)
     .frame(width: 560, alignment: .leading)
     .background {
-      RoundedRectangle(cornerRadius: 22)
+      RoundedRectangle(cornerRadius: cardCornerRadius)
         .fill(isFocused ? Color.white.opacity(0.94) : Color.clear)
     }
+    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
     .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
   }
 }

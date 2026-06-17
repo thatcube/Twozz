@@ -92,6 +92,7 @@ struct PlayerView: View {
   @State private var playbackWatchdogTask: Task<Void, Never>?
   @State private var wallClockLatencySeconds: Double?
   @State private var liveEdgeLatencySeconds: Double?
+  @State private var smoothedLatencySeconds: Double?
   @State private var isPlaybackActive = false
   @State private var didRequestPlayback = false
   @State private var lastHardCatchUpJumpAt = Date.distantPast
@@ -110,14 +111,19 @@ struct PlayerView: View {
   @State private var raidBannerDismissTask: Task<Void, Never>?
 
   private let controlsAutoHideSeconds: Double = 10
-  /// Live-edge target. Low-latency mode promotes Twitch prefetch segments, so we
-  /// can sit much closer to the edge; without it we keep a safer cushion.
-  private var targetLiveEdgeSeconds: Double { lowLatencyProxyEnabled ? 2.0 : 3.5 }
-  private var softCatchUpThresholdSeconds: Double { lowLatencyProxyEnabled ? 5 : 8 }
-  // Hard catch-up stays conservative even in low-latency mode: zero-tolerance
-  // seeks toward an edge made of just-promoted prefetch segments tend to
-  // rebuffer and oscillate, which raises latency instead of lowering it.
-  private let hardCatchUpThresholdSeconds: Double = 14
+  // Latency tuning stays at the proven-stable baseline even in low-latency mode.
+  // The latency win comes from the proxy promoting Twitch prefetch segments — not
+  // from starving buffers or chasing the edge, both of which caused freezes and
+  // blur on-device. Freeze-free playback is the top priority, then sharpness.
+  private let targetLiveEdgeSeconds: Double = 3.5
+  private let softCatchUpThresholdSeconds: Double = 8
+  // In low-latency mode the proxy adds prefetch segments to the seekable window,
+  // which inflates the seekable-edge latency metric. A zero-tolerance hard seek
+  // against that inflated edge rebuffers and freezes, so disable hard seeks while
+  // low-latency mode is on and rely on gentle rate correction + a healthy buffer.
+  private var hardCatchUpThresholdSeconds: Double {
+    lowLatencyProxyEnabled ? .greatestFiniteMagnitude : 14
+  }
   private let hardCatchUpCooldownSeconds: Double = 20
   private let maxCatchUpRate: Float = 1.04
   private let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
@@ -1620,15 +1626,25 @@ struct PlayerView: View {
       asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
     }
     let item = AVPlayerItem(asset: asset)
-    // Smaller forward buffer in low-latency mode to stay nearer the edge; a
-    // slightly larger cushion otherwise for smoother default playback.
-    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 0.5 : 1
+    // A slightly larger forward buffer in low-latency mode gives ABR room to
+    // climb to the selected quality (fixes soft 1080p) and resists stalls. The
+    // proxy keeps us near live regardless, so the latency cost is small.
+    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 2 : 1
     applyCaptions(to: item, retries: 12)
     return item
   }
 
+  /// Best estimate of true "behind live" latency. Prefer the PROGRAM-DATE-TIME
+  /// wall-clock delay (actual glass-to-glass) over the seekable-edge distance:
+  /// the low-latency proxy extends the seekable window with prefetch segments,
+  /// which inflates the edge metric and made the old readout read far too high.
+  private var rawLatencySeconds: Double? {
+    wallClockLatencySeconds ?? liveEdgeLatencySeconds
+  }
+
+  /// Smoothed value actually shown in the UI, to stop the number jumping around.
   private var measuredLatencySeconds: Double? {
-    liveEdgeLatencySeconds ?? wallClockLatencySeconds
+    smoothedLatencySeconds ?? rawLatencySeconds
   }
 
   private var latencyColor: Color {
@@ -1643,7 +1659,7 @@ struct PlayerView: View {
       return "Waiting for playback"
     }
     if let seconds = measuredLatencySeconds {
-      return "Estimated latency \(formatLatencySeconds(seconds))"
+      return "~\(formatLatencySeconds(seconds)) behind live"
     }
     return "Latency unavailable"
   }
@@ -1658,10 +1674,9 @@ struct PlayerView: View {
   }
 
   private func configurePlayerForLive() {
-    // In low-latency mode, don't let AVPlayer hold back extra buffer to avoid
-    // stalls — that hold-back is a big part of steady-state latency. Off-mode
-    // keeps the safer default. This is the main non-oscillating latency lever.
-    player.automaticallyWaitsToMinimizeStalling = !lowLatencyProxyEnabled
+    // Always minimize stalling. Disabling this starves the buffer and caused
+    // hard freezes on-device; the latency win comes from the proxy instead.
+    player.automaticallyWaitsToMinimizeStalling = true
   }
 
   private func startPlayback() {
@@ -1675,6 +1690,7 @@ struct PlayerView: View {
       while !Task.isCancelled {
         await MainActor.run {
           updateLatencyMetrics()
+          updateSmoothedLatency()
           applyChatSyncSettings()
         }
         try? await Task.sleep(for: .seconds(1))
@@ -1687,6 +1703,7 @@ struct PlayerView: View {
     latencyTask = nil
     wallClockLatencySeconds = nil
     liveEdgeLatencySeconds = nil
+    smoothedLatencySeconds = nil
     isPlaybackActive = false
     didRequestPlayback = false
     edgeLatencyLowConfidenceStreak = 0
@@ -1769,6 +1786,25 @@ struct PlayerView: View {
     isRecoveringPlayback = true
     await load(maxAttempts: 2, reason: reason, resetMetadata: false)
     isRecoveringPlayback = false
+  }
+
+  /// Exponential moving average of the raw latency estimate so the on-screen
+  /// number is stable instead of flickering between samples. Snaps directly on
+  /// large jumps (e.g. after a re-snap) rather than crawling toward the new value.
+  private func updateSmoothedLatency() {
+    guard isPlaybackActive, let raw = rawLatencySeconds else {
+      smoothedLatencySeconds = nil
+      return
+    }
+    guard let prev = smoothedLatencySeconds else {
+      smoothedLatencySeconds = raw
+      return
+    }
+    if abs(raw - prev) >= 3 {
+      smoothedLatencySeconds = raw
+    } else {
+      smoothedLatencySeconds = prev * 0.6 + raw * 0.4
+    }
   }
 
   private func updateLatencyMetrics() {

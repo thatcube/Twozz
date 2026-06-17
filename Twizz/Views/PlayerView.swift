@@ -550,16 +550,18 @@ struct PlayerView: View {
         useGlassBackground: isGlass
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .overlay(alignment: .topTrailing) {
-        chatSettingsFloating
-          .padding(.top, 16)
-          .padding(.trailing, 16)
-      }
 
       chatComposerBar
     }
     .frame(width: chatWidth)
     .modifier(GlassChatPaneStyle(enabled: isGlass))
+    // Float the settings above the glass clip so the expanding panel is never
+    // cut off by the rounded glass shape.
+    .overlay(alignment: .topTrailing) {
+      chatSettingsFloating
+        .padding(.top, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
+        .padding(.trailing, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
+    }
   }
 
   // MARK: - Floating chat settings

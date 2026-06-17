@@ -112,7 +112,7 @@ struct SettingsView: View {
     HStack(alignment: .center, spacing: 32) {
       VStack(alignment: .leading, spacing: 4) {
         Text(title)
-          .font(.title3.weight(.semibold))
+          .font(.system(size: 32, weight: .bold))
         if let subtitle {
           Text(subtitle)
             .font(.callout)

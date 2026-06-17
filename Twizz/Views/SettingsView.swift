@@ -288,7 +288,7 @@ private struct AboutSection: View {
         QRCodeView(string: Self.repoURL)
           .frame(width: 160, height: 160)
 
-        Text("Scan for source\n& to contribute")
+        Text("Scan to view the\nGitHub repo or donate")
           .font(.caption)
           .multilineTextAlignment(.center)
           .foregroundStyle(.secondary)
@@ -331,6 +331,14 @@ private struct QRCodeView: View {
         .scaledToFit()
         .padding(10)
         .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+          Image("GitHubMark")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 34, height: 34)
+            .padding(7)
+            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
     } else {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .fill(Color.secondary.opacity(0.2))
@@ -341,7 +349,7 @@ private struct QRCodeView: View {
     let context = CIContext()
     guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
     filter.setValue(Data(string.utf8), forKey: "inputMessage")
-    filter.setValue("M", forKey: "inputCorrectionLevel")
+    filter.setValue("H", forKey: "inputCorrectionLevel")
     guard let output = filter.outputImage else { return nil }
     let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
     guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }

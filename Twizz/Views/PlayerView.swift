@@ -945,6 +945,7 @@ struct PlayerView: View {
           // Do not clip this field in SwiftUI: clipping trims the focused tvOS
           // input platter and causes a broken-looking focus state.
           .frame(maxWidth: .infinity)
+          .focusEffectDisabled()
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
             switch direction {
@@ -1009,6 +1010,7 @@ struct PlayerView: View {
         .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
         // Same focus guardrail as the authenticated field above.
         .frame(maxWidth: .infinity)
+        .focusEffectDisabled()
         .focused($focus, equals: .chatInput)
         .onMoveCommand { direction in
           switch direction {
@@ -1792,18 +1794,21 @@ private struct ChatInputShellStyle: ViewModifier {
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if isFocused {
-      content
-        .padding(.horizontal, 16)
-    } else if #available(tvOS 26.0, *) {
+    if #available(tvOS 26.0, *) {
       content
         .padding(.horizontal, 16)
         .clipShape(shape)
         .glassEffect(.regular, in: shape)
+        .scaleEffect(isFocused ? 1.01 : 1.0)
+        .shadow(color: .white.opacity(isFocused ? 0.14 : 0), radius: 12, x: 0, y: 0)
     } else {
       content
         .padding(.horizontal, 16)
         .background(.ultraThinMaterial, in: shape)
+        .overlay(
+          shape
+            .strokeBorder(.white.opacity(isFocused ? 0.18 : 0.10), lineWidth: 1)
+        )
     }
   }
 }
@@ -1852,19 +1857,12 @@ private struct ChatInputField: UIViewRepresentable {
     context.coordinator.allowsEditing = allowsEditing
     context.coordinator.onActivate = onActivate
 
-    // In the focused tvOS state, the system draws a bright field background.
-    // Match text and placeholder colors so content remains readable.
-    let foreground: UIColor = isFocused ? .black : .white
-    let placeholderColor =
-      isFocused
-      ? UIColor.black
-      : UIColor.white.withAlphaComponent(0.45)
-
-    uiView.textColor = foreground
-    uiView.tintColor = foreground
+    uiView.backgroundColor = .clear
+    uiView.textColor = .white
+    uiView.tintColor = .white
     uiView.attributedPlaceholder = NSAttributedString(
       string: placeholder,
-      attributes: [.foregroundColor: placeholderColor]
+      attributes: [.foregroundColor: UIColor.white.withAlphaComponent(isFocused ? 0.55 : 0.45)]
     )
   }
 

@@ -731,33 +731,32 @@ struct PlayerView: View {
               }
             }
 
-          if hasChatDraft {
-            Button {
-              submitChatMessage()
-            } label: {
-              if isSendingChat {
-                ProgressView()
-                  .frame(width: 24, height: 24)
-              } else {
-                Image(systemName: "paperplane.fill")
-                  .font(.system(size: 20, weight: .semibold))
-                  .frame(width: 24, height: 24)
-              }
+          Button {
+            submitChatMessage()
+          } label: {
+            if isSendingChat {
+              ProgressView()
+                .frame(width: 24, height: 24)
+            } else {
+              Image(systemName: "paperplane.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .frame(width: 24, height: 24)
             }
-            .TwizzControlButtonStyle()
-            .disabled(isSendingChat)
-            .focused($focus, equals: .chatSend)
-            .onMoveCommand { direction in
-              switch direction {
-              case .left:
-                focus = .chatInput
-              case .up:
-                focus = .chatSettingsButton
-              default:
-                break
-              }
+          }
+          .TwizzControlButtonStyle()
+          .disabled(isSendingChat || !hasChatDraft)
+          .focused($focus, equals: .chatSend)
+          .opacity(hasChatDraft ? 1 : 0)
+          .allowsHitTesting(hasChatDraft)
+          .onMoveCommand { direction in
+            switch direction {
+            case .left:
+              focus = .chatInput
+            case .up:
+              focus = .chatSettingsButton
+            default:
+              break
             }
-            .transition(.opacity.combined(with: .scale))
           }
         }
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
@@ -770,6 +769,11 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
+    .background(
+      chatLayoutMode == .glass
+        ? AnyShapeStyle(.clear)
+        : AnyShapeStyle(Color(white: 0.07).opacity(0.98))
+    )
   }
 
   private func submitChatMessage() {

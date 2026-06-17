@@ -19,14 +19,14 @@ final class FollowedChannelsService {
             lastUpdatedAt = Date()
         }
 
-                guard auth.isAuthenticated,
-                            let clientID = Bundle.main.object(forInfoDictionaryKey: "TWITCH_CLIENT_ID") as? String,
-                            let accessToken = auth.accessToken,
-                            let userID = auth.userID else {
-                        channels = await fetchDemoChannels()
-                        isUsingDemoData = true
-                        return
-                }
+        guard auth.isAuthenticated,
+              let clientID = resolveClientID(),
+              let accessToken = auth.accessToken,
+              let userID = auth.userID else {
+            channels = await fetchDemoChannels()
+            isUsingDemoData = true
+            return
+        }
 
         do {
             channels = try await fetchLiveFollowedChannels(
@@ -38,10 +38,21 @@ final class FollowedChannelsService {
         } catch {
             channels = await fetchDemoChannels()
             isUsingDemoData = true
-            if errorMessage == nil {
-                errorMessage = "Could not load followed channels. Showing trending channels instead."
-            }
+            let detail = describe(error)
+            errorMessage = "Could not load followed channels (\(detail)). Showing trending channels instead."
         }
+    }
+
+    private func resolveClientID() -> String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "TWITCH_CLIENT_ID") as? String else {
+            return nil
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("$(") || trimmed.contains("TWITCH_CLIENT_ID") {
+            return nil
+        }
+        return trimmed
     }
 
     private func fetchDemoChannels() async -> [FollowedChannel] {
@@ -59,10 +70,39 @@ final class FollowedChannelsService {
     }
 
     private func fetchLiveFollowedChannels(clientID: String, accessToken: String, userID: String) async throws -> [FollowedChannel] {
+        do {
+            let followed = try await fetchFollowedStreamsDirect(clientID: clientID, accessToken: accessToken, userID: userID)
+            return followed.map(mapStream)
+        } catch let error as TwitchHelixRequestError {
+            guard error.status == 404 else {
+                throw error
+            }
+
+            let follows = try await fetchFollowedBroadcasters(clientID: clientID, accessToken: accessToken, userID: userID)
+            if follows.isEmpty {
+                return []
+            }
+
+            let liveByBroadcasterID = try await fetchLiveStreamsByBroadcasterID(
+                clientID: clientID,
+                accessToken: accessToken,
+                broadcasterIDs: follows.map(\.broadcasterID)
+            )
+
+            return follows.compactMap { followed in
+                guard let stream = liveByBroadcasterID[followed.broadcasterID] else {
+                    return nil
+                }
+                return mapStream(stream)
+            }
+        }
+    }
+
+    private func fetchFollowedStreamsDirect(clientID: String, accessToken: String, userID: String) async throws -> [HelixStream] {
         var components = URLComponents(string: "https://api.twitch.tv/helix/streams/followed")!
         components.queryItems = [
             URLQueryItem(name: "user_id", value: userID),
-            URLQueryItem(name: "first", value: "50")
+            URLQueryItem(name: "first", value: "100")
         ]
 
         var req = URLRequest(url: components.url!)
@@ -70,30 +110,91 @@ final class FollowedChannelsService {
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(clientID, forHTTPHeaderField: "Client-Id")
 
-        let (data, response) = try await URLSession.shared.data(for: req)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let (data, status) = try await performHelixRequest(req)
         guard (200...299).contains(status) else {
-            throw URLError(.badServerResponse)
+            throw makeHelixError(context: "loading followed streams", status: status, data: data)
         }
 
-        let payload = try JSONDecoder().decode(FollowedStreamsEnvelope.self, from: data)
-        return payload.data.map { stream in
+        return try JSONDecoder().decode(FollowedStreamsEnvelope.self, from: data).data
+    }
+
+    private func fetchFollowedBroadcasters(clientID: String, accessToken: String, userID: String) async throws -> [FollowedBroadcaster] {
+        var components = URLComponents(string: "https://api.twitch.tv/helix/channels/followed")!
+        components.queryItems = [
+            URLQueryItem(name: "user_id", value: userID),
+            URLQueryItem(name: "first", value: "100")
+        ]
+
+        var req = URLRequest(url: components.url!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+
+        let (data, status) = try await performHelixRequest(req)
+        guard (200...299).contains(status) else {
+            throw makeHelixError(context: "loading followed channels", status: status, data: data)
+        }
+
+        return try JSONDecoder().decode(FollowedChannelsEnvelope.self, from: data).data
+    }
+
+    private func fetchLiveStreamsByBroadcasterID(clientID: String, accessToken: String, broadcasterIDs: [String]) async throws -> [String: HelixStream] {
+        guard !broadcasterIDs.isEmpty else { return [:] }
+
+        let cappedIDs = Array(Set(broadcasterIDs)).prefix(100)
+        var components = URLComponents(string: "https://api.twitch.tv/helix/streams")!
+        components.queryItems = [URLQueryItem(name: "first", value: "100")]
+        components.queryItems?.append(contentsOf: cappedIDs.map { URLQueryItem(name: "user_id", value: $0) })
+
+        var req = URLRequest(url: components.url!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+
+        let (data, status) = try await performHelixRequest(req)
+        guard (200...299).contains(status) else {
+            throw makeHelixError(context: "loading live stream statuses", status: status, data: data)
+        }
+
+        let streams = try JSONDecoder().decode(FollowedStreamsEnvelope.self, from: data).data
+        return Dictionary(uniqueKeysWithValues: streams.map { ($0.userID, $0) })
+    }
+
+    private func mapStream(_ stream: HelixStream) -> FollowedChannel {
             let thumb = stream.thumbnailURL
                 .replacingOccurrences(of: "{width}", with: "640")
                 .replacingOccurrences(of: "{height}", with: "360")
 
-            return FollowedChannel(
-                id: stream.userID,
-                login: stream.userLogin,
-                displayName: stream.userName,
-                title: stream.title,
-                gameName: stream.gameName,
-                viewerCount: stream.viewerCount,
-                thumbnailURL: URL(string: thumb),
-                profileImageURL: nil,
-                isLive: stream.type == "live"
-            )
+        return FollowedChannel(
+            id: stream.userID,
+            login: stream.userLogin,
+            displayName: stream.userName,
+            title: stream.title,
+            gameName: stream.gameName,
+            viewerCount: stream.viewerCount,
+            thumbnailURL: URL(string: thumb),
+            profileImageURL: nil,
+            isLive: stream.type == "live"
+        )
+    }
+
+    private func performHelixRequest(_ req: URLRequest) async throws -> (Data, Int) {
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        return (data, status)
+    }
+
+    private func makeHelixError(context: String, status: Int, data: Data) -> TwitchHelixRequestError {
+        let payload = try? JSONDecoder().decode(TwitchHelixErrorPayload.self, from: data)
+        let message = payload?.message ?? payload?.error ?? String(data: data, encoding: .utf8)
+        return TwitchHelixRequestError(context: context, status: status, message: message)
+    }
+
+    private func describe(_ error: Error) -> String {
+        if let helixError = error as? TwitchHelixRequestError {
+            return helixError.localizedDescription
         }
+        return error.localizedDescription
     }
 
     /// Fetches top live streams anonymously from Twitch GraphQL.
@@ -252,10 +353,10 @@ final class FollowedChannelsService {
 }
 
 private struct FollowedStreamsEnvelope: Decodable {
-    let data: [FollowedStream]
+    let data: [HelixStream]
 }
 
-private struct FollowedStream: Decodable {
+private struct HelixStream: Decodable {
     let userID: String
     let userLogin: String
     let userName: String
@@ -274,5 +375,37 @@ private struct FollowedStream: Decodable {
         case viewerCount = "viewer_count"
         case thumbnailURL = "thumbnail_url"
         case type
+    }
+}
+
+private struct FollowedChannelsEnvelope: Decodable {
+    let data: [FollowedBroadcaster]
+}
+
+private struct FollowedBroadcaster: Decodable {
+    let broadcasterID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case broadcasterID = "broadcaster_id"
+    }
+}
+
+private struct TwitchHelixErrorPayload: Decodable {
+    let error: String?
+    let status: Int?
+    let message: String?
+}
+
+private struct TwitchHelixRequestError: LocalizedError {
+    let context: String
+    let status: Int
+    let message: String?
+
+    var errorDescription: String? {
+        let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            return "\(context): \(trimmed) (HTTP \(status))"
+        }
+        return "\(context) failed (HTTP \(status))"
     }
 }

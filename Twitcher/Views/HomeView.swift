@@ -2,9 +2,9 @@ import SwiftUI
 
 struct HomeView: View {
   private let pagePadding: CGFloat = 44
-  private let channelRailPadding: CGFloat = 16
-  private let channelRailSpacing: CGFloat = 34
-  private let focusedCardScale: CGFloat = 1.03
+  private let channelRailVerticalPadding: CGFloat = 16
+  private let channelRailSpacing: CGFloat = 42
+  private let focusedCardScale: CGFloat = 1.015
 
   @State private var selectedTopTab: TopTab = .home
   @State private var auth = TwitchAuthSession()
@@ -113,20 +113,21 @@ struct HomeView: View {
           ForEach(follows.channels) { channel in
             let isFocused = focusedChannelID == channel.id
 
-            Button {
-              selectedChannel = channel
-            } label: {
-              FollowedChannelCard(channel: channel, isFocused: isFocused)
-            }
-            .buttonStyle(.plain)
-            .focused($focusedChannelID, equals: channel.id)
-            .focusEffectDisabled()
-            .scaleEffect(isFocused ? focusedCardScale : 1)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
-            .zIndex(isFocused ? 2 : 0)
+            FollowedChannelCard(channel: channel, isFocused: isFocused)
+              .contentShape(RoundedRectangle(cornerRadius: 18))
+              .focusable(true)
+              .focused($focusedChannelID, equals: channel.id)
+              .focusEffectDisabled()
+              .onTapGesture {
+                selectedChannel = channel
+              }
+              .accessibilityAddTraits(.isButton)
+              .scaleEffect(isFocused ? focusedCardScale : 1)
+              .animation(.easeOut(duration: 0.14), value: isFocused)
+              .zIndex(isFocused ? 2 : 0)
           }
         }
-        .padding(channelRailPadding)
+        .padding(.vertical, channelRailVerticalPadding)
       }
       .scrollClipDisabled()
 
@@ -270,11 +271,7 @@ private struct FollowedChannelCard: View {
         .lineLimit(1)
     }
     .frame(width: 560, alignment: .leading)
-    .overlay {
-      RoundedRectangle(cornerRadius: 18)
-        .stroke(Color.white.opacity(isFocused ? 0.95 : 0), lineWidth: 3)
-    }
-    .shadow(color: Color.white.opacity(isFocused ? 0.24 : 0), radius: 20, y: 10)
+    .shadow(color: Color.white.opacity(isFocused ? 0.16 : 0), radius: 14, y: 8)
   }
 }
 

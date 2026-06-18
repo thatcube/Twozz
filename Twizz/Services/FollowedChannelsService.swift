@@ -11,6 +11,11 @@ final class FollowedChannelsService {
   ]
 
   private(set) var channels: [FollowedChannel] = []
+  /// Category name -> number of followed channels (online **and** offline) whose
+  /// last/current broadcast was in that category. Drives the personalized
+  /// recommendation profile so it reflects the whole follow list, not just whoever
+  /// happens to be live. Empty in demo mode or when the lookup fails.
+  private(set) var followedCategories: [String: Int] = [:]
   private(set) var isLoading = false
   private(set) var isUsingDemoData = false
   private(set) var errorMessage: String?
@@ -100,6 +105,73 @@ final class FollowedChannelsService {
       errorMessage =
         "Could not load followed channels (\(detail)). Showing trending channels instead."
     }
+
+    // Best-effort: build the full follow-category profile (incl. offline follows)
+    // for personalized recommendations. Never affects the Following rail.
+    if !isUsingDemoData {
+      await refreshFollowedCategories(
+        clientID: clientID,
+        accessToken: auth.accessToken ?? initialAccessToken,
+        userID: userID
+      )
+    } else {
+      followedCategories = [:]
+    }
+  }
+
+  /// Loads the categories of every channel the viewer follows (online and offline)
+  /// and tallies them by category. Best-effort: on any failure the previous
+  /// profile is left intact so a transient error doesn't wipe recommendations.
+  private func refreshFollowedCategories(clientID: String, accessToken: String, userID: String) async {
+    do {
+      let follows = try await fetchFollowedBroadcasters(
+        clientID: clientID, accessToken: accessToken, userID: userID)
+      let ids = follows.map(\.broadcasterID)
+      guard !ids.isEmpty else {
+        followedCategories = [:]
+        return
+      }
+      followedCategories = try await fetchChannelCategoryCounts(
+        clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
+    } catch {
+      // Keep any previously-loaded profile.
+    }
+  }
+
+  /// Tallies last/current broadcast categories for the given broadcasters via
+  /// Helix Get Channel Information (batched at 100 IDs per request).
+  private func fetchChannelCategoryCounts(
+    clientID: String, accessToken: String, broadcasterIDs: [String]
+  ) async throws -> [String: Int] {
+    var counts: [String: Int] = [:]
+    let uniqueIDs = Array(Set(broadcasterIDs))
+
+    for chunk in stride(from: 0, to: uniqueIDs.count, by: 100) {
+      let batch = Array(uniqueIDs[chunk..<min(chunk + 100, uniqueIDs.count)])
+      var components = URLComponents(string: "https://api.twitch.tv/helix/channels")!
+      components.queryItems = batch.map { URLQueryItem(name: "broadcaster_id", value: $0) }
+
+      var req = URLRequest(url: components.url!)
+      req.httpMethod = "GET"
+      req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+      req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+      req.setValue("application/json", forHTTPHeaderField: "Accept")
+      req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+
+      let (data, status) = try await performHelixRequest(req)
+      guard (200...299).contains(status) else {
+        throw makeHelixError(context: "loading followed channel categories", status: status, data: data)
+      }
+
+      let payload = try JSONDecoder().decode(ChannelInformationEnvelope.self, from: data)
+      for channel in payload.data {
+        let name = channel.gameName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !name.isEmpty else { continue }
+        counts[name, default: 0] += 1
+      }
+    }
+
+    return counts
   }
 
   private func resolveClientID() -> String? {
@@ -565,6 +637,18 @@ private struct HelixStream: Decodable {
 
 private struct FollowedChannelsEnvelope: Decodable {
   let data: [FollowedBroadcaster]
+}
+
+private struct ChannelInformationEnvelope: Decodable {
+  let data: [ChannelInformation]
+}
+
+private struct ChannelInformation: Decodable {
+  let gameName: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case gameName = "game_name"
+  }
 }
 
 private struct HelixUsersEnvelope: Decodable {

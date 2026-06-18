@@ -619,7 +619,11 @@ struct HomeView: View {
 
   private func refreshPersonalizedIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshPersonalized() else { return }
-    await personalized.refresh(follows: follows.channels, history: watchHistory)
+    await personalized.refresh(
+      follows: follows.channels,
+      followedCategories: follows.followedCategories,
+      history: watchHistory
+    )
   }
 
   private func publishTopShelfSnapshot() {

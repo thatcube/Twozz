@@ -18,17 +18,23 @@ final class PersonalizedRecommendationsService {
   private(set) var isLoading = false
   private(set) var lastUpdatedAt: Date?
 
-  /// A watch counts for more than a follow: actively choosing to watch a category
-  /// is a stronger taste signal than following a channel (which can go stale).
-  private static let followWeight = 1.0
-  private static let watchWeight = 2.0
+  /// History is normalized independently and weighted more heavily than follows:
+  /// what you actively choose to watch is a stronger, fresher taste signal than
+  /// who you happen to follow. With both present at equal normalized strength,
+  /// watching influences the profile ~2.5x as much as following.
+  private static let followShare = 0.4
+  private static let watchShare = 1.0
   /// Generic catch-all categories ("Just Chatting", etc.) say little about taste,
   /// so they're heavily discounted — same rationale as the channel-DNA engine.
   private static let genericWeight = 0.15
 
   /// Rebuilds recommendations from the current follows and watch history. Clears
   /// the rail when personalization is disabled or there isn't enough signal yet.
-  func refresh(follows: [FollowedChannel], history: WatchHistoryService) async {
+  func refresh(
+    follows: [FollowedChannel],
+    followedCategories: [String: Int],
+    history: WatchHistoryService
+  ) async {
     guard history.isEnabled else {
       channels = []
       lastUpdatedAt = Date()
@@ -41,7 +47,8 @@ final class PersonalizedRecommendationsService {
       lastUpdatedAt = Date()
     }
 
-    let profile = Self.buildProfile(follows: follows, history: history)
+    let profile = Self.buildProfile(
+      follows: follows, followedCategories: followedCategories, history: history)
     guard !profile.categoryWeights.isEmpty else {
       channels = []
       return
@@ -79,31 +86,48 @@ final class PersonalizedRecommendationsService {
 
   private static func buildProfile(
     follows: [FollowedChannel],
+    followedCategories: [String: Int],
     history: WatchHistoryService
   ) -> Profile {
-    var raw: [String: Double] = [:]
-
-    for channel in follows {
-      let game = channel.gameName.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !game.isEmpty, game.caseInsensitiveCompare("live") != .orderedSame else { continue }
-      raw[game, default: 0] += followWeight
+    // Follow signal: prefer the full follow list (online + offline) when we have
+    // it; otherwise fall back to the categories of currently-live follows.
+    var followRaw: [String: Double] = [:]
+    if followedCategories.isEmpty {
+      for channel in follows {
+        let game = channel.gameName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !game.isEmpty, game.caseInsensitiveCompare("live") != .orderedSame else { continue }
+        followRaw[game, default: 0] += 1
+      }
+    } else {
+      for (game, count) in followedCategories {
+        let name = game.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { continue }
+        followRaw[name, default: 0] += Double(count)
+      }
     }
 
-    for (game, weight) in history.categoryAffinities() {
-      raw[game, default: 0] += watchWeight * weight
+    // Normalize each signal to 0...1 on its own so the *relative* influence of
+    // follows vs. watching is governed by the shares above, not by raw counts (a
+    // category with 30 follows shouldn't automatically bury what you actually
+    // watch).
+    let normalizedFollows = normalize(followRaw)
+    let normalizedHistory = normalize(history.categoryAffinities())
+
+    var combined: [String: Double] = [:]
+    for key in Set(normalizedFollows.keys).union(normalizedHistory.keys) {
+      let value = followShare * (normalizedFollows[key] ?? 0)
+        + watchShare * (normalizedHistory[key] ?? 0)
+      combined[key] = value * (ChannelContentService.isGeneric(key) ? genericWeight : 1.0)
     }
 
-    // Down-weight generic directories so a viewer's *specific* niches drive the
-    // recommendations, then normalize so the strongest signal is 1.0.
-    var weighted: [String: Double] = [:]
-    for (name, count) in raw {
-      weighted[name] = count * (ChannelContentService.isGeneric(name) ? genericWeight : 1.0)
-    }
-    let maxWeight = weighted.values.max() ?? 0
-    let normalized: [String: Double] =
-      maxWeight > 0 ? weighted.mapValues { $0 / maxWeight } : [:]
+    let weights = normalize(combined)
+    return Profile(categoryWeights: weights, viewerTier: medianTier(follows: follows, history: history))
+  }
 
-    return Profile(categoryWeights: normalized, viewerTier: medianTier(follows: follows, history: history))
+  /// Scales a weight map so its strongest entry is 1.0; empty in, empty out.
+  private static func normalize(_ weights: [String: Double]) -> [String: Double] {
+    let maxWeight = weights.values.max() ?? 0
+    return maxWeight > 0 ? weights.mapValues { $0 / maxWeight } : [:]
   }
 
   /// Median concurrent-viewer count across the channels the viewer follows and

@@ -172,7 +172,7 @@ struct SettingsView: View {
           AsyncImage(url: auth.profileImageURL) { image in
             image.resizable().scaledToFill()
           } placeholder: {
-            PhIcon(icon: .userCircle, filled: true, size: 64)
+            Icon(glyph: .userCircle, size: 64)
               .foregroundStyle(.secondary)
           }
           .frame(width: 64, height: 64)
@@ -212,7 +212,7 @@ struct SettingsView: View {
         }
       } else {
         HStack(spacing: 24) {
-          PhIcon(icon: .userCirclePlus, filled: false, size: 40)
+          Icon(glyph: .userPlus, size: 40)
             .foregroundStyle(.secondary)
 
           VStack(alignment: .leading, spacing: 4) {
@@ -254,7 +254,7 @@ struct SettingsView: View {
       }
 
       HStack(spacing: 24) {
-        PhIcon(icon: .cards, filled: false, size: 44)
+        Icon(glyph: .cards, size: 44)
           .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
 
         VStack(alignment: .leading, spacing: 6) {
@@ -429,7 +429,7 @@ private struct SettingPill: View {
         }
       }
 
-      PhIcon(icon: .check, bold: true, size: 26)
+      Icon(glyph: .check, size: 26)
         .opacity(isSelected ? 1 : 0)
     }
     .padding(.horizontal, 14)

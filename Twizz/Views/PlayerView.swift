@@ -421,14 +421,14 @@ struct PlayerView: View {
               } placeholder: {
                 ZStack {
                   Circle().fill(.white.opacity(0.16))
-                  PhIcon(icon: .userCircle, filled: true, size: 36)
+                  Icon(glyph: .userCircle, size: 36)
                     .foregroundStyle(.white.opacity(0.85))
                 }
               }
             } else {
               ZStack {
                 Circle().fill(.white.opacity(0.16))
-                PhIcon(icon: .userCircle, filled: true, size: 36)
+                Icon(glyph: .userCircle, size: 36)
                   .foregroundStyle(.white.opacity(0.85))
               }
             }
@@ -487,7 +487,7 @@ struct PlayerView: View {
         Button {
           toggleFollow()
         } label: {
-          PhIcon(icon: .heart, filled: isFollowing, size: 40)
+          Icon(glyph: isFollowing ? .heartFilled : .heart)
             .accessibilityLabel(isFollowing ? "Following" : "Follow")
         }
         .disabled(followInProgress)
@@ -510,11 +510,8 @@ struct PlayerView: View {
           }
           scheduleHide()
         } label: {
-          PhIcon(
-            icon: showChat ? .arrowLineRight : .arrowLineLeft,
-            size: 40
-          )
-          .accessibilityLabel(showChat ? "Hide Chat" : "Show Chat")
+          Icon(glyph: showChat ? .sidebarRightCollapse : .sidebarRightExpand)
+            .accessibilityLabel(showChat ? "Hide Chat" : "Show Chat")
         }
         .focused($focus, equals: .chatToggle)
         .onMoveCommand { direction in
@@ -690,8 +687,8 @@ struct PlayerView: View {
       Button {
         toggleChatSettings()
       } label: {
-        PhIcon(icon: showChatSettings ? .x : .slidersHorizontal, size: 26)
-          .frame(width: 30, height: 30)
+        Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
+          .frame(width: Icon.controlButtonSize, height: Icon.controlButtonSize)
       }
       .TwizzControlButtonStyle()
       .focused($focus, equals: .chatSettingsButton)
@@ -887,7 +884,7 @@ struct PlayerView: View {
         if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
           HStack(spacing: 6) {
             if status.hasPrefix("YouTube chat connected") {
-              PhIcon(icon: .checkCircle, filled: true, size: 18)
+              Icon(glyph: .circleCheckFilled, size: 18)
                 .foregroundStyle(.green)
             }
 
@@ -928,7 +925,7 @@ struct PlayerView: View {
     return Button(action: action) {
       HStack(spacing: 8) {
         if isSelected {
-          PhIcon(icon: .check, bold: true, size: 22)
+          Icon(glyph: .check, size: 24)
         }
         Text(title)
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -1052,7 +1049,7 @@ struct PlayerView: View {
                 ProgressView()
                   .frame(width: 24, height: 24)
               } else {
-                PhIcon(icon: .paperPlaneTilt, filled: true, size: 22)
+                Icon(glyph: .send, size: 24)
                   .frame(width: 24, height: 24)
               }
             }
@@ -1271,7 +1268,7 @@ struct PlayerView: View {
               Text(option)
               Spacer()
               if option == preferredQuality {
-                PhIcon(icon: .check, bold: true, size: 32)
+                Icon(glyph: .check, size: 32)
               }
             }
             .frame(width: 360)
@@ -2142,7 +2139,7 @@ private struct ChatSyncSendIndicator: View {
       let remaining = max(0, deadline.timeIntervalSince(context.date))
       let progress = total > 0 ? min(1, max(0, 1 - remaining / total)) : 1
       HStack(spacing: 10) {
-        PhIcon(icon: .clockCountdown, filled: false, size: 16)
+        Icon(glyph: .clock, size: 16)
           .foregroundStyle(.white.opacity(0.7))
         VStack(alignment: .leading, spacing: 4) {
           Text(remaining > 0.5

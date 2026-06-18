@@ -389,7 +389,7 @@ struct HomeView: View {
       }
       // Future: a "Search" entry point can be added here as another menu item.
     } label: {
-      PhIcon(icon: .faders, filled: false, size: 30)
+      Icon(glyph: .adjustmentsHorizontal, size: 34)
     }
     .accessibilityLabel("View settings")
   }
@@ -427,7 +427,7 @@ struct HomeView: View {
   private var authBanner: some View {
     if !auth.isAuthenticated {
       HStack(spacing: 28) {
-        PhIcon(icon: .userCirclePlus, filled: false, size: 44)
+        Icon(glyph: .userPlus, size: 44)
           .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
 
         VStack(alignment: .leading, spacing: 6) {

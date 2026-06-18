@@ -533,6 +533,7 @@ struct PlayerView: View {
           options: qualityOptions,
           selectedOption: preferredQuality,
           buttonLabel: qualityButtonLabel,
+          isFocused: focus == .quality,
           displayLabel: { qualityDisplayLabel($0) },
           onSelect: { selectQuality(at: $0) },
           focus: $focus,
@@ -2313,6 +2314,7 @@ private struct QualityMenu<F: Hashable>: View, Equatable {
   let options: [String]
   let selectedOption: String
   let buttonLabel: String
+  let isFocused: Bool
   let displayLabel: (String) -> String
   let onSelect: (Int) -> Void
   var focus: FocusState<F>.Binding
@@ -2324,6 +2326,7 @@ private struct QualityMenu<F: Hashable>: View, Equatable {
     lhs.options == rhs.options
       && lhs.selectedOption == rhs.selectedOption
       && lhs.buttonLabel == rhs.buttonLabel
+      && lhs.isFocused == rhs.isFocused
   }
 
   /// Drives the inline `Picker` selection. Reading derives the current index

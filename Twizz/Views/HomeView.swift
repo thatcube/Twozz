@@ -49,6 +49,7 @@ struct HomeView: View {
   enum SidebarTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case browse = "Browse"
+    case search = "Search"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -57,6 +58,7 @@ struct HomeView: View {
       switch self {
       case .home: return "house"
       case .browse: return "square.grid.2x2"
+      case .search: return "magnifyingglass"
       case .settings: return "gearshape"
       }
     }
@@ -88,6 +90,22 @@ struct HomeView: View {
       .tag(SidebarTab.browse)
       .tabItem {
         Label(SidebarTab.browse.rawValue, systemImage: SidebarTab.browse.systemImage)
+      }
+
+      tabContainer {
+        SearchView(
+          auth: auth,
+          selectedChannel: $selectedChannel,
+          channelPageTarget: $channelPageTarget,
+          onSelectCategory: { category in
+            pendingBrowseCategory = category
+            selectedSidebarTab = .browse
+          }
+        )
+      }
+      .tag(SidebarTab.search)
+      .tabItem {
+        Label(SidebarTab.search.rawValue, systemImage: SidebarTab.search.systemImage)
       }
 
       tabContainer {

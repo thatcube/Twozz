@@ -23,7 +23,8 @@ enum ChatAppearance {
 
   /// Extra spacing inserted *between characters* (tracking). A readability aid —
   /// looser character spacing is one of the more evidence-backed dyslexia aids.
-  static let letterSpacingRange: ClosedRange<CGFloat> = 0...12
+  /// Negative values tighten the text for users who prefer denser lines.
+  static let letterSpacingRange: ClosedRange<CGFloat> = -4...12
   static let letterSpacingStep: CGFloat = 1
 
   /// Vertical gap *between* messages.
@@ -170,14 +171,28 @@ enum ChatFontStyle: String, CaseIterable, Identifiable {
     }
   }
 
+  /// Visual-size correction so switching typefaces doesn't jump in size.
+  /// OpenDyslexic renders noticeably larger than the system fonts at the same
+  /// point size (large x-height, heavy forms), so it's scaled down to roughly
+  /// match; the system designs are already consistent with each other.
+  var sizeMultiplier: CGFloat {
+    switch self {
+    case .openDyslexic: return 0.82
+    default: return 1
+    }
+  }
+
   /// Resolve the concrete `Font` for chat text at a given size/weight. Custom
   /// (bundled) families go through `Font.custom` so they scale like the system
-  /// options; everything else uses the matching system design.
+  /// options; everything else uses the matching system design. The size is
+  /// pre-corrected by `sizeMultiplier` so each typeface lands at a comparable
+  /// visual size.
   func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    let resolvedSize = size * sizeMultiplier
     if let customFontName {
-      return Font.custom(customFontName, size: size).weight(weight)
+      return Font.custom(customFontName, size: resolvedSize).weight(weight)
     }
-    return .system(size: size, weight: weight, design: design)
+    return .system(size: resolvedSize, weight: weight, design: design)
   }
 }
 

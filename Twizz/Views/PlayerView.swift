@@ -125,6 +125,7 @@ struct PlayerView: View {
   @State private var isRecoveringPlayback = false
   @State private var lastRecoveryAttemptAt = Date.distantPast
   @State private var lastStallNotificationAt = Date.distantPast
+  @State private var suppressLowLatencyToggleReload = false
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
@@ -401,6 +402,10 @@ struct PlayerView: View {
       applyExperimentalYouTubeSettings()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
+      if suppressLowLatencyToggleReload {
+        suppressLowLatencyToggleReload = false
+        return
+      }
       // Rebuild the asset pipeline so the proxy is attached/detached cleanly.
       configurePlayerForLive()
       Task { await load(reason: "lowLatencyToggle", resetMetadata: false) }
@@ -1850,13 +1855,9 @@ struct PlayerView: View {
       asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
     }
     let item = AVPlayerItem(asset: asset)
-    // A deeper forward buffer in low-latency mode does double duty: it gives
-    // ABR enough headroom to actually climb to the selected quality (fixes soft
-    // 1080p) and it keeps AVPlayer from skipping forward to live when the buffer
-    // runs thin (fixes the "jumps ahead"). The proxy keeps the *content* near
-    // live regardless, so the only cost is a few seconds of latency — which the
-    // user has ranked below freeze-free, smooth, sharp playback.
-    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 5 : 1
+    // Favor smoothness over latency: extra buffer reduces native AVPlayer
+    // skip-ahead behavior and rebuffer risk on throughput dips.
+    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 8 : 3
     return item
   }
 
@@ -2041,6 +2042,17 @@ struct PlayerView: View {
     isRecoveringPlayback = true
     defer { isRecoveringPlayback = false }
 
+    if lowLatencyProxyEnabled {
+      // Hard-stall failsafe: if low-latency mode reaches a confirmed hard stall,
+      // automatically drop back to the stable non-proxy path before reloading.
+      suppressLowLatencyToggleReload = true
+      lowLatencyProxyEnabled = false
+      preferredQuality = "Auto"
+      if showLatencyDiagnostics {
+        logDiagnosticsEvent("failsafe: low-latency OFF")
+      }
+    }
+
     diagReloadCount += 1
     if showLatencyDiagnostics { logDiagnosticsEvent("reload (\(reason))") }
     // A reload restarts the timeline, so clear the jump baseline to avoid
@@ -2189,58 +2201,12 @@ struct PlayerView: View {
     liveEdgeLatency: Double?
   ) {
     guard isPlaybackActive else { return }
-    let now = Date()
-
-    if let liveEdgeLatency {
-      // Ignore tiny/unstable values to avoid oscillation.
-      guard liveEdgeLatency >= 0.8 else {
-        if abs(player.rate - 1.0) > 0.01 {
-          player.playImmediately(atRate: 1.0)
-        }
-        return
-      }
-
-      if liveEdgeLatency >= hardCatchUpThresholdSeconds {
-        guard now.timeIntervalSince(lastHardCatchUpJumpAt) >= hardCatchUpCooldownSeconds else {
-          return
-        }
-
-        guard let range else { return }
-
-        let edge = CMTimeRangeGetEnd(range)
-        let edgeSeconds = CMTimeGetSeconds(edge)
-        let floorSeconds = CMTimeGetSeconds(range.start)
-        let targetSeconds = max(floorSeconds, edgeSeconds - targetLiveEdgeSeconds)
-
-        guard targetSeconds.isFinite else { return }
-        let targetTime = CMTime(
-          seconds: targetSeconds, preferredTimescale: edge.timescale == 0 ? 600 : edge.timescale)
-        player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        player.playImmediately(atRate: 1.0)
-        lastHardCatchUpJumpAt = now
-        wallClockHighLatencyStreak = 0
-        return
-      }
-
-      if liveEdgeLatency > softCatchUpThresholdSeconds {
-        // Mild speed-up only; prioritize smooth playback over aggressive chasing.
-        let overshoot = liveEdgeLatency - softCatchUpThresholdSeconds
-        let targetRate = min(maxCatchUpRate, 1.01 + Float(overshoot / 60.0))
-        if abs(player.rate - targetRate) > 0.01 {
-          player.playImmediately(atRate: targetRate)
-        }
-        wallClockHighLatencyStreak = 0
-        return
-      }
-
-      wallClockHighLatencyStreak = 0
-      if liveEdgeLatency <= targetLiveEdgeSeconds + 0.8, abs(player.rate - 1.0) > 0.01 {
-        player.playImmediately(atRate: 1.0)
-      }
-      return
-    }
-
-    // Fallback for channels where seekable-range edge latency is unreliable.
+    // Stability-first policy: do not perform any automatic seeks or rate changes
+    // during playback. Those interventions can look like user-visible jumps.
+    _ = item
+    _ = range
+    _ = wallClockLatency
+    _ = liveEdgeLatency
     wallClockHighLatencyStreak = 0
     if abs(player.rate - 1.0) > 0.01 {
       player.playImmediately(atRate: 1.0)

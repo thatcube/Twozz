@@ -2417,41 +2417,63 @@ private struct QualityMenu: View, Equatable {
   }
 
   var body: some View {
-    Menu {
-      // A `Picker` is Apple's recommended single-selection control inside a
-      // menu: it renders a checkmark in a reserved leading gutter so every
-      // row's text stays aligned (no per-row shift), unlike hand-placed
-      // checkmark labels.
-      Picker("Quality", selection: selection) {
-        ForEach(Array(options.enumerated()), id: \.element) { index, option in
-          Text(displayLabel(option)).tag(index)
-        }
+    // Invisible barrier: hidden copies of every possible label reserve the
+    // width of the widest one, so the in-player title's available space stays
+    // constant. The barrier draws nothing and isn't focusable — only the Menu
+    // is interactive, and its platter hugs the live label, so the visible
+    // button stays variable-width. Trailing alignment parks the button against
+    // the next control, letting the reserved slack sit (invisibly) on its left.
+    ZStack(alignment: .trailing) {
+      ForEach(reservedWidthLabels, id: \.self) { candidate in
+        qualityLabelText(candidate).hidden()
       }
-      .pickerStyle(.inline)
-      .onAppear(perform: onMenuPresented)
-      .onDisappear(perform: onMenuDismissed)
-    } label: {
-      // Reserve the width of the widest possible quality label (e.g.
-      // "Auto (1080p60)") via hidden copies, then overlay the live label
-      // left-aligned. This keeps the button — and therefore the stream
-      // title's available width — a constant size as the label changes.
-      ZStack(alignment: .leading) {
-        ForEach(reservedWidthLabels, id: \.self) { candidate in
-          qualityLabelText(candidate).hidden()
+
+      Menu {
+        // A `Picker` is Apple's recommended single-selection control inside a
+        // menu: it renders a checkmark in a reserved leading gutter so every
+        // row's text stays aligned (no per-row shift), unlike hand-placed
+        // checkmark labels.
+        Picker("Quality", selection: selection) {
+          ForEach(Array(options.enumerated()), id: \.element) { index, option in
+            Text(displayLabel(option)).tag(index)
+          }
         }
+        .pickerStyle(.inline)
+        .onAppear(perform: onMenuPresented)
+        .onDisappear(perform: onMenuDismissed)
+      } label: {
         qualityLabelText(buttonLabel)
+          .accessibilityLabel("Quality, \(buttonLabel)")
       }
-      .accessibilityLabel("Quality, \(buttonLabel)")
     }
   }
 
+  /// `true` for the live "Auto (1080p60)" form, which we render slightly
+  /// smaller so the parenthetical resolution reads as a secondary detail.
+  private func isAutoResolutionLabel(_ text: String) -> Bool {
+    text.hasPrefix("Auto (")
+  }
+
+  @ViewBuilder
   private func qualityLabelText(_ text: String) -> some View {
-    Text(text)
-      .font(.subheadline)
-      .fontWeight(.semibold)
-      .monospacedDigit()
-      .lineLimit(1)
-      .fixedSize()
+    Group {
+      if isAutoResolutionLabel(text) {
+        Text(text)
+          .font(.system(size: Self.compactQualityFontSize, weight: .semibold))
+      } else {
+        Text(text)
+          .font(.subheadline)
+          .fontWeight(.semibold)
+      }
+    }
+    .monospacedDigit()
+    .lineLimit(1)
+    .fixedSize()
+  }
+
+  /// 20% smaller than `.subheadline`, used for the "Auto (1080p60)" label.
+  private static var compactQualityFontSize: CGFloat {
+    UIFont.preferredFont(forTextStyle: .subheadline).pointSize * 0.8
   }
 }
 

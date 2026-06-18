@@ -14,17 +14,21 @@ actor EmoteCatalogService {
 
         let userID = await twitchUserID(for: key)
 
+        async let twitchGlobal = fetchTwitchGlobal()
         async let sevenTVGlobal = fetch7TVGlobal()
         async let bttvGlobal = fetchBTTVGlobal()
         async let ffzGlobal = fetchFFZGlobal()
 
+        async let twitchChannel = fetchTwitchChannel(login: key)
         async let sevenTVChannel = fetch7TVChannel(twitchUserID: userID)
         async let bttvChannel = fetchBTTVChannel(twitchUserID: userID)
         async let ffzChannel = fetchFFZChannel(channel: key)
 
-        let merged = (await sevenTVGlobal)
+        let merged = (await twitchGlobal)
+            .merging(await sevenTVGlobal) { _, new in new }
             .merging(await bttvGlobal) { _, new in new }
             .merging(await ffzGlobal) { _, new in new }
+            .merging(await twitchChannel) { _, new in new }
             .merging(await sevenTVChannel) { _, new in new }
             .merging(await bttvChannel) { _, new in new }
             .merging(await ffzChannel) { _, new in new }
@@ -39,11 +43,13 @@ actor EmoteCatalogService {
         let key = "__global__"
         if let cached = cache[key] { return cached }
 
+        async let twitchGlobal = fetchTwitchGlobal()
         async let sevenTVGlobal = fetch7TVGlobal()
         async let bttvGlobal = fetchBTTVGlobal()
         async let ffzGlobal = fetchFFZGlobal()
 
-        let merged = (await sevenTVGlobal)
+        let merged = (await twitchGlobal)
+            .merging(await sevenTVGlobal) { _, new in new }
             .merging(await bttvGlobal) { _, new in new }
             .merging(await ffzGlobal) { _, new in new }
 
@@ -69,6 +75,60 @@ actor EmoteCatalogService {
         guard let data = json["data"] as? [String: Any] else { return nil }
         guard let user = data["user"] as? [String: Any] else { return nil }
         return user["id"] as? String
+    }
+
+    /// Twitch's first-party global emotes (Kappa, LUL, PogChamp, …) via the
+    /// public web GQL endpoint. Emote set "0" is the global set.
+    private func fetchTwitchGlobal() async -> [String: URL] {
+        let query = "query { emoteSet(id: \"0\") { emotes { id token } } }"
+        guard let json = await fetchTwitchGQL(query: query) as? [String: Any],
+              let data = json["data"] as? [String: Any],
+              let emoteSet = data["emoteSet"] as? [String: Any],
+              let emotes = emoteSet["emotes"] as? [[String: Any]] else { return [:] }
+        return parseTwitchEmotes(emotes)
+    }
+
+    /// A channel's first-party subscriber/bit emotes (e.g. `alveusCheer`). These
+    /// only resolve on Twitch via the IRC `emotes` tag, so fetching them by name
+    /// lets them render when typed on YouTube too.
+    private func fetchTwitchChannel(login: String) async -> [String: URL] {
+        let query = "query ChannelEmotes($login: String!) { user(login: $login) { subscriptionProducts { emotes { id token } } } }"
+        guard let json = await fetchTwitchGQL(query: query, variables: ["login": login]) as? [String: Any],
+              let data = json["data"] as? [String: Any],
+              let user = data["user"] as? [String: Any],
+              let products = user["subscriptionProducts"] as? [[String: Any]] else { return [:] }
+
+        var map: [String: URL] = [:]
+        for product in products {
+            guard let emotes = product["emotes"] as? [[String: Any]] else { continue }
+            map.merge(parseTwitchEmotes(emotes)) { _, new in new }
+        }
+        return map
+    }
+
+    private func parseTwitchEmotes(_ list: [[String: Any]]) -> [String: URL] {
+        var map: [String: URL] = [:]
+        for emote in list {
+            guard let token = emote["token"] as? String,
+                  let id = emote["id"] as? String,
+                  let url = URL(string: "https://static-cdn.jtvnw.net/emoticons/v2/\(id)/default/dark/2.0") else { continue }
+            map[token] = url
+        }
+        return map
+    }
+
+    private func fetchTwitchGQL(query: String, variables: [String: Any]? = nil) async -> Any? {
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var body: [String: Any] = ["query": query]
+        if let variables { body["variables"] = variables }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        return await fetchJSON(request: req)
     }
 
     private func fetch7TVGlobal() async -> [String: URL] {

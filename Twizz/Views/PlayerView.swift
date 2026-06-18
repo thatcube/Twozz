@@ -2301,10 +2301,12 @@ private struct ChatInputButtonStyle: ButtonStyle {
   }
 }
 
-/// Gives the chat composer field a Liquid Glass capsule at rest and the standard
-/// tvOS focus treatment when focused: a solid white fill with a subtle lift and
-/// drop shadow, matching every other focusable control. Falls back to
-/// `.ultraThinMaterial` on systems older than tvOS 26.
+/// Gives the chat composer field a single Liquid Glass capsule that is the *same*
+/// element at rest and when focused — it simply brightens (white-tinted glass) and
+/// lifts slightly on focus, the way native tvOS controls do, instead of swapping in
+/// a separate opaque card on top. Keeping one view subtree (only the parameters
+/// change with `isFocused`) preserves view identity so SwiftUI animates it as one
+/// element growing. Falls back to `.ultraThinMaterial` on systems older than tvOS 26.
 private struct ChatGlassFieldStyle: ViewModifier {
   let isFocused: Bool
 
@@ -2314,20 +2316,20 @@ private struct ChatGlassFieldStyle: ViewModifier {
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if isFocused {
+    if #available(tvOS 26.0, *) {
       content
-        .background(.white, in: shape)
-        .scaleEffect(1.05)
-        .shadow(color: .black.opacity(0.28), radius: 14, x: 0, y: 8)
-    } else if #available(tvOS 26.0, *) {
-      content
-        .glassEffect(.regular, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 0.75))
-        .shadow(color: .black.opacity(0.18), radius: 5, x: 0, y: 2)
+        .glassEffect(isFocused ? .regular.tint(.white) : .regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.10), lineWidth: 0.75))
+        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .shadow(color: .black.opacity(isFocused ? 0.22 : 0.18),
+                radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
     } else {
       content
-        .background(.ultraThinMaterial, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 0.75))
+        .background(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.ultraThinMaterial), in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.10), lineWidth: 0.75))
+        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .shadow(color: .black.opacity(isFocused ? 0.22 : 0.18),
+                radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
     }
   }
 }

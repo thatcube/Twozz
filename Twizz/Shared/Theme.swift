@@ -124,7 +124,7 @@ struct ThemePalette: Equatable {
     playerBackdrop: .black,
     chatSideSurface: Color(white: 0.07).opacity(0.96),
     chatSidePrimaryText: .white,
-    topGlow: ThemePalette.brandPurple.opacity(0.18)
+    topGlow: ThemePalette.brandPurple.opacity(0.10)
   )
 
   static let light = ThemePalette(
@@ -138,7 +138,7 @@ struct ThemePalette: Equatable {
     playerBackdrop: Color(red: 0.90, green: 0.90, blue: 0.92),
     chatSideSurface: Color(white: 0.97).opacity(0.98),
     chatSidePrimaryText: Color(white: 0.12),
-    topGlow: ThemePalette.brandPurple.opacity(0.13)
+    topGlow: ThemePalette.brandPurple.opacity(0.07)
   )
 
   /// Twitch brand purple (#9146FF).

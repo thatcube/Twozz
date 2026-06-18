@@ -99,7 +99,7 @@ private struct BrowseCategoriesView: View {
               category: category,
               isFocused: isFocused
             )
-            .contentShape(RoundedRectangle(cornerRadius: 20))
+            .contentShape(RoundedRectangle(cornerRadius: 24))
             .focusable(true)
             .focused($focusedID, equals: category.id)
             .prefersDefaultFocus(
@@ -262,7 +262,7 @@ private struct CategoryCard: View {
 
   @Environment(\.themePalette) private var palette
 
-  private let cornerRadius: CGFloat = 20
+  private let cornerRadius: CGFloat = 24
   private let artRatio: CGFloat = 285.0 / 380.0
 
   var body: some View {

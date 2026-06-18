@@ -385,7 +385,7 @@ struct HomeView: View {
                 isFocused: isFocused,
                 width: categoryWidth
               )
-              .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+              .contentShape(RoundedRectangle(cornerRadius: 24))
               .focusable(true)
               .focused($focusedItemID, equals: itemID)
               .focusEffectDisabled()
@@ -593,7 +593,7 @@ private struct HomeCategoryCard: View {
 
   @Environment(\.themePalette) private var palette
 
-  private let cornerRadius: CGFloat = 16
+  private let cornerRadius: CGFloat = 24
   private let artRatio: CGFloat = 285.0 / 380.0
 
   var body: some View {

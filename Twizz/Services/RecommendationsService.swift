@@ -26,8 +26,8 @@ final class RecommendationsService {
             async let channelsTask = fetchRecommendedChannels(limit: 24)
             async let categoriesTask = fetchRecommendedCategories(limit: 20)
             let (loadedChannels, loadedCategories) = try await (channelsTask, categoriesTask)
-            channels = loadedChannels.filter { !$0.isMature }
-            categories = loadedCategories.filter { !$0.isMature }
+            channels = loadedChannels
+            categories = loadedCategories
         } catch {
             errorMessage = "Could not load recommendations right now."
         }

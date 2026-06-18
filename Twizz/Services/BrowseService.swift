@@ -20,7 +20,7 @@ final class BrowseService {
         defer { isLoadingCategories = false }
 
         do {
-            categories = try await fetchTopCategories(limit: 40).filter { !$0.isMature }
+            categories = try await fetchTopCategories(limit: 40)
         } catch {
             categoryErrorMessage = "Could not load categories."
         }
@@ -31,11 +31,6 @@ final class BrowseService {
         streamsErrorMessage = nil
         categoryStreams = []
         defer { isLoadingStreams = false }
-
-        guard !category.isMature else {
-            streamsErrorMessage = "Mature categories are hidden in Twizz."
-            return
-        }
 
         do {
             // Twitch's anonymous GQL client rejects cursor pagination (integrity
@@ -185,7 +180,6 @@ final class BrowseService {
                 isMature: node.isMature ?? false
             )
         }
-        .filter { !$0.isMature }
     }
 
     // MARK: - GQL Transport

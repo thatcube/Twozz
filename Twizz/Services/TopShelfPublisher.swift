@@ -23,7 +23,7 @@ enum TopShelfPublisher {
     ) {
         var sections: [TopShelfSnapshot.Section] = []
 
-        let primaryItems = makeItems(from: followed.filter { $0.isLive && !$0.isMature })
+        let primaryItems = makeItems(from: followed.filter(\.isLive))
         if !primaryItems.isEmpty {
             sections.append(
                 TopShelfSnapshot.Section(
@@ -37,9 +37,7 @@ enum TopShelfPublisher {
         // Avoid duplicating channels already shown in the primary section.
         let primaryLogins = Set(primaryItems.map(\.login))
         let recommendedItems = makeItems(
-            from: recommended.filter {
-                $0.isLive && !$0.isMature && !primaryLogins.contains($0.login.lowercased())
-            }
+            from: recommended.filter { $0.isLive && !primaryLogins.contains($0.login.lowercased()) }
         )
         if !recommendedItems.isEmpty {
             sections.append(

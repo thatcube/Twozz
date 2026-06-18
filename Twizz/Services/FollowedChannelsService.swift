@@ -142,7 +142,6 @@ final class FollowedChannelsService {
       return followed.map { stream in
         mapStream(stream, profileImageURL: profileImagesByUserID[stream.userID])
       }
-      .filter { !$0.isMature }
     } catch let error as TwitchHelixRequestError {
       guard error.status == 404 else {
         throw error
@@ -172,7 +171,6 @@ final class FollowedChannelsService {
           }
           return mapStream(stream, profileImageURL: profileImagesByUserID[followed.broadcasterID])
         }
-        .filter { !$0.isMature }
       } catch let fallbackError as TwitchHelixRequestError {
         // Some clients/tokens occasionally fail for /channels/followed but
         // still allow resolving the current user via /users.
@@ -199,7 +197,6 @@ final class FollowedChannelsService {
         return followed.map { stream in
           mapStream(stream, profileImageURL: profileImagesByUserID[stream.userID])
         }
-        .filter { !$0.isMature }
       }
     }
   }
@@ -483,7 +480,7 @@ final class FollowedChannelsService {
       )
     }
 
-    return channels.filter { !$0.isMature }
+    return channels
   }
 
   private static let demoChannels: [FollowedChannel] = [

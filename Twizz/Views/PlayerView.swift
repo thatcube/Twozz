@@ -1319,8 +1319,9 @@ struct PlayerView: View {
                 activationToken: chatInputActivationToken,
                 onSubmit: submitChatMessage
               )
+              .frame(width: 1, height: 1)
               .allowsHitTesting(false)
-              .frame(maxWidth: .infinity, maxHeight: .infinity)
+              .accessibilityHidden(true)
 
               Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
                 .font(.subheadline)

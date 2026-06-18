@@ -2,6 +2,12 @@ import AVKit
 import SwiftUI
 import UIKit
 
+/// AVPlayer host that is intentionally non-interactive: Twizz handles all remote
+/// input in SwiftUI and never lets AVKit consume transport/scrub commands.
+private final class PassivePlayerViewController: AVPlayerViewController {
+  override var canBecomeFirstResponder: Bool { false }
+}
+
 /// Hosts an embedded `AVPlayerViewController` with native controls disabled.
 /// This keeps custom Twizz UI while preserving Apple's media rendering paths
 /// better than a raw `AVPlayerLayer`.
@@ -9,12 +15,17 @@ struct VideoSurface: UIViewControllerRepresentable {
   let player: AVPlayer
 
   func makeUIViewController(context: Context) -> AVPlayerViewController {
-    let controller = AVPlayerViewController()
+    let controller = PassivePlayerViewController()
     controller.player = player
     controller.showsPlaybackControls = false
+    controller.requiresLinearPlayback = true
+    controller.allowsPictureInPicturePlayback = false
     controller.videoGravity = .resizeAspect
     // Keep output mode stable while toggling in-app layouts (chat on/off).
     controller.appliesPreferredDisplayCriteriaAutomatically = false
+    // Prevent AVKit's internal gesture/press recognizers from handling Siri
+    // Remote input (seek/scrub/skip). Twizz UI remains fully interactive.
+    controller.view.isUserInteractionEnabled = false
     controller.view.backgroundColor = .black
     return controller
   }
@@ -24,8 +35,11 @@ struct VideoSurface: UIViewControllerRepresentable {
       controller.player = player
     }
     controller.showsPlaybackControls = false
+    controller.requiresLinearPlayback = true
+    controller.allowsPictureInPicturePlayback = false
     controller.videoGravity = .resizeAspect
     controller.appliesPreferredDisplayCriteriaAutomatically = false
+    controller.view.isUserInteractionEnabled = false
   }
 }
 

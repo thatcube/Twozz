@@ -1697,12 +1697,9 @@ struct PlayerView: View {
       } label: {
         Text("Reset to Normal")
           .font(.subheadline.weight(.semibold))
-          .padding(.horizontal, 24)
-          .padding(.vertical, 9)
-          .modifier(ChatSettingsGlassStyle(isFocused: focus == .chatResetButton, isSelected: false))
       }
-      .buttonStyle(ChatSettingsPillButtonStyle())
-      .focusEffectDisabled()
+      .chatSettingsGlassButton()
+      .buttonBorderShape(.capsule)
       .focused($focus, equals: .chatResetButton)
       .focusSection()
     }
@@ -1724,9 +1721,7 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    let isFocused = focus == focusTag
-
-    return Button(action: action) {
+    Button(action: action) {
       HStack(spacing: 8) {
         if let icon {
           Icon(glyph: icon, size: 22)
@@ -1737,14 +1732,9 @@ struct PlayerView: View {
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
       }
-      .padding(.horizontal, 22)
-      .padding(.vertical, 8)
-      .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: isSelected))
     }
-    // Passthrough press style; the focus lift comes from ChatSettingsGlassStyle
-    // so it matches the app's liquid-glass focus treatment.
-    .buttonStyle(ChatSettingsPillButtonStyle())
-    .focusEffectDisabled()
+    .chatSettingsGlassButton(isSelected: isSelected)
+    .buttonBorderShape(.capsule)
     .focused($focus, equals: focusTag)
   }
 
@@ -1756,9 +1746,7 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    let isFocused = focus == focusTag
-
-    return Button(action: action) {
+    Button(action: action) {
       HStack(spacing: 10) {
         Text(title)
           .font(.subheadline.weight(.semibold))
@@ -1769,7 +1757,7 @@ struct PlayerView: View {
         if let detail {
           Text(detail)
             .font(.caption)
-            .foregroundStyle(isFocused ? AnyShapeStyle(.black.opacity(0.55)) : AnyShapeStyle(.white.opacity(0.55)))
+            .foregroundStyle(.secondary)
             .lineLimit(1)
         }
 
@@ -1779,13 +1767,9 @@ struct PlayerView: View {
           .rotationEffect(.degrees(180))
           .opacity(0.7)
       }
-      .padding(.horizontal, 26)
-      .padding(.vertical, 12)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: false))
     }
-    .buttonStyle(ChatSettingsPillButtonStyle())
-    .focusEffectDisabled()
+    .chatSettingsGlassButton()
     .focused($focus, equals: focusTag)
   }
 
@@ -1800,12 +1784,9 @@ struct PlayerView: View {
           Text("Back")
             .font(.subheadline.weight(.semibold))
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 8)
-        .modifier(ChatSettingsGlassStyle(isFocused: focus == .chatAdvancedBack, isSelected: false))
       }
-      .buttonStyle(ChatSettingsPillButtonStyle())
-      .focusEffectDisabled()
+      .chatSettingsGlassButton()
+      .buttonBorderShape(.capsule)
       .focused($focus, equals: .chatAdvancedBack)
 
       Text(title)
@@ -1853,9 +1834,10 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 22)
     .padding(.vertical, 8)
-    // Match the neutral Liquid Glass of the pills instead of a flat translucent
-    // fill, so the stepper row reads as the same material as every other control.
-    .modifier(ChatSettingsRowGlassBackground())
+    // A subtle non-glass grouping fill: this row is a static container holding a
+    // glass +/- control, so it must NOT be glass itself (glass-on-glass is what
+    // made the controls look flat). The native glass steppers pop against it.
+    .background(Capsule(style: .continuous).fill(.white.opacity(0.06)))
     .focusSection()
   }
 
@@ -1865,16 +1847,12 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    let isFocused = focus == focusTag
-
-    return Button(action: action) {
+    Button(action: action) {
       Icon(glyph: glyph, size: 22)
-        .frame(width: 42, height: 34)
-        .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: false))
         .opacity(enabled ? 1.0 : 0.35)
     }
-    .buttonStyle(ChatSettingsPillButtonStyle())
-    .focusEffectDisabled()
+    .chatSettingsGlassButton()
+    .buttonBorderShape(.circle)
     .focused($focus, equals: focusTag)
   }
 
@@ -3113,12 +3091,28 @@ extension View {
       self.buttonStyle(.automatic)
     }
   }
-}
 
-private struct ChatSettingsPillButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .opacity(configuration.isPressed ? 0.92 : 1.0)
+  /// Native Liquid Glass for the compact chat-settings controls: the exact same
+  /// `.glass` / `.glassProminent` button styles the app's main SettingsView
+  /// uses, so these pills/rows look and focus identically to the rest of the
+  /// app (and to the playback controls on the player bar) instead of a custom
+  /// imitation. Selected options render prominent; everything else is plain
+  /// glass. Falls back to bordered styles before tvOS 26.
+  @ViewBuilder
+  fileprivate func chatSettingsGlassButton(isSelected: Bool = false) -> some View {
+    if #available(tvOS 26.0, *) {
+      if isSelected {
+        self.buttonStyle(.glassProminent)
+      } else {
+        self.buttonStyle(.glass)
+      }
+    } else {
+      if isSelected {
+        self.buttonStyle(.borderedProminent)
+      } else {
+        self.buttonStyle(.bordered)
+      }
+    }
   }
 }
 
@@ -3128,85 +3122,6 @@ private struct ChatSettingsHeightKey: PreferenceKey {
   static var defaultValue: CGFloat { 0 }
   static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
     value = max(value, nextValue())
-  }
-}
-
-/// The neutral Liquid Glass backing for a non-button settings row (e.g. the
-/// stepper row) so it matches the pills' resting material instead of a flat
-/// translucent fill. No focus/selection states — the focusable buttons inside
-/// carry those themselves.
-private struct ChatSettingsRowGlassBackground: ViewModifier {
-  private var shape: Capsule { Capsule(style: .continuous) }
-
-  @ViewBuilder
-  func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
-      content
-        .glassEffect(.regular, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    } else {
-      content
-        .background(shape.fill(.ultraThinMaterial))
-        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    }
-  }
-}
-
-/// The focus/selection treatment for the compact chat-settings controls. Modeled
-/// on `ChatGlassFieldStyle` (the chat input): one view subtree whose parameters
-/// change with `isFocused`/`isSelected`, so it lifts as a single Liquid Glass
-/// element — brightening (white-tinted glass), scaling slightly, and casting a
-/// soft shadow on focus — instead of swapping in an opaque card or using manual
-/// opacity stacks. Tuned more compact than the chat input to keep the efficient
-/// pill sizing. Falls back to `.ultraThinMaterial` before tvOS 26.
-private struct ChatSettingsGlassStyle: ViewModifier {
-  let isFocused: Bool
-  var isSelected: Bool = false
-
-  // A Capsule keeps these controls fully rounded so they match the chat input
-  // and the rest of the app's Liquid Glass controls.
-  private var shape: Capsule {
-    Capsule(style: .continuous)
-  }
-
-  // Selection is shown with a crisp white hairline ring rather than a glass
-  // tint: a white-tinted glass blends with whatever (often saturated) video sits
-  // behind the panel and muddies to brown/taupe, which read as a different
-  // material than the neutral native glass used by the chat input and the
-  // playback controls. A ring is background-independent, so the selected pill
-  // stays the same neutral Liquid Glass as everything else.
-  private var strokeOpacity: Double {
-    if isFocused { return 0.0 }
-    return isSelected ? 0.85 : 0.16
-  }
-
-  private var strokeWidth: Double {
-    isSelected && !isFocused ? 2.5 : 1
-  }
-
-  @ViewBuilder
-  func body(content: Content) -> some View {
-    let tinted = content
-      .foregroundStyle(isFocused ? AnyShapeStyle(.black) : AnyShapeStyle(.white))
-    if #available(tvOS 26.0, *) {
-      tinted
-        // Same native Liquid Glass treatment as the chat input and playback
-        // controls: neutral `.regular` glass at rest, a bright white glass +
-        // black text on focus, scaling and shadowing as one element. Selection
-        // is the ring above, not a tint, so the material always matches.
-        .glassEffect(isFocused ? .regular.tint(.white) : .regular, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: strokeWidth))
-        .scaleEffect(isFocused ? 1.05 : 1.0)
-        .shadow(color: .black.opacity(isFocused ? 0.25 : 0.0),
-                radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)
-    } else {
-      tinted
-        .background(shape.fill(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.ultraThinMaterial)))
-        .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: strokeWidth))
-        .scaleEffect(isFocused ? 1.05 : 1.0)
-        .shadow(color: .black.opacity(isFocused ? 0.25 : 0.0),
-                radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)
-    }
   }
 }
 

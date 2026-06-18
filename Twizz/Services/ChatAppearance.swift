@@ -23,8 +23,9 @@ enum ChatAppearance {
 
   /// Extra spacing inserted *between characters* (tracking). A readability aid —
   /// looser character spacing is one of the more evidence-backed dyslexia aids.
-  /// Negative values tighten the text for users who prefer denser lines.
-  static let letterSpacingRange: ClosedRange<CGFloat> = -8...12
+  /// Negative values tighten the text for users who prefer denser lines; the
+  /// floor stops short of the point where glyphs collide and become illegible.
+  static let letterSpacingRange: ClosedRange<CGFloat> = -5...12
   static let letterSpacingStep: CGFloat = 1
 
   /// Vertical gap *between* messages.

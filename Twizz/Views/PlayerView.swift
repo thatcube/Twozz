@@ -208,6 +208,10 @@ struct PlayerView: View {
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
+  /// A just-activated settings control to briefly defend against tvOS's
+  /// transient focus jump when toggling an option resizes the panel.
+  @State private var chatFocusPin: Focusable?
+  @State private var chatFocusPinTask: Task<Void, Never>?
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
   @State private var outgoingRaid: OutgoingRaidEvent?
@@ -546,8 +550,22 @@ struct PlayerView: View {
     .onChange(of: focus) { _, newFocus in
       if showChatSettings {
         guard let newFocus else {
-          focus = lastChatSettingsFocus
+          focus = chatFocusPin ?? lastChatSettingsFocus
           return
+        }
+
+        // A control was just activated: defend it against the transient focus
+        // jump tvOS performs when toggling an option resizes the panel, which
+        // dumps focus onto the section's first focusable (the back button). We
+        // only revert that specific spurious target so deliberate navigation to
+        // any other control is never fought, and consume the pin after one move.
+        if let pin = chatFocusPin, newFocus != pin {
+          chatFocusPin = nil
+          chatFocusPinTask?.cancel()
+          if newFocus == firstChatSettingsFocus {
+            focus = pin
+            return
+          }
         }
 
         if isChatSettingsFocus(newFocus) {
@@ -1794,7 +1812,10 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    Button(action: action) {
+    Button {
+      pinChatFocus(focusTag)
+      action()
+    } label: {
       HStack(spacing: 8) {
         if let icon {
           Icon(glyph: icon, size: 22)
@@ -1937,13 +1958,32 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    Button(action: action) {
+    Button {
+      pinChatFocus(focusTag)
+      action()
+    } label: {
       Icon(glyph: glyph, size: 22)
         .opacity(enabled ? 1.0 : 0.35)
     }
     .chatSettingsGlassButton()
     .buttonBorderShape(.circle)
     .focused($focus, equals: focusTag)
+  }
+
+  /// Briefly "pin" focus to a just-activated settings control. Toggling an
+  /// option can resize the panel, and tvOS responds by yanking focus to the
+  /// section's first focusable (the back button). For a short window the focus
+  /// handler reverts any such unsolicited jump back to the control the user
+  /// actually used; the timer is only a safety net since the pin is consumed on
+  /// the first reverted move.
+  private func pinChatFocus(_ tag: Focusable) {
+    chatFocusPin = tag
+    chatFocusPinTask?.cancel()
+    chatFocusPinTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(600))
+      guard !Task.isCancelled else { return }
+      chatFocusPin = nil
+    }
   }
 
   private func chatStepperConfig(

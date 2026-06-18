@@ -145,6 +145,7 @@ struct PlayerView: View {
   @State private var diagInstabilityScore = 0
   @State private var diagLastInstabilityAt: Date?
   @State private var diagAdaptiveFallbackCount = 0
+  @State private var diagHealCount = 0
 
   private let controlsAutoHideSeconds: Double = 10
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
@@ -175,8 +176,10 @@ struct PlayerView: View {
   private let resolveTimeoutSeconds: Double = 18
   private let startupPlaybackTimeoutSeconds: Double = 14
   private let startupPlaybackPollMilliseconds: UInt64 = 500
-  private let stalledPlaybackThresholdSamples = 6
-  private let playbackWatchdogIntervalSeconds: Double = 2
+  private let stalledPlaybackThresholdSamples = 3
+  private let playbackWatchdogIntervalSeconds: Double = 1
+  private let stallHealProbeSeconds: Double = 1.2
+  private let stallHealProgressThresholdSeconds: Double = 0.12
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
@@ -331,6 +334,7 @@ struct PlayerView: View {
       guard let stalledItem = notification.object as? AVPlayerItem else { return }
       guard stalledItem == player.currentItem else { return }
       markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
+      Task { await recoverFromPlaybackStall(reason: "stall notification") }
     }
     .onDisappear {
       hideTask?.cancel()
@@ -738,7 +742,9 @@ struct PlayerView: View {
     }
     lines.append("Edge gap: \(edge) · Encoder: \(wall)")
     lines.append("Chat hold: \(chatHold)")
-    lines.append("Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
+    lines.append(
+      "Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Heals: \(diagHealCount) · Reloads: \(diagReloadCount)"
+    )
     lines.append("Stability score: \(diagInstabilityScore) · Auto-fallbacks: \(diagAdaptiveFallbackCount)")
 
     return lines
@@ -895,6 +901,7 @@ struct PlayerView: View {
     diagInstabilityScore = 0
     diagLastInstabilityAt = nil
     diagAdaptiveFallbackCount = 0
+    diagHealCount = 0
   }
 
   // MARK: - Controls visibility
@@ -2055,6 +2062,14 @@ struct PlayerView: View {
   private func recoverFromPlaybackStall(reason: String) async {
     guard !isRecoveringPlayback else { return }
     isRecoveringPlayback = true
+    defer { isRecoveringPlayback = false }
+
+    // Fast path: try an in-place seek-to-live heal first so we can recover from
+    // transient stalls without a full asset reload.
+    if await attemptInPlaceStallHeal(reason: reason) {
+      return
+    }
+
     diagReloadCount += 1
     if showLatencyDiagnostics { logDiagnosticsEvent("reload (\(reason))") }
     // A reload restarts the timeline, so clear the jump baseline to avoid
@@ -2062,7 +2077,46 @@ struct PlayerView: View {
     diagLastPlayheadSeconds = nil
     diagLastSampleAt = nil
     await load(maxAttempts: 2, reason: reason, resetMetadata: false)
-    isRecoveringPlayback = false
+  }
+
+  private func attemptInPlaceStallHeal(reason: String) async -> Bool {
+    guard let item = player.currentItem,
+      let range = item.seekableTimeRanges.last?.timeRangeValue
+    else { return false }
+
+    let before = CMTimeGetSeconds(item.currentTime())
+    let edge = CMTimeRangeGetEnd(range)
+    let edgeSeconds = CMTimeGetSeconds(edge)
+    let floorSeconds = CMTimeGetSeconds(range.start)
+    guard before.isFinite, edgeSeconds.isFinite, floorSeconds.isFinite else { return false }
+
+    let targetSeconds = max(floorSeconds, edgeSeconds - max(targetLiveEdgeSeconds, 1.8))
+    let target = CMTime(
+      seconds: targetSeconds, preferredTimescale: edge.timescale == 0 ? 600 : edge.timescale)
+    _ = await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+    player.playImmediately(atRate: 1.0)
+    if showLatencyDiagnostics { logDiagnosticsEvent("heal seek (\(reason))") }
+
+    try? await Task.sleep(for: .seconds(stallHealProbeSeconds))
+    guard player.currentItem === item else { return false }
+
+    let after = CMTimeGetSeconds(item.currentTime())
+    guard after.isFinite else { return false }
+    if after > before + stallHealProgressThresholdSeconds {
+      diagHealCount += 1
+      stalledPlaybackSamples = 0
+      lastObservedPlaybackTimeSeconds = after
+      diagWasStalled = false
+      diagIsFrozen = false
+      diagFrozenSince = nil
+      if showLatencyDiagnostics {
+        logDiagnosticsEvent("heal success (+\(diagFormat(after - before, decimals: 1))s)")
+      }
+      return true
+    }
+
+    if showLatencyDiagnostics { logDiagnosticsEvent("heal failed (\(reason))") }
+    return false
   }
 
   /// Exponential moving average of the raw latency estimate so the on-screen

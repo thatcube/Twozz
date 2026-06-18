@@ -184,6 +184,9 @@ struct PlayerView: View {
   @State private var lastObservedPlaybackTimeSeconds: Double?
   @State private var stalledPlaybackSamples = 0
   @State private var isRecoveringPlayback = false
+  @State private var lastRecoveryAttemptAt = Date.distantPast
+  @State private var lastStallNotificationAt = Date.distantPast
+  @State private var suppressLowLatencyToggleReload = false
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
@@ -207,9 +210,6 @@ struct PlayerView: View {
   @State private var diagIsFrozen = false
   @State private var diagFrozenSince: Date?
   @State private var diagSessionStartedAt: Date?
-  @State private var diagInstabilityScore = 0
-  @State private var diagLastInstabilityAt: Date?
-  @State private var diagAdaptiveFallbackCount = 0
 
   private let controlsAutoHideSeconds: Double = 10
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
@@ -252,16 +252,14 @@ struct PlayerView: View {
   private let latencyPlausibleFloorSeconds: Double = 2
   private let latencyStableDeltaSeconds: Double = 2
   private let playbackWatchdogIntervalSeconds: Double = 2
+  private let hardStallRecoverySeconds: Double = 10
+  private let recoveryCooldownSeconds: Double = 15
+  private let stallNotificationDebounceSeconds: Double = 2.5
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
   private let diagJumpForwardThresholdSeconds: Double = 2.0
   private let diagJumpBackwardThresholdSeconds: Double = 1.0
-  // Stability guard: if stalls/jumps stack up within this rolling window while
-  // pinned to a fixed rendition, fall back to Auto/adaptive before we keep
-  // fighting the network with no ABR escape hatch.
-  private let diagInstabilityWindowSeconds: Double = 75
-  private let diagFallbackScoreThreshold = 3
   private let chatReplayMessageCount = 30
   private let chatComposerRowHeight: CGFloat = 62
 
@@ -434,6 +432,9 @@ struct PlayerView: View {
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) { notification in
       guard let stalledItem = notification.object as? AVPlayerItem else { return }
       guard stalledItem == player.currentItem else { return }
+      let now = Date()
+      guard now.timeIntervalSince(lastStallNotificationAt) >= stallNotificationDebounceSeconds else { return }
+      lastStallNotificationAt = now
       markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
     }
     .onDisappear {
@@ -516,6 +517,10 @@ struct PlayerView: View {
       applyExperimentalYouTubeSettings()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
+      if suppressLowLatencyToggleReload {
+        suppressLowLatencyToggleReload = false
+        return
+      }
       // Rebuild the asset pipeline so the proxy is attached/detached cleanly.
       configurePlayerForLive()
       Task { await load(reason: "lowLatencyToggle", resetMetadata: false) }
@@ -942,7 +947,6 @@ struct PlayerView: View {
     lines.append("Edge gap: \(edge) · Encoder: \(wall)")
     lines.append("Chat hold: \(chatHold)")
     lines.append("Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
-    lines.append("Stability score: \(diagInstabilityScore) · Auto-fallbacks: \(diagAdaptiveFallbackCount)")
 
     return lines
   }
@@ -1002,34 +1006,6 @@ struct PlayerView: View {
       if showLatencyDiagnostics {
         logDiagnosticsEvent("stall (\(reason))")
       }
-      registerInstability(points: 2, reason: reason)
-    }
-  }
-
-  private func registerInstability(points: Int, reason: String) {
-    let now = Date()
-    if let last = diagLastInstabilityAt, now.timeIntervalSince(last) > diagInstabilityWindowSeconds {
-      diagInstabilityScore = 0
-    }
-    diagLastInstabilityAt = now
-    diagInstabilityScore += points
-    maybeTriggerAdaptiveFallback(trigger: reason)
-  }
-
-  /// If fixed-quality playback becomes unstable, switch to Auto/adaptive so ABR
-  /// can step down instead of stalling/jumping repeatedly.
-  private func maybeTriggerAdaptiveFallback(trigger: String) {
-    guard diagInstabilityScore >= diagFallbackScoreThreshold else { return }
-    guard preferredQuality != "Auto" else { return }
-    guard playback != nil else { return }
-
-    preferredQuality = "Auto"
-    applyQualityPreference("Auto")
-    diagAdaptiveFallbackCount += 1
-    diagInstabilityScore = 0
-
-    if showLatencyDiagnostics {
-      logDiagnosticsEvent("stability fallback -> Auto (\(trigger))")
     }
   }
 
@@ -1061,11 +1037,9 @@ struct PlayerView: View {
       if forwardDrift >= diagJumpForwardThresholdSeconds {
         diagJumpCount += 1
         logDiagnosticsEvent("jump +\(diagFormat(forwardDrift, decimals: 1))s forward")
-        registerInstability(points: 1, reason: "jump forward")
       } else if advanced <= -diagJumpBackwardThresholdSeconds {
         diagJumpCount += 1
         logDiagnosticsEvent("jump \(diagFormat(advanced, decimals: 1))s back")
-        registerInstability(points: 1, reason: "jump back")
       }
 
       if advanced >= 0.05 {
@@ -1090,9 +1064,8 @@ struct PlayerView: View {
     diagIsFrozen = false
     diagFrozenSince = nil
     diagSessionStartedAt = Date()
-    diagInstabilityScore = 0
-    diagLastInstabilityAt = nil
-    diagAdaptiveFallbackCount = 0
+    lastRecoveryAttemptAt = Date.distantPast
+    lastStallNotificationAt = Date.distantPast
   }
 
   // MARK: - Controls visibility
@@ -2275,13 +2248,9 @@ struct PlayerView: View {
       asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
     }
     let item = AVPlayerItem(asset: asset)
-    // A deeper forward buffer in low-latency mode does double duty: it gives
-    // ABR enough headroom to actually climb to the selected quality (fixes soft
-    // 1080p) and it keeps AVPlayer from skipping forward to live when the buffer
-    // runs thin (fixes the "jumps ahead"). The proxy keeps the *content* near
-    // live regardless, so the only cost is a few seconds of latency — which the
-    // user has ranked below freeze-free, smooth, sharp playback.
-    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 5 : 1
+    // Favor smoothness over latency: extra buffer reduces native AVPlayer
+    // skip-ahead behavior and rebuffer risk on throughput dips.
+    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 8 : 3
     return item
   }
 
@@ -2410,6 +2379,18 @@ struct PlayerView: View {
     lastObservedPlaybackTimeSeconds = nil
     stalledPlaybackSamples = 0
     isRecoveringPlayback = false
+    lastRecoveryAttemptAt = Date.distantPast
+    lastStallNotificationAt = Date.distantPast
+  }
+
+  private func triggerRecoveryIfAllowed(reason: String) {
+    guard !isRecoveringPlayback else { return }
+    let now = Date()
+    guard now.timeIntervalSince(lastRecoveryAttemptAt) >= recoveryCooldownSeconds else {
+      return
+    }
+    lastRecoveryAttemptAt = now
+    Task { await recoverFromPlaybackStall(reason: reason) }
   }
 
   private func samplePlaybackHealth() {
@@ -2426,9 +2407,7 @@ struct PlayerView: View {
     }
 
     if item.status == .failed {
-      if !isRecoveringPlayback {
-        Task { await recoverFromPlaybackStall(reason: "item failed") }
-      }
+      triggerRecoveryIfAllowed(reason: "item failed")
       return
     }
 
@@ -2458,9 +2437,15 @@ struct PlayerView: View {
 
     lastObservedPlaybackTimeSeconds = currentSeconds
 
-    if stalledPlaybackSamples >= stalledPlaybackThresholdSamples, !isRecoveringPlayback {
-      stalledPlaybackSamples = 0
-      Task { await recoverFromPlaybackStall(reason: "watchdog stall") }
+    let isHardStallSignal =
+      player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+      && (item.isPlaybackBufferEmpty || !item.isPlaybackLikelyToKeepUp)
+    if stalledPlaybackSamples >= stalledPlaybackThresholdSamples,
+      isHardStallSignal,
+      let frozenSince = diagFrozenSince,
+      Date().timeIntervalSince(frozenSince) >= hardStallRecoverySeconds
+    {
+      triggerRecoveryIfAllowed(reason: "hard stall")
     }
   }
 
@@ -2477,6 +2462,17 @@ struct PlayerView: View {
     if await PlaybackService.streamLiveStatus(for: activeChannel) == .offline {
       presentOfflineState()
       return
+    }
+
+    if lowLatencyProxyEnabled {
+      // Hard-stall failsafe: if low-latency mode reaches a confirmed hard stall,
+      // automatically drop back to the stable non-proxy path before reloading.
+      suppressLowLatencyToggleReload = true
+      lowLatencyProxyEnabled = false
+      preferredQuality = "Auto"
+      if showLatencyDiagnostics {
+        logDiagnosticsEvent("failsafe: low-latency OFF")
+      }
     }
 
     diagReloadCount += 1
@@ -2676,58 +2672,12 @@ struct PlayerView: View {
     liveEdgeLatency: Double?
   ) {
     guard isPlaybackActive else { return }
-    let now = Date()
-
-    if let liveEdgeLatency {
-      // Ignore tiny/unstable values to avoid oscillation.
-      guard liveEdgeLatency >= 0.8 else {
-        if abs(player.rate - 1.0) > 0.01 {
-          player.playImmediately(atRate: 1.0)
-        }
-        return
-      }
-
-      if liveEdgeLatency >= hardCatchUpThresholdSeconds {
-        guard now.timeIntervalSince(lastHardCatchUpJumpAt) >= hardCatchUpCooldownSeconds else {
-          return
-        }
-
-        guard let range else { return }
-
-        let edge = CMTimeRangeGetEnd(range)
-        let edgeSeconds = CMTimeGetSeconds(edge)
-        let floorSeconds = CMTimeGetSeconds(range.start)
-        let targetSeconds = max(floorSeconds, edgeSeconds - targetLiveEdgeSeconds)
-
-        guard targetSeconds.isFinite else { return }
-        let targetTime = CMTime(
-          seconds: targetSeconds, preferredTimescale: edge.timescale == 0 ? 600 : edge.timescale)
-        player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        player.playImmediately(atRate: 1.0)
-        lastHardCatchUpJumpAt = now
-        wallClockHighLatencyStreak = 0
-        return
-      }
-
-      if liveEdgeLatency > softCatchUpThresholdSeconds {
-        // Mild speed-up only; prioritize smooth playback over aggressive chasing.
-        let overshoot = liveEdgeLatency - softCatchUpThresholdSeconds
-        let targetRate = min(maxCatchUpRate, 1.01 + Float(overshoot / 60.0))
-        if abs(player.rate - targetRate) > 0.01 {
-          player.playImmediately(atRate: targetRate)
-        }
-        wallClockHighLatencyStreak = 0
-        return
-      }
-
-      wallClockHighLatencyStreak = 0
-      if liveEdgeLatency <= targetLiveEdgeSeconds + 0.8, abs(player.rate - 1.0) > 0.01 {
-        player.playImmediately(atRate: 1.0)
-      }
-      return
-    }
-
-    // Fallback for channels where seekable-range edge latency is unreliable.
+    // Stability-first policy: do not perform any automatic seeks or rate changes
+    // during playback. Those interventions can look like user-visible jumps.
+    _ = item
+    _ = range
+    _ = wallClockLatency
+    _ = liveEdgeLatency
     wallClockHighLatencyStreak = 0
     if abs(player.rate - 1.0) > 0.01 {
       player.playImmediately(atRate: 1.0)

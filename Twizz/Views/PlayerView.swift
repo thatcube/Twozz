@@ -1731,6 +1731,13 @@ struct PlayerView: View {
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
+
+        // Trailing checkmark marks the active option, mirroring the main
+        // SettingsView pills. Shown only when selected (not a reserved-space
+        // placeholder), so unselected pills stay compact with no empty padding.
+        if isSelected {
+          Icon(glyph: .check, size: 20)
+        }
       }
     }
     .chatSettingsGlassButton(isSelected: isSelected)
@@ -3111,19 +3118,16 @@ extension View {
   fileprivate func chatSettingsGlassButton(isSelected: Bool = false) -> some View {
     if #available(tvOS 26.0, *) {
       if isSelected {
-        // Native "active" state: the prominent glass style tinted with the app's
-        // brand color. `.glassProminent` alone uses the default accent (the app
-        // ships no AccentColor asset), which reads weakly; the tint makes the
-        // selected option unmistakably "on" while staying fully native.
+        // Active state mirrors the main SettingsView pills: native prominent
+        // glass plus a trailing checkmark (added by the caller). No tint — the
+        // prominent fill + checkmark is the established app pattern.
         self.buttonStyle(.glassProminent)
-          .tint(ThemePalette.brandPurple)
       } else {
         self.buttonStyle(.glass)
       }
     } else {
       if isSelected {
         self.buttonStyle(.borderedProminent)
-          .tint(ThemePalette.brandPurple)
       } else {
         self.buttonStyle(.bordered)
       }

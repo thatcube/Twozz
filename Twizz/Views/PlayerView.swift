@@ -116,7 +116,14 @@ struct PlayerView: View {
   @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
   @AppStorage("chatSyncToStream") private var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
-  @AppStorage("experimentalYouTubeMergeChannelOrURL") private var experimentalYouTubeMergeChannelOrURL = ""
+  /// Optional manual override for the YouTube merge target. Kept per-channel and
+  /// non-persistent so a value entered for one streamer never leaks into another
+  /// (previously this was global `@AppStorage`, which made every channel merge
+  /// with whatever handle was last entered).
+  @State private var experimentalYouTubeMergeChannelOrURL = ""
+  /// Best-effort YouTube target derived from the active Twitch channel (its
+  /// social links, then description, then a name-based guess).
+  @State private var youtubeAutoResolvedTarget = ""
   @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = true
   @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
@@ -576,6 +583,15 @@ struct PlayerView: View {
     }
     .onChange(of: experimentalYouTubeMergeChannelOrURL) { _, _ in
       applyExperimentalYouTubeSettings()
+    }
+    .onChange(of: activeChannel) { _, _ in
+      // A manual override is scoped to the channel it was entered for; clear it
+      // when the channel changes (e.g. following a raid) so it can't leak.
+      experimentalYouTubeMergeChannelOrURL = ""
+      youtubeAutoResolvedTarget = ""
+    }
+    .task(id: activeChannel) {
+      await refreshYouTubeAutoTarget()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
       if suppressLowLatencyToggleReload {
@@ -2446,21 +2462,157 @@ struct PlayerView: View {
     return youtubeMergeDefaultTarget.isEmpty ? "YouTube handle or channel URL" : youtubeMergeDefaultTarget
   }
 
-  /// The handle the merge falls back to when no manual value is entered.
+  /// The handle the merge falls back to when no manual value is entered. Prefers
+  /// the YouTube channel discovered from the Twitch channel's social links /
+  /// description, and only guesses `@<twitch-login>` when nothing better exists.
   private var youtubeMergeDefaultTarget: String {
+    let auto = youtubeAutoResolvedTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !auto.isEmpty { return auto }
     let base = activeChannel.isEmpty ? channel : activeChannel
     return base.isEmpty ? "" : "@\(base)"
   }
 
   private func applyExperimentalYouTubeSettings() {
     let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
-    let defaultTarget = channel
-    let resolvedTarget = manual.isEmpty ? defaultTarget : manual
+    let resolvedTarget = manual.isEmpty ? youtubeMergeDefaultTarget : manual
 
     chat.configureExperimentalYouTubeMerge(
       enabled: experimentalYouTubeMergeEnabled,
       channelOrURL: resolvedTarget
     )
+  }
+
+  /// Resolves the best YouTube target for the active channel and pushes it to the
+  /// chat service. Runs whenever the active channel changes.
+  private func refreshYouTubeAutoTarget() async {
+    let login = activeChannel
+    guard !login.isEmpty else { return }
+    let resolved = await Self.resolveYouTubeTarget(forTwitchLogin: login)
+    guard login == activeChannel else { return }
+    youtubeAutoResolvedTarget = resolved
+    applyExperimentalYouTubeSettings()
+  }
+
+  /// Makes an educated guess at a channel's YouTube live source from its Twitch
+  /// profile. Streamers often list several YouTube links (main channel, a VOD
+  /// channel, a podcast, …), so we score each one against the streamer's Twitch
+  /// identity instead of blindly taking the first. Falls back to a YouTube link
+  /// in the bio, then a `@<twitch-login>` guess.
+  private static func resolveYouTubeTarget(forTwitchLogin login: String) async -> String {
+    let fallback = "@\(login)"
+    guard let profile = await ChannelProfileService.fetch(login: login) else {
+      return fallback
+    }
+
+    if let best = bestYouTubeChannelURL(
+      among: profile.socialLinks,
+      twitchLogin: login,
+      displayName: profile.displayName
+    ) {
+      return best
+    }
+    if let descLink = firstYouTubeChannelURL(in: profile.description ?? "") {
+      return descLink
+    }
+    return fallback
+  }
+
+  /// Picks the YouTube channel link most likely to be the streamer's *primary*
+  /// live channel. Returns nil when no candidate looks confident enough, so the
+  /// caller can fall back rather than merge with the wrong channel (e.g. a
+  /// podcast or clips channel the streamer also links).
+  private static func bestYouTubeChannelURL(
+    among links: [ChannelSocialLink],
+    twitchLogin: String,
+    displayName: String
+  ) -> String? {
+    let candidates = links.filter { isYouTubeChannelURL($0.url) }
+    guard !candidates.isEmpty else { return nil }
+
+    let loginKey = normalizeIdentity(twitchLogin)
+    let nameKey = normalizeIdentity(displayName)
+    let secondaryMarkers = [
+      "podcast", "vod", "vods", "clip", "clips", "shorts", "archive", "replay",
+      "replays", "music", "topic", "highlight", "highlights", "fan", "second",
+    ]
+
+    func score(_ link: ChannelSocialLink) -> Int {
+      var score = 0
+      let handle = normalizeIdentity(youtubeHandle(from: link.url) ?? "")
+      let label = link.title.lowercased()
+      let haystack = "\(label) \(handle)"
+
+      // Strongest signal: the YouTube handle matches the Twitch identity.
+      if !handle.isEmpty {
+        if handle == loginKey || (!nameKey.isEmpty && handle == nameKey) {
+          score += 100
+        } else if !loginKey.isEmpty, handle.contains(loginKey) {
+          score += 60
+        } else if nameKey.count >= 3, handle.contains(nameKey) {
+          score += 50
+        }
+      }
+
+      // The streamer labelled it as their main YouTube.
+      if ["youtube", "youtube channel", "main", "main channel", "live"].contains(label) {
+        score += 20
+      }
+
+      // Down-rank obvious secondary channels (podcasts, VOD/clip dumps, …).
+      if secondaryMarkers.contains(where: { haystack.contains($0) }) {
+        score -= 40
+      }
+
+      return score
+    }
+
+    let scored = candidates.map { ($0.url, score($0)) }
+    guard let best = scored.max(by: { $0.1 < $1.1 }), best.1 > 0 else {
+      return nil
+    }
+    return best.0
+  }
+
+  /// True for URLs that point at a YouTube *channel* (rather than a single video),
+  /// e.g. `/@handle`, `/channel/UC…`, `/c/Name`, or `/user/Name`.
+  private static func isYouTubeChannelURL(_ string: String) -> Bool {
+    let lower = string.lowercased()
+    guard lower.contains("youtube.com") else { return false }
+    return lower.contains("/@")
+      || lower.contains("/channel/")
+      || lower.contains("/c/")
+      || lower.contains("/user/")
+  }
+
+  /// Extracts the channel handle / id segment from a YouTube channel URL.
+  private static func youtubeHandle(from urlString: String) -> String? {
+    let normalized = urlString.contains("://") ? urlString : "https://\(urlString)"
+    guard let comps = URLComponents(string: normalized) else { return nil }
+    let parts = comps.path.split(separator: "/").map(String.init)
+    if let at = parts.first(where: { $0.hasPrefix("@") }) {
+      return String(at.dropFirst())
+    }
+    if parts.count >= 2, ["channel", "c", "user"].contains(parts[0].lowercased()) {
+      return parts[1]
+    }
+    return parts.first
+  }
+
+  /// Lowercases and strips everything but letters/digits for loose comparison.
+  private static func normalizeIdentity(_ raw: String) -> String {
+    String(String.UnicodeScalarView(raw.lowercased().unicodeScalars.filter {
+      CharacterSet.alphanumerics.contains($0)
+    }))
+  }
+
+  private static func firstYouTubeChannelURL(in text: String) -> String? {
+    let separators = CharacterSet(charactersIn: " \n\t\r,;|()<>[]\"'")
+    for raw in text.components(separatedBy: separators) {
+      let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !token.isEmpty, isYouTubeChannelURL(token) else { continue }
+      return token
+    }
+    return nil
   }
 
   /// The delay to hold chat by so it lines up with the on-screen video.

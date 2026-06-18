@@ -623,7 +623,11 @@ final class TwitchAuthSession {
         }
 
         let payload = try JSONDecoder().decode(FollowedStateEnvelope.self, from: data)
-        return (payload.total ?? payload.data.count) > 0
+        // `total` can represent the user's overall followed-channel count, so
+        // determine state from the returned relationship rows instead.
+        return payload.data.contains { entry in
+            entry.broadcasterID == broadcasterID
+        }
     }
 
     /// Mutates the follow via Twitch's private GraphQL API.

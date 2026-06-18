@@ -1367,13 +1367,11 @@ struct PlayerView: View {
     .onPreferenceChange(ChatSettingsHeightKey.self) { height in
       chatSettingsContentHeight = height
     }
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 22, style: .continuous)
-        .stroke(.white.opacity(0.20), lineWidth: 1)
-    )
-    // Intentionally avoid clipShape here: tvOS focus effects can scale beyond
-    // bounds, and clipping reintroduces visibly cut-off hover/focus states.
+    // Match the chat pane's real Liquid Glass (`.glassEffect(.regular)`) so the
+    // panel reads the same as the Glass chat layout, instead of a flatter
+    // frosted material. Intentionally no clipShape: tvOS focus effects scale
+    // beyond bounds, and clipping reintroduces visibly cut-off focus states.
+    .modifier(ChatSettingsPanelGlassStyle())
     .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
     .animation(.easeOut(duration: 0.22), value: resolvedHeight)
     .focusSection()
@@ -3499,6 +3497,29 @@ private struct GlassChatPaneStyle: ViewModifier {
         .frame(maxHeight: .infinity)
         .background(.ultraThinMaterial, in: shape)
         .clipShape(shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    }
+  }
+}
+
+/// Gives the floating chat-settings panel the same real Liquid Glass surface as
+/// the Glass chat pane (`.glassEffect(.regular)`), with a matching subtle white
+/// hairline. Unlike `GlassChatPaneStyle` it does not clip or inset, so the
+/// panel can size to its content and its inner focus effects can lift freely.
+private struct ChatSettingsPanelGlassStyle: ViewModifier {
+  private var shape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: 32, style: .continuous)
+  }
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(tvOS 26.0, *) {
+      content
+        .glassEffect(.regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    } else {
+      content
+        .background(.ultraThinMaterial, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
     }
   }

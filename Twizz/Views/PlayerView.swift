@@ -1387,14 +1387,6 @@ struct PlayerView: View {
         }
         .frame(height: chatComposerRowHeight)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
-
-        if focus == .chatInput {
-          Text("Sends to chat as soon as you finish typing")
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.5))
-            .padding(.leading, 28)
-            .transition(.opacity)
-        }
       } else {
         Button {
           showSignInSheet = true
@@ -1433,7 +1425,6 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
-    .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
     .background(
       chatLayoutMode == .glass
         ? AnyShapeStyle(Color.black.opacity(0.22))
@@ -2364,6 +2355,12 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
   var activationToken: Int = 0
   var onSubmit: () -> Void = {}
 
+  /// Shown only as the prompt at the top of the tvOS keyboard entry screen
+  /// (the placeholder is surfaced there by the system). It is applied just
+  /// before the keyboard presents and cleared when editing ends, so it never
+  /// renders inline behind the resting glass capsule.
+  private static let keyboardPrompt = "Your message posts to chat immediately"
+
   func makeUIView(context: Context) -> UITextField {
     let field = NonFocusableTextField()
     field.delegate = context.coordinator
@@ -2395,6 +2392,10 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
       context.coordinator.lastActivationToken = activationToken
       DispatchQueue.main.async {
         if !uiView.isFirstResponder {
+          // Set the prompt right before presenting so the keyboard screen shows
+          // it; it's cleared again in textFieldDidEndEditing to avoid leaking
+          // behind the resting capsule.
+          uiView.placeholder = Self.keyboardPrompt
           uiView.becomeFirstResponder()
         }
       }
@@ -2416,6 +2417,11 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
 
     @objc func editingChanged(_ field: UITextField) {
       parent.text = field.text ?? ""
+    }
+
+    func textFieldDidEndEditing(_ textField: UITextField) {
+      // Clear the prompt so it never renders inline behind the resting capsule.
+      textField.placeholder = nil
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {

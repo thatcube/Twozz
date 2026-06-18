@@ -1293,7 +1293,7 @@ struct PlayerView: View {
     .animation(.easeOut(duration: 0.18), value: showChatSettings)
   }
 
-  private let chatSettingsPanelWidth: CGFloat = 520
+  private let chatSettingsPanelWidth: CGFloat = 560
   private let chatSettingsPanelGap: CGFloat = 16
 
   // MARK: - Floating chat settings
@@ -1350,7 +1350,7 @@ struct PlayerView: View {
         }
       }
       .padding(.vertical, 18)
-      .padding(.horizontal, 20)
+      .padding(.horizontal, 30)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(
         GeometryReader { proxy in
@@ -1678,7 +1678,7 @@ struct PlayerView: View {
       } label: {
         Text("Reset to Normal")
           .font(.subheadline.weight(.semibold))
-          .padding(.horizontal, 16)
+          .padding(.horizontal, 24)
           .padding(.vertical, 9)
           .modifier(ChatSettingsGlassStyle(isFocused: focus == .chatResetButton, isSelected: false))
       }
@@ -1718,7 +1718,7 @@ struct PlayerView: View {
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
       }
-      .padding(.horizontal, 14)
+      .padding(.horizontal, 22)
       .padding(.vertical, 8)
       .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: isSelected))
     }
@@ -1760,7 +1760,7 @@ struct PlayerView: View {
           .rotationEffect(.degrees(180))
           .opacity(0.7)
       }
-      .padding(.horizontal, 16)
+      .padding(.horizontal, 26)
       .padding(.vertical, 12)
       .frame(maxWidth: .infinity, alignment: .leading)
       .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: false))
@@ -1781,7 +1781,7 @@ struct PlayerView: View {
           Text("Back")
             .font(.subheadline.weight(.semibold))
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 22)
         .padding(.vertical, 8)
         .modifier(ChatSettingsGlassStyle(isFocused: focus == .chatAdvancedBack, isSelected: false))
       }
@@ -1832,7 +1832,7 @@ struct PlayerView: View {
         adjustChatStepper(field, by: 1)
       }
     }
-    .padding(.horizontal, 14)
+    .padding(.horizontal, 22)
     .padding(.vertical, 8)
     .background(Capsule(style: .continuous).fill(.white.opacity(0.06)))
     .focusSection()

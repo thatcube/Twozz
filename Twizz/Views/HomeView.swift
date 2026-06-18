@@ -383,13 +383,13 @@ struct HomeView: View {
     Menu {
       Picker("Card Size", selection: $streamCardSizeRaw) {
         ForEach(StreamCardSize.allCases) { size in
-          Label("\(size.title) · \(size.subtitle)", systemImage: size.symbolName)
+          Text("\(size.title) · \(size.subtitle)")
             .tag(size.rawValue)
         }
       }
       // Future: a "Search" entry point can be added here as another menu item.
     } label: {
-      Icon(glyph: .adjustmentsHorizontal, size: 34)
+      Icon(glyph: .dimensions, size: 34)
     }
     .accessibilityLabel("View settings")
   }

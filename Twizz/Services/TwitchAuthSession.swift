@@ -9,6 +9,7 @@ final class TwitchAuthSession {
         // and may not reliably authorize Helix followed-channel endpoints.
         "kimne78kx3ncx6brgo4mv6wki5h1ko"
     ]
+    private static let twitchGraphQLPublicClientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 
     private(set) var isAuthenticated = false
     private(set) var userID: String?
@@ -436,6 +437,17 @@ final class TwitchAuthSession {
         return normalized.contains("invalid_refresh_token") || normalized.contains("invalid_grant")
     }
 
+    private func isInvalidClientIDError(_ error: TwitchAuthHTTPError) -> Bool {
+        guard error.status == 400 else { return false }
+        guard let normalized = normalizedOAuthMessage(error.message) else { return false }
+        return normalized.contains("client_id") && normalized.contains("invalid")
+    }
+
+    private func isIntegrityCheckFailureMessage(_ message: String?) -> Bool {
+        guard let normalized = normalizedOAuthMessage(message) else { return false }
+        return normalized.contains("integrity_check") && normalized.contains("fail")
+    }
+
     private func describe(_ error: Error) -> String {
         if let authError = error as? TwitchAuthHTTPError {
             return authError.localizedDescription
@@ -550,18 +562,19 @@ final class TwitchAuthSession {
         guard isAuthenticated, let clientID, let userID else {
             throw FollowActionError.notSignedIn
         }
-        let accessToken = try await validAccessToken()
-        let broadcasterID = try await resolveBroadcasterID(
-            forLogin: channelLogin,
-            clientID: clientID,
-            accessToken: accessToken
-        )
-        return try await fetchFollowState(
-            broadcasterID: broadcasterID,
-            userID: userID,
-            clientID: clientID,
-            accessToken: accessToken
-        )
+        return try await withUserTokenRefreshRetry { accessToken in
+            let broadcasterID = try await resolveBroadcasterID(
+                forLogin: channelLogin,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+            return try await fetchFollowState(
+                broadcasterID: broadcasterID,
+                userID: userID,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+        }
     }
 
     /// Follows `channelLogin` on behalf of the signed-in user.
@@ -578,18 +591,19 @@ final class TwitchAuthSession {
         guard isAuthenticated, let clientID else {
             throw FollowActionError.notSignedIn
         }
-        let accessToken = try await validAccessToken()
-        let broadcasterID = try await resolveBroadcasterID(
-            forLogin: login,
-            clientID: clientID,
-            accessToken: accessToken
-        )
-        try await performFollowMutation(
-            targetID: broadcasterID,
-            follow: shouldFollow,
-            clientID: clientID,
-            accessToken: accessToken
-        )
+        try await withUserTokenRefreshRetry { accessToken in
+            let broadcasterID = try await resolveBroadcasterID(
+                forLogin: login,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+            try await performFollowMutation(
+                targetID: broadcasterID,
+                follow: shouldFollow,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+        }
     }
 
     private func validAccessToken() async throws -> String {
@@ -597,6 +611,18 @@ final class TwitchAuthSession {
             return accessToken
         }
         return try await refreshAccessTokenIfNeeded(force: true)
+    }
+
+    private func withUserTokenRefreshRetry<T>(
+        _ operation: (String) async throws -> T
+    ) async throws -> T {
+        let accessToken = try await validAccessToken()
+        do {
+            return try await operation(accessToken)
+        } catch let error as TwitchAuthHTTPError where error.status == 401 {
+            let refreshedAccessToken = try await refreshAccessTokenIfNeeded(force: true)
+            return try await operation(refreshedAccessToken)
+        }
     }
 
     private func fetchFollowState(
@@ -623,7 +649,11 @@ final class TwitchAuthSession {
         }
 
         let payload = try JSONDecoder().decode(FollowedStateEnvelope.self, from: data)
-        return (payload.total ?? payload.data.count) > 0
+        // `total` can represent the user's overall followed-channel count, so
+        // determine state from the returned relationship rows instead.
+        return payload.data.contains { entry in
+            entry.broadcasterID == broadcasterID
+        }
     }
 
     /// Mutates the follow via Twitch's private GraphQL API.
@@ -636,6 +666,59 @@ final class TwitchAuthSession {
         follow: Bool,
         clientID: String,
         accessToken: String
+    ) async throws {
+        let normalizedClientID = clientID.lowercased()
+        do {
+            try await performFollowMutationWithAuthorizationFallback(
+                targetID: targetID,
+                follow: follow,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+        } catch let error as TwitchAuthHTTPError
+        where isInvalidClientIDError(error)
+            && normalizedClientID != Self.twitchGraphQLPublicClientID
+        {
+            // Some GQL routes reject app-issued client IDs even with valid user
+            // tokens; retry with Twitch's public web client ID.
+            try await performFollowMutationWithAuthorizationFallback(
+                targetID: targetID,
+                follow: follow,
+                clientID: Self.twitchGraphQLPublicClientID,
+                accessToken: accessToken
+            )
+        }
+    }
+
+    private func performFollowMutationWithAuthorizationFallback(
+        targetID: String,
+        follow: Bool,
+        clientID: String,
+        accessToken: String
+    ) async throws {
+        do {
+            try await performFollowMutationRequest(
+                targetID: targetID,
+                follow: follow,
+                clientID: clientID,
+                authorizationHeader: "OAuth \(accessToken)"
+            )
+        } catch let error as TwitchAuthHTTPError where error.status == 401 {
+            // Some Twitch GraphQL paths only accept Bearer even for user tokens.
+            try await performFollowMutationRequest(
+                targetID: targetID,
+                follow: follow,
+                clientID: clientID,
+                authorizationHeader: "Bearer \(accessToken)"
+            )
+        }
+    }
+
+    private func performFollowMutationRequest(
+        targetID: String,
+        follow: Bool,
+        clientID: String,
+        authorizationHeader: String
     ) async throws {
         let query: String
         var variables: [String: Any] = ["targetID": targetID]
@@ -662,8 +745,8 @@ final class TwitchAuthSession {
 
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
-        req.setValue("OAuth \(accessToken)", forHTTPHeaderField: "Authorization")
-        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(
             withJSONObject: ["query": query, "variables": variables])
@@ -681,6 +764,9 @@ final class TwitchAuthSession {
         // GraphQL returns HTTP 200 even for logical failures, so inspect the body.
         let decoded = try JSONDecoder().decode(GQLFollowResponse.self, from: data)
         if let message = decoded.errors?.compactMap({ $0.message }).first(where: { !$0.isEmpty }) {
+            if isIntegrityCheckFailureMessage(message) {
+                throw FollowActionError.integrityCheckRequired
+            }
             throw FollowActionError.mutationFailed(reason: message)
         }
         let opError =
@@ -688,6 +774,9 @@ final class TwitchAuthSession {
             ? decoded.data?.followUser?.error?.code
             : decoded.data?.unfollowUser?.error?.code
         if let opError, !opError.isEmpty {
+            if isIntegrityCheckFailureMessage(opError) {
+                throw FollowActionError.integrityCheckRequired
+            }
             throw FollowActionError.mutationFailed(reason: opError)
         }
     }
@@ -695,12 +784,15 @@ final class TwitchAuthSession {
 
 enum FollowActionError: LocalizedError {
     case notSignedIn
+    case integrityCheckRequired
     case mutationFailed(reason: String?)
 
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
             return "Sign in to follow channels."
+        case .integrityCheckRequired:
+            return "Twitch blocked follow/unfollow from this app (integrity check required). Use the Twitch app or website to change follows."
         case .mutationFailed(let reason):
             if let reason, !reason.isEmpty {
                 return "Couldn't update follow: \(reason)."

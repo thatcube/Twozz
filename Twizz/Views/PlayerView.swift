@@ -87,9 +87,6 @@ struct PlayerView: View {
   @State private var showSignInSheet = false
   @State private var showChatSettings = false
   @State private var showControls = false
-  @State private var isFollowing = false
-  @State private var followInProgress = false
-  @State private var followError: String?
   @State private var streamTitle: String = ""
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
@@ -197,7 +194,7 @@ struct PlayerView: View {
 
   @FocusState private var focus: Focusable?
   private enum Focusable: Hashable {
-    case video, streamInfo, quality, follow, chatToggle, chatInput, errorBack
+    case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case chatSend
     case chatSettingsButton
     case qualityOption(Int)
@@ -321,10 +318,8 @@ struct PlayerView: View {
       applyExperimentalYouTubeSettings()
       chat.connect(to: activeChannel)
       async let metadataTask: Void = refreshChannelMetadata()
-      async let followStateTask: Void = refreshFollowState()
       await load()
       _ = await metadataTask
-      _ = await followStateTask
       focus = .video
     }
     .onAppear {
@@ -427,19 +422,6 @@ struct PlayerView: View {
           HStack {
             latencyBadge
             Spacer()
-            if let followError {
-              Text(followError)
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-                .overlay(
-                  Capsule(style: .continuous)
-                    .strokeBorder(.orange.opacity(0.6), lineWidth: 1)
-                )
-            }
           }
           if showLatencyDiagnostics {
             HStack {
@@ -562,25 +544,6 @@ struct PlayerView: View {
           case .left:
             focus = .streamInfo
           case .right:
-            focus = .follow
-          default:
-            break
-          }
-        }
-
-        Button {
-          toggleFollow()
-        } label: {
-          Icon(glyph: isFollowing ? .heartFilled : .heart)
-            .accessibilityLabel(isFollowing ? "Following" : "Follow")
-        }
-        .disabled(followInProgress)
-        .focused($focus, equals: .follow)
-        .onMoveCommand { direction in
-          switch direction {
-          case .left:
-            focus = .quality
-          case .right:
             focus = .chatToggle
           default:
             break
@@ -601,7 +564,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .follow
+            focus = .quality
           case .right:
             if showChat {
               focus = .chatInput
@@ -944,7 +907,7 @@ struct PlayerView: View {
 
   private func isControlFocus(_ focus: Focusable) -> Bool {
     switch focus {
-    case .streamInfo, .quality, .follow, .chatToggle, .chatInput:
+    case .streamInfo, .quality, .chatToggle, .chatInput:
       return true
     default:
       return false
@@ -1586,8 +1549,6 @@ struct PlayerView: View {
     raidBannerDismissTask?.cancel()
     chat.pendingRaid = nil
     activeChannel = login
-    isFollowing = false
-    followError = nil
     stopPlaybackWatchdog()
     stopLatencyMonitor()
     player.pause()
@@ -1603,10 +1564,8 @@ struct PlayerView: View {
     chat.connect(to: login)
     Task {
       async let metadataTask: Void = refreshChannelMetadata()
-      async let followStateTask: Void = refreshFollowState()
       await load(reason: "raid follow", resetMetadata: false)
       _ = await metadataTask
-      _ = await followStateTask
       focus = .video
     }
   }
@@ -2338,65 +2297,6 @@ struct PlayerView: View {
     channelDisplayName = metadata.displayName
     channelAvatarURL = metadata.profileImageURL
     streamTitle = metadata.title
-  }
-
-  // MARK: - Follow / unfollow
-
-  private func refreshFollowState() async {
-    guard auth.isAuthenticated else {
-      isFollowing = false
-      return
-    }
-    let target = activeChannel
-    guard let following = try? await auth.isFollowing(channelLogin: target) else {
-      return
-    }
-    // Ignore a stale result if the user raided to another channel meanwhile.
-    guard target == activeChannel else { return }
-    isFollowing = following
-  }
-
-  private func toggleFollow() {
-    guard auth.isAuthenticated else {
-      showSignInSheet = true
-      return
-    }
-    guard !followInProgress else { return }
-
-    let target = activeChannel
-    let wantFollow = !isFollowing
-    followInProgress = true
-    followError = nil
-    // Optimistically reflect the new state; revert if the request fails.
-    isFollowing = wantFollow
-    scheduleHide()
-
-    Task {
-      do {
-        if wantFollow {
-          try await auth.followChannel(login: target)
-        } else {
-          try await auth.unfollowChannel(login: target)
-        }
-      } catch {
-        await MainActor.run {
-          if target == activeChannel {
-            isFollowing = !wantFollow
-          }
-          followError =
-            (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-          scheduleFollowErrorDismiss()
-        }
-      }
-      await MainActor.run { followInProgress = false }
-    }
-  }
-
-  private func scheduleFollowErrorDismiss() {
-    Task {
-      try? await Task.sleep(for: .seconds(5))
-      await MainActor.run { followError = nil }
-    }
   }
 
   private func setIdleTimer(disabled: Bool) {

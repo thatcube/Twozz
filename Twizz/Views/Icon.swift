@@ -14,6 +14,7 @@ import SwiftUI
 enum Glyph: String {
   case chevronLeft = "chevron-left"
   case adjustmentsHorizontal = "adjustments-horizontal"
+  case dimensions
   case x
   case check
   case heart

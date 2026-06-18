@@ -29,6 +29,10 @@ struct ChannelPageView: View {
   @State private var onDemandItem: OnDemandItem?
   @FocusState private var focusedID: String?
 
+  /// Measured height of the identity hero card, so it can straddle the banner's
+  /// bottom edge by exactly 50% regardless of its dynamic content.
+  @State private var heroHeight: CGFloat = 0
+
   private let avatarSize: CGFloat = 96
   private let tileWidth: CGFloat = 360
   private var tileMediaHeight: CGFloat { tileWidth * 9 / 16 }
@@ -38,6 +42,11 @@ struct ChannelPageView: View {
   private let cardCorner: CGFloat = 22
   private let mediaCorner: CGFloat = 18
   private let heroCorner: CGFloat = 28
+  /// Full-bleed banner height. The hero identity card overlaps its bottom edge by
+  /// half, and a mirrored, blurred reflection fills the rest of the page below it.
+  private let bannerHeight: CGFloat = 380
+
+  private var hasBanner: Bool { profile?.bannerImageURL != nil }
 
   private var headerName: String {
     profile?.displayName ?? target.displayName ?? target.login
@@ -56,25 +65,38 @@ struct ChannelPageView: View {
   }
 
   var body: some View {
-    ZStack(alignment: .top) {
-      LinearGradient(colors: palette.backgroundColors, startPoint: .top, endPoint: .bottom)
-        .ignoresSafeArea()
+    GeometryReader { geo in
+      ZStack(alignment: .top) {
+        LinearGradient(colors: palette.backgroundColors, startPoint: .top, endPoint: .bottom)
+          .ignoresSafeArea()
 
-      bannerBackdrop
+        ScrollView(.vertical, showsIndicators: false) {
+          ZStack(alignment: .top) {
+            // Mirrored, blurred wash of the banner that fills the rest of the
+            // page beneath it — like the reflection under the Apple TV dock.
+            bannerReflection(pageHeight: geo.size.height)
 
-      ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 30) {
-          heroCard
-          liveOrLastCard
-          clipsRow
-          vodsRow
-          similarRow
-          aboutAndLinks
+            VStack(alignment: .leading, spacing: 0) {
+              bannerHeader
+
+              VStack(alignment: .leading, spacing: 30) {
+                heroCard
+                liveOrLastCard
+                clipsRow
+                vodsRow
+                similarRow
+                aboutAndLinks
+              }
+              // Pull the identity card up so it overlaps the banner's bottom
+              // edge by half its height; channels without a banner keep the
+              // original top inset.
+              .padding(.top, hasBanner ? -heroHeight / 2 : 40)
+              .padding(.bottom, 60)
+            }
+          }
         }
-        .padding(.top, 40)
-        .padding(.bottom, 60)
+        .scrollClipDisabled()
       }
-      .scrollClipDisabled()
     }
     .onExitCommand { dismiss() }
     .task(id: target.id) { await loadAll() }
@@ -84,34 +106,60 @@ struct ChannelPageView: View {
     }
   }
 
-  // MARK: - Banner backdrop
+  // MARK: - Banner
 
-  /// A soft, dimmed wash of the channel banner behind the top of the page, so the
-  /// glass hero card reads as floating over the channel's identity rather than a
-  /// flat color. Fades into the page background.
+  /// Full-width banner pinned to the top of the page flow, pushing the rest of
+  /// the content down. The identity card overlaps its bottom edge.
   @ViewBuilder
-  private var bannerBackdrop: some View {
+  private var bannerHeader: some View {
     if let bannerURL = profile?.bannerImageURL {
       AsyncImage(url: bannerURL) { image in
         image.resizable().scaledToFill()
       } placeholder: {
-        Color.clear
+        Rectangle().fill(.white.opacity(0.06))
       }
-      .frame(height: 460)
+      .frame(height: bannerHeight)
       .frame(maxWidth: .infinity)
       .clipped()
       .overlay(
         LinearGradient(
-          colors: [
-            Color.black.opacity(0.25),
-            palette.backgroundColors.last ?? .black,
-          ],
+          colors: [.clear, .clear, Color.black.opacity(0.28)],
           startPoint: .top,
           endPoint: .bottom
         )
       )
-      .opacity(0.55)
-      .ignoresSafeArea(edges: .top)
+    }
+  }
+
+  /// A vertically-mirrored, heavily blurred copy of the banner that begins at the
+  /// banner's bottom edge and washes down to fill the remaining page height,
+  /// fading into the page background. Purely decorative.
+  @ViewBuilder
+  private func bannerReflection(pageHeight: CGFloat) -> some View {
+    if let bannerURL = profile?.bannerImageURL {
+      let reflectionHeight = max(pageHeight - bannerHeight, 0)
+      VStack(spacing: 0) {
+        Color.clear.frame(height: bannerHeight)
+
+        AsyncImage(url: bannerURL) { image in
+          image.resizable()
+        } placeholder: {
+          Color.clear
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: reflectionHeight)
+        .scaleEffect(x: 1, y: -1, anchor: .center)
+        .blur(radius: 70)
+        .clipped()
+        .overlay(
+          LinearGradient(
+            colors: [.clear, palette.backgroundColors.last ?? .black],
+            startPoint: .top,
+            endPoint: .bottom
+          )
+        )
+        .opacity(0.5)
+      }
       .allowsHitTesting(false)
     }
   }
@@ -137,6 +185,7 @@ struct ChannelPageView: View {
     .padding(24)
     .frame(maxWidth: .infinity, alignment: .leading)
     .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: false, palette: palette)
+    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heroHeight = $0 }
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
 

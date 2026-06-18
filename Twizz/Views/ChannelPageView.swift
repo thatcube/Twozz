@@ -575,7 +575,7 @@ struct ChannelPageView: View {
       .focused($focusedID, equals: id)
       .focusEffectDisabled()
       .onTapGesture(perform: onSelect)
-      .scaleEffect(focusedID == id ? 1.04 : 1)
+      .scaleEffect(focusedID == id ? AppLayout.focusedCardScale : 1)
       .animation(.easeOut(duration: 0.14), value: focusedID)
       .zIndex(focusedID == id ? 2 : 0)
   }

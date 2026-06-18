@@ -110,7 +110,7 @@ private struct BrowseCategoriesView: View {
             .onTapGesture {
               onSelectCategory(category)
             }
-            .scaleEffect(isFocused ? 1.07 : 1)
+            .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
             .animation(.easeOut(duration: 0.14), value: isFocused)
             .zIndex(isFocused ? 2 : 0)
           }
@@ -226,7 +226,7 @@ private struct BrowseStreamsView: View {
                 .onTapGesture {
                   selectedChannel = channel
                 }
-                .scaleEffect(isFocused ? 1.25 : 1)
+                .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
                 .animation(.easeOut(duration: 0.14), value: isFocused)
                 .zIndex(isFocused ? 2 : 0)
               }

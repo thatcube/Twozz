@@ -7,6 +7,11 @@ import SwiftUI
 enum AppLayout {
   /// The single horizontal page gutter shared by every top-level view.
   static let horizontalPadding: CGFloat = 24
+
+  /// The single focus/hover zoom applied to every interactive content card
+  /// (channels, categories, search results, etc.) so the scale is consistent
+  /// everywhere instead of varying per surface.
+  static let focusedCardScale: CGFloat = 1.07
 }
 
 // MARK: - AppTheme

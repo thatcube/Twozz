@@ -123,6 +123,8 @@ struct PlayerView: View {
   @State private var lastObservedPlaybackTimeSeconds: Double?
   @State private var stalledPlaybackSamples = 0
   @State private var isRecoveringPlayback = false
+  @State private var lastRecoveryAttemptAt = Date.distantPast
+  @State private var lastStallNotificationAt = Date.distantPast
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
@@ -176,10 +178,12 @@ struct PlayerView: View {
   private let resolveTimeoutSeconds: Double = 18
   private let startupPlaybackTimeoutSeconds: Double = 14
   private let startupPlaybackPollMilliseconds: UInt64 = 500
-  private let stalledPlaybackThresholdSamples = 3
-  private let playbackWatchdogIntervalSeconds: Double = 1
+  private let stalledPlaybackThresholdSamples = 6
+  private let playbackWatchdogIntervalSeconds: Double = 2
   private let stallHealProbeSeconds: Double = 1.2
   private let stallHealProgressThresholdSeconds: Double = 0.12
+  private let recoveryCooldownSeconds: Double = 8
+  private let stallNotificationDebounceSeconds: Double = 2.5
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
@@ -333,8 +337,11 @@ struct PlayerView: View {
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) { notification in
       guard let stalledItem = notification.object as? AVPlayerItem else { return }
       guard stalledItem == player.currentItem else { return }
+      let now = Date()
+      guard now.timeIntervalSince(lastStallNotificationAt) >= stallNotificationDebounceSeconds else { return }
+      lastStallNotificationAt = now
       markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
-      Task { await recoverFromPlaybackStall(reason: "stall notification") }
+      triggerRecoveryIfAllowed(reason: "stall notification")
     }
     .onDisappear {
       hideTask?.cancel()
@@ -902,6 +909,8 @@ struct PlayerView: View {
     diagLastInstabilityAt = nil
     diagAdaptiveFallbackCount = 0
     diagHealCount = 0
+    lastRecoveryAttemptAt = Date.distantPast
+    lastStallNotificationAt = Date.distantPast
   }
 
   // MARK: - Controls visibility
@@ -2005,6 +2014,18 @@ struct PlayerView: View {
     lastObservedPlaybackTimeSeconds = nil
     stalledPlaybackSamples = 0
     isRecoveringPlayback = false
+    lastRecoveryAttemptAt = Date.distantPast
+    lastStallNotificationAt = Date.distantPast
+  }
+
+  private func triggerRecoveryIfAllowed(reason: String) {
+    guard !isRecoveringPlayback else { return }
+    let now = Date()
+    guard now.timeIntervalSince(lastRecoveryAttemptAt) >= recoveryCooldownSeconds else {
+      return
+    }
+    lastRecoveryAttemptAt = now
+    Task { await recoverFromPlaybackStall(reason: reason) }
   }
 
   private func samplePlaybackHealth() {
@@ -2021,9 +2042,7 @@ struct PlayerView: View {
     }
 
     if item.status == .failed {
-      if !isRecoveringPlayback {
-        Task { await recoverFromPlaybackStall(reason: "item failed") }
-      }
+      triggerRecoveryIfAllowed(reason: "item failed")
       return
     }
 
@@ -2055,7 +2074,7 @@ struct PlayerView: View {
 
     if stalledPlaybackSamples >= stalledPlaybackThresholdSamples, !isRecoveringPlayback {
       stalledPlaybackSamples = 0
-      Task { await recoverFromPlaybackStall(reason: "watchdog stall") }
+      triggerRecoveryIfAllowed(reason: "watchdog stall")
     }
   }
 

@@ -66,34 +66,32 @@ struct ChannelPageView: View {
 
   var body: some View {
     GeometryReader { geo in
+      let safeTop = geo.safeAreaInsets.top
+      // Full screen height, including the overscan-safe insets that tvOS adds.
+      let fullHeight = geo.size.height + safeTop + geo.safeAreaInsets.bottom
+
       ZStack(alignment: .top) {
         LinearGradient(colors: palette.backgroundColors, startPoint: .top, endPoint: .bottom)
           .ignoresSafeArea()
 
+        // Edge-to-edge banner with a mirrored reflection beneath it, sitting
+        // behind the scrolling content and bleeding past the safe area.
+        bannerBackdrop(fullHeight: fullHeight)
+
         ScrollView(.vertical, showsIndicators: false) {
-          ZStack(alignment: .top) {
-            // Mirrored, blurred wash of the banner that fills the rest of the
-            // page beneath it — like the reflection under the Apple TV dock.
-            bannerReflection(pageHeight: geo.size.height)
-
-            VStack(alignment: .leading, spacing: 0) {
-              bannerHeader
-
-              VStack(alignment: .leading, spacing: 30) {
-                heroCard
-                liveOrLastCard
-                clipsRow
-                vodsRow
-                similarRow
-                aboutAndLinks
-              }
-              // Pull the identity card up so it overlaps the banner's bottom
-              // edge by half its height; channels without a banner keep the
-              // original top inset.
-              .padding(.top, hasBanner ? -heroHeight / 2 : 40)
-              .padding(.bottom, 60)
-            }
+          VStack(alignment: .leading, spacing: 30) {
+            heroCard
+            liveOrLastCard
+            clipsRow
+            vodsRow
+            similarRow
+            aboutAndLinks
           }
+          // Push content down so the identity card straddles the banner's
+          // bottom edge by 50%. The banner starts at the true screen top, so we
+          // subtract the safe-area inset the ScrollView already applies.
+          .padding(.top, hasBanner ? max(bannerHeight - safeTop - heroHeight / 2, 0) : 40)
+          .padding(.bottom, 60)
         }
         .scrollClipDisabled()
       }
@@ -108,38 +106,29 @@ struct ChannelPageView: View {
 
   // MARK: - Banner
 
-  /// Full-width banner pinned to the top of the page flow, pushing the rest of
-  /// the content down. The identity card overlaps its bottom edge.
+  /// Edge-to-edge channel banner topped over a vertically-mirrored, blurred
+  /// reflection that fills the rest of the screen — like the wash under the
+  /// Apple TV home dock. Bleeds past the overscan-safe area on every side and
+  /// renders behind the scrolling content. Purely decorative.
   @ViewBuilder
-  private var bannerHeader: some View {
+  private func bannerBackdrop(fullHeight: CGFloat) -> some View {
     if let bannerURL = profile?.bannerImageURL {
-      AsyncImage(url: bannerURL) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        Rectangle().fill(.white.opacity(0.06))
-      }
-      .frame(height: bannerHeight)
-      .frame(maxWidth: .infinity)
-      .clipped()
-      .overlay(
-        LinearGradient(
-          colors: [.clear, .clear, Color.black.opacity(0.28)],
-          startPoint: .top,
-          endPoint: .bottom
-        )
-      )
-    }
-  }
-
-  /// A vertically-mirrored, heavily blurred copy of the banner that begins at the
-  /// banner's bottom edge and washes down to fill the remaining page height,
-  /// fading into the page background. Purely decorative.
-  @ViewBuilder
-  private func bannerReflection(pageHeight: CGFloat) -> some View {
-    if let bannerURL = profile?.bannerImageURL {
-      let reflectionHeight = max(pageHeight - bannerHeight, 0)
       VStack(spacing: 0) {
-        Color.clear.frame(height: bannerHeight)
+        AsyncImage(url: bannerURL) { image in
+          image.resizable().scaledToFill()
+        } placeholder: {
+          Rectangle().fill(.white.opacity(0.06))
+        }
+        .frame(height: bannerHeight)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .overlay(
+          LinearGradient(
+            colors: [.clear, .clear, Color.black.opacity(0.28)],
+            startPoint: .top,
+            endPoint: .bottom
+          )
+        )
 
         AsyncImage(url: bannerURL) { image in
           image.resizable()
@@ -147,7 +136,7 @@ struct ChannelPageView: View {
           Color.clear
         }
         .frame(maxWidth: .infinity)
-        .frame(height: reflectionHeight)
+        .frame(height: max(fullHeight - bannerHeight, 0))
         .scaleEffect(x: 1, y: -1, anchor: .center)
         .blur(radius: 70)
         .clipped()
@@ -160,6 +149,8 @@ struct ChannelPageView: View {
         )
         .opacity(0.5)
       }
+      .frame(maxWidth: .infinity, alignment: .top)
+      .ignoresSafeArea()
       .allowsHitTesting(false)
     }
   }

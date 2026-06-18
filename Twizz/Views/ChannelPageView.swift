@@ -32,10 +32,15 @@ struct ChannelPageView: View {
   @State private var onDemandItem: OnDemandItem?
   @FocusState private var focusedID: String?
 
-  private let bannerHeight: CGFloat = 300
-  private let avatarSize: CGFloat = 132
+  private let bannerHeight: CGFloat = 240
+  private let avatarSize: CGFloat = 104
   private let tileWidth: CGFloat = 360
-  private let tileMediaHeight: CGFloat = 202
+  private var tileMediaHeight: CGFloat { tileWidth * 9 / 16 }
+  // Match the rail-card metrics used across the rest of the app (HomeView).
+  private let focusHInset: CGFloat = 18
+  private let focusVInset: CGFloat = 18
+  private let cardCorner: CGFloat = 22
+  private let mediaCorner: CGFloat = 18
 
   private var canWatchThisChannel: Bool {
     showsHeaderWatch && onWatchChannel != nil && (profile?.isLive ?? false)
@@ -184,7 +189,7 @@ struct ChannelPageView: View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 12) {
         Text(headerName)
-          .font(.system(size: 46, weight: .bold))
+          .font(.system(size: 34, weight: .bold))
           .foregroundStyle(.white)
           .lineLimit(1)
           .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
@@ -217,16 +222,16 @@ struct ChannelPageView: View {
 
   private func badge(text: String, systemImage: String, tint: Color) -> some View {
     Label(text, systemImage: systemImage)
-      .font(.callout.weight(.semibold))
+      .font(.subheadline.weight(.semibold))
       .foregroundStyle(.white)
-      .padding(.horizontal, 14)
-      .padding(.vertical, 6)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 5)
       .background(Capsule().fill(tint.opacity(0.9)))
   }
 
   private func statLabel(text: String, systemImage: String) -> some View {
     Label(text, systemImage: systemImage)
-      .font(.title3.weight(.medium))
+      .font(.callout.weight(.medium))
       .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
   }
 
@@ -283,13 +288,13 @@ struct ChannelPageView: View {
   private func summaryTitleGame(title: String?, game: String?) -> some View {
     if let title, !title.isEmpty {
       Text(title)
-        .font(.title2.weight(.semibold))
+        .font(.title3.weight(.semibold))
         .lineLimit(2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     if let game, !game.isEmpty {
       Label(game, systemImage: "gamecontroller.fill")
-        .font(.title3).foregroundStyle(.secondary)
+        .font(.callout).foregroundStyle(.secondary)
     }
   }
 
@@ -300,14 +305,22 @@ struct ChannelPageView: View {
     if let clips = content?.clips, !clips.isEmpty {
       contentRow(title: "Clips") {
         ForEach(clips) { clip in
-          tile(id: "clip-\(clip.slug)") {
+          let itemID = "clip-\(clip.slug)"
+          focusableTile(id: itemID, onSelect: {
             onDemandItem = .clip(slug: clip.slug, title: clip.title)
-          } content: {
-            mediaTile(
-              thumbnail: clip.thumbnailURL,
-              badge: Self.shortDuration(clip.durationSeconds),
+          }) {
+            MediaContentCard(
               title: clip.title,
-              subtitle: clipSubtitle(clip)
+              subtitle: clipSubtitle(clip),
+              thumbnailURL: clip.thumbnailURL,
+              durationText: Self.shortDuration(clip.durationSeconds),
+              isFocused: focusedID == itemID,
+              mediaWidth: tileWidth,
+              mediaHeight: tileMediaHeight,
+              focusHorizontalInset: focusHInset,
+              focusVerticalInset: focusVInset,
+              cardCornerRadius: cardCorner,
+              mediaCornerRadius: mediaCorner
             )
           }
         }
@@ -330,14 +343,22 @@ struct ChannelPageView: View {
     if let videos = content?.videos, !videos.isEmpty {
       contentRow(title: "Past Broadcasts") {
         ForEach(videos) { vod in
-          tile(id: "vod-\(vod.id)") {
+          let itemID = "vod-\(vod.id)"
+          focusableTile(id: itemID, onSelect: {
             onDemandItem = .vod(id: vod.id, title: vod.title)
-          } content: {
-            mediaTile(
-              thumbnail: vod.thumbnailURL,
-              badge: Self.longDuration(vod.lengthSeconds),
+          }) {
+            MediaContentCard(
               title: vod.title,
-              subtitle: vodSubtitle(vod)
+              subtitle: vodSubtitle(vod),
+              thumbnailURL: vod.thumbnailURL,
+              durationText: Self.longDuration(vod.lengthSeconds),
+              isFocused: focusedID == itemID,
+              mediaWidth: tileWidth,
+              mediaHeight: tileMediaHeight,
+              focusHorizontalInset: focusHInset,
+              focusVerticalInset: focusVInset,
+              cardCornerRadius: cardCorner,
+              mediaCornerRadius: mediaCorner
             )
           }
         }
@@ -362,35 +383,29 @@ struct ChannelPageView: View {
     if !recommendations.isEmpty {
       VStack(alignment: .leading, spacing: 4) {
         Text("More like this")
-          .font(.system(size: 30, weight: .bold))
+          .font(.system(size: 26, weight: .bold))
           .padding(.horizontal, AppLayout.horizontalPadding)
 
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 22) {
             ForEach(recommendations) { channel in
               let itemID = "rec-\(channel.id)"
-              StreamChannelCard(
-                channel: channel,
-                isFocused: focusedID == itemID,
-                layout: .rail(
-                  mediaWidth: tileWidth,
-                  mediaHeight: tileMediaHeight,
-                  focusHorizontalInset: 12,
-                  focusVerticalInset: 12,
-                  cardCornerRadius: 16,
-                  mediaCornerRadius: 12
-                ),
-                showsGameName: true
-              )
-              .contentShape(RoundedRectangle(cornerRadius: 16))
-              .focusable(true)
-              .focused($focusedID, equals: itemID)
-              .focusEffectDisabled()
-              .onTapGesture { onWatchChannel?(channel) }
-              .accessibilityAddTraits(.isButton)
-              .scaleEffect(focusedID == itemID ? 1.04 : 1)
-              .animation(.easeOut(duration: 0.14), value: focusedID)
-              .zIndex(focusedID == itemID ? 2 : 0)
+              focusableTile(id: itemID, onSelect: { onWatchChannel?(channel) }) {
+                StreamChannelCard(
+                  channel: channel,
+                  isFocused: focusedID == itemID,
+                  layout: .rail(
+                    mediaWidth: tileWidth,
+                    mediaHeight: tileMediaHeight,
+                    focusHorizontalInset: focusHInset,
+                    focusVerticalInset: focusVInset,
+                    cardCornerRadius: cardCorner,
+                    mediaCornerRadius: mediaCorner
+                  ),
+                  showsGameName: true
+                )
+                .accessibilityAddTraits(.isButton)
+              }
             }
           }
           .padding(.horizontal, AppLayout.horizontalPadding)
@@ -450,7 +465,7 @@ struct ChannelPageView: View {
   ) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       Text(title)
-        .font(.system(size: 30, weight: .bold))
+        .font(.system(size: 26, weight: .bold))
         .padding(.horizontal, AppLayout.horizontalPadding)
 
       ScrollView(.horizontal, showsIndicators: false) {
@@ -468,7 +483,7 @@ struct ChannelPageView: View {
   private func loadingRow(title: String) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       Text(title)
-        .font(.system(size: 30, weight: .bold))
+        .font(.system(size: 26, weight: .bold))
       HStack(spacing: 14) {
         ProgressView()
         Text("Loading…").foregroundStyle(.secondary)
@@ -477,56 +492,24 @@ struct ChannelPageView: View {
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
-  /// A focusable thumbnail tile (clip or VOD) that triggers `action` on select.
+  /// Wraps a card in the app's standard rail focus behavior: focusable, select
+  /// on tap, and a subtle scale/elevation when focused. Used by the clips, VODs,
+  /// and "More like this" rows so they all feel identical to focus through.
   @ViewBuilder
-  private func tile<Content: View>(
+  private func focusableTile<V: View>(
     id: String,
-    action: @escaping () -> Void,
-    @ViewBuilder content: () -> Content
+    onSelect: @escaping () -> Void,
+    @ViewBuilder _ content: () -> V
   ) -> some View {
     content()
-      .frame(width: tileWidth, alignment: .leading)
-      .contentShape(RoundedRectangle(cornerRadius: 14))
+      .contentShape(RoundedRectangle(cornerRadius: cardCorner))
       .focusable(true)
       .focused($focusedID, equals: id)
       .focusEffectDisabled()
-      .onTapGesture(perform: action)
-      .scaleEffect(focusedID == id ? 1.05 : 1)
+      .onTapGesture(perform: onSelect)
+      .scaleEffect(focusedID == id ? 1.04 : 1)
       .animation(.easeOut(duration: 0.14), value: focusedID)
       .zIndex(focusedID == id ? 2 : 0)
-  }
-
-  private func mediaTile(thumbnail: URL?, badge: String?, title: String, subtitle: String) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      ZStack(alignment: .bottomTrailing) {
-        AsyncImage(url: thumbnail) { image in
-          image.resizable().scaledToFill()
-        } placeholder: {
-          Rectangle().fill(Color.primary.opacity(0.10))
-        }
-        .frame(width: tileWidth, height: tileMediaHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-
-        if let badge {
-          Text(badge)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(.black.opacity(0.75)))
-            .padding(10)
-        }
-      }
-
-      Text(title)
-        .font(.headline)
-        .foregroundStyle(.primary)
-        .lineLimit(1)
-      Text(subtitle)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-    }
   }
 
   // MARK: - Loading

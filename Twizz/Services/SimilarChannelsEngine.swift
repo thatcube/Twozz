@@ -17,14 +17,22 @@ struct SimilarChannelsEngine {
   private static let tierWeight = 0.15
 
   private static let seedCategoryCount = 3
-  private static let candidatesPerCategory = 25
+  private static let candidatesPerCategory = 40
   private static let maxResults = 12
 
   /// Returns up to `maxResults` recommended live channels ranked by similarity to
   /// the channel described by `signals`. Returns an empty list if there is not
   /// enough signal (e.g. a brand-new channel with no broadcast history).
   static func recommend(using signals: ChannelSignals) async -> [FollowedChannel] {
-    let seeds = Array(signals.rankedCategories.prefix(seedCategoryCount))
+    // Seed the search from the channel's most defining categories. Prefer its
+    // *specific* niches over generic catch-alls (Just Chatting, etc.) so a
+    // sanctuary seeds from "Animals, Aquariums, and Zoos" rather than the
+    // sprawling Just Chatting directory — only falling back to generic seeds when
+    // that's all the channel has.
+    let ranked = signals.rankedCategories
+    let specific = ranked.filter { !ChannelContentService.isGeneric($0) }
+    let seedSource = specific.isEmpty ? ranked : specific
+    let seeds = Array(seedSource.prefix(seedCategoryCount))
     guard !seeds.isEmpty else { return [] }
 
     // Fetch candidate pools for each seed category in parallel.

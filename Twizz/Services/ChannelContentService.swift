@@ -42,6 +42,42 @@ struct ChannelContentService {
     return URLSession(configuration: config)
   }()
 
+  /// Catch-all / "meta" categories that say little about what a channel is
+  /// actually *about* — most niche channels technically sit in "Just Chatting"
+  /// while really streaming animals, art, music, etc. They're heavily
+  /// down-weighted so a channel's specific category drives its recommendation
+  /// DNA instead of being buried by a generic directory.
+  static let genericCategories: Set<String> = [
+    "just chatting",
+    "special events",
+    "talk shows & podcasts",
+    "watch parties",
+    "politics",
+    "travel & outdoors",
+    "asmr",
+    "pools, hot tubs, and beaches",
+  ]
+  private static let genericCategoryWeight = 0.15
+
+  static func isGeneric(_ category: String) -> Bool {
+    genericCategories.contains(category.lowercased())
+  }
+
+  /// Resolves a Twitch thumbnail template to a concrete URL. Twitch returns these
+  /// with `{width}x{height}` (or `%{width}`) placeholders, and freshly-ended VODs
+  /// hand back a "404_processing" placeholder image — drop those so the card
+  /// shows our own fallback instead of a broken/ugly thumbnail.
+  static func thumbnail(_ raw: String?, width: Int, height: Int) -> URL? {
+    guard let raw = raw?.trimmed, !raw.isEmpty else { return nil }
+    if raw.contains("404_processing") || raw.contains("404_preview") { return nil }
+    let resolved = raw
+      .replacingOccurrences(of: "%{width}", with: "\(width)")
+      .replacingOccurrences(of: "%{height}", with: "\(height)")
+      .replacingOccurrences(of: "{width}", with: "\(width)")
+      .replacingOccurrences(of: "{height}", with: "\(height)")
+    return URL(string: resolved)
+  }
+
   /// Loads clips, VODs, and channel signals in a single GQL request.
   static func load(login: String) async -> ChannelContent? {
     let normalized = login.lowercased()
@@ -80,7 +116,7 @@ struct ChannelContentService {
         title: node.title?.trimmed.nilIfEmpty ?? "Clip",
         viewCount: node.viewCount ?? 0,
         durationSeconds: Int(node.durationSeconds ?? 0),
-        thumbnailURL: node.thumbnailURL.flatMap(URL.init(string:)),
+        thumbnailURL: ChannelContentService.thumbnail(node.thumbnailURL, width: 480, height: 270),
         gameName: node.game?.displayName?.trimmed.nilIfEmpty,
         createdAt: parseDate(node.createdAt)
       )
@@ -92,7 +128,7 @@ struct ChannelContentService {
         id: id,
         title: node.title?.trimmed.nilIfEmpty ?? "Past Broadcast",
         lengthSeconds: node.lengthSeconds ?? 0,
-        thumbnailURL: node.previewThumbnailURL.flatMap(URL.init(string:)),
+        thumbnailURL: ChannelContentService.thumbnail(node.previewThumbnailURL, width: 480, height: 270),
         gameName: node.game?.displayName?.trimmed.nilIfEmpty,
         publishedAt: parseDate(node.publishedAt),
         viewCount: node.viewCount ?? 0
@@ -117,9 +153,16 @@ struct ChannelContentService {
       counts[liveGame, default: 0] += 2
     }
 
-    let maxCount = counts.values.max() ?? 0
-    let weights: [String: Double] = maxCount > 0
-      ? counts.mapValues { $0 / maxCount }
+    // Down-weight generic catch-all categories so a channel's *specific* niche
+    // (e.g. "Animals, Aquariums, and Zoos") wins over "Just Chatting" even when
+    // it has fewer broadcasts, then normalize so the strongest signal is 1.0.
+    var weighted: [String: Double] = [:]
+    for (name, count) in counts {
+      weighted[name] = count * (isGeneric(name) ? genericCategoryWeight : 1.0)
+    }
+    let maxWeight = weighted.values.max() ?? 0
+    let weights: [String: Double] = maxWeight > 0
+      ? weighted.mapValues { $0 / maxWeight }
       : [:]
 
     let tags = Set((user.stream?.freeformTags ?? []).compactMap { $0.name?.trimmed.nilIfEmpty })

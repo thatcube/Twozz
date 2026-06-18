@@ -112,6 +112,13 @@ final class ChatService {
   /// dump immediately on connect, so the panel seeds with recent context
   /// instead of a wall of history.
   private let maxImmediateBacklogMessages = 8
+  /// When a single batch would surface more than this many messages at once
+  /// (e.g. the connect-time YouTube backlog + in-window fill), trickle them in
+  /// over `immediateTrickleWindowSeconds` instead of dumping them all at once,
+  /// so the opening reads like live chat scrolling in rather than a wall.
+  private let immediateTrickleThreshold = 4
+  private let immediateTrickleWindowSeconds: Double = 1.5
+  private let immediateTrickleMinIntervalSeconds: Double = 0.06
 
   private struct PendingChatMessage {
     let message: ChatMessage
@@ -1042,7 +1049,7 @@ final class ChatService {
       }
       return lhs.timestamp < rhs.timestamp
     }
-    appendVisible(visibleNow)
+    scheduleImmediate(visibleNow, now: now)
 
     if !syncBuffer.isEmpty {
       // Keep release order correct even when immediate + delayed messages
@@ -1058,6 +1065,26 @@ final class ChatService {
       }
       pendingSyncMessageCount = syncBuffer.count
       startSyncDrainIfNeeded()
+    }
+  }
+
+  /// Surfaces a batch that is releasable right now. Small batches appear
+  /// instantly; a large fill (typically the connect-time backlog + in-window
+  /// burst while the warm-up delay is still ~0) is trickled in over a short
+  /// window via the sync buffer so it reads like live chat instead of a wall.
+  private func scheduleImmediate(_ messages: [ChatMessage], now: Date) {
+    guard !messages.isEmpty else { return }
+    if messages.count <= immediateTrickleThreshold {
+      appendVisible(messages)
+      return
+    }
+    let perMessage = max(
+      immediateTrickleWindowSeconds / Double(messages.count),
+      immediateTrickleMinIntervalSeconds
+    )
+    for (index, message) in messages.enumerated() {
+      let releaseAt = now.addingTimeInterval(perMessage * Double(index))
+      syncBuffer.append(PendingChatMessage(message: message, releaseAt: releaseAt))
     }
   }
 

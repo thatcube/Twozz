@@ -248,7 +248,6 @@ struct PlayerView: View {
     case chatStepperDec(ChatStepperField)
     case chatStepperInc(ChatStepperField)
     case chatEmoteAutoToggle
-    case chatWidthSlider
     case chatAnimatedToggle
     case chatResetButton
   }
@@ -1200,7 +1199,6 @@ struct PlayerView: View {
       .chatStepperDec,
       .chatStepperInc,
       .chatEmoteAutoToggle,
-      .chatWidthSlider,
       .chatAnimatedToggle,
       .chatResetButton:
       return true
@@ -1260,7 +1258,7 @@ struct PlayerView: View {
     .animation(.easeOut(duration: 0.18), value: showChatSettings)
   }
 
-  private let chatSettingsPanelWidth: CGFloat = 560
+  private let chatSettingsPanelWidth: CGFloat = 600
   private let chatSettingsPanelGap: CGFloat = 16
 
   // MARK: - Floating chat settings
@@ -1327,7 +1325,7 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Size")
 
-        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
+        HStack(spacing: 8) {
           ForEach(Array(ChatAppearancePreset.allCases.enumerated()), id: \.element) { index, preset in
             settingsPill(
               title: preset.title,
@@ -1359,7 +1357,7 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Chat Width")
 
-        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
+        HStack(spacing: 8) {
           ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.element) { index, mode in
             settingsPill(
               title: mode.title,
@@ -1377,7 +1375,7 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Chat Position")
 
-        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
+        HStack(spacing: 8) {
           ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.element) { index, mode in
             settingsPill(
               title: mode.title,
@@ -1602,29 +1600,6 @@ struct PlayerView: View {
           .fixedSize(horizontal: false, vertical: true)
       }
 
-      VStack(alignment: .leading, spacing: 10) {
-        settingsSectionHeader("Chat Width")
-
-        HStack(spacing: 14) {
-          chatWidthSliderControl
-
-          Text("\(Int(chatWidth))")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
-            .frame(minWidth: 56, alignment: .trailing)
-            .monospacedDigit()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06)))
-        .focusSection()
-
-        Text("Press left/right to size the chat. The preview updates live behind this panel.")
-          .font(.caption2)
-          .foregroundStyle(.white.opacity(0.55))
-          .fixedSize(horizontal: false, vertical: true)
-      }
-
       Button {
         resetChatAppearance()
       } label: {
@@ -1661,15 +1636,24 @@ struct PlayerView: View {
 
     return Button(action: action) {
       HStack(spacing: 8) {
-        if isSelected {
-          Icon(glyph: .check, size: 22)
-        } else if let icon {
-          Icon(glyph: icon, size: 22)
+        // Reserve the leading icon slot whether or not it's filled so a pill's
+        // width never changes when it becomes selected (the check icon would
+        // otherwise widen it and reflow/​wrap the row).
+        Group {
+          if isSelected {
+            Icon(glyph: .check, size: 22)
+          } else if let icon {
+            Icon(glyph: icon, size: 22)
+          } else {
+            Color.clear
+          }
         }
+        .frame(width: 22, height: 22)
+
         Text(title)
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
           .lineLimit(1)
-          .truncationMode(.tail)
+          .fixedSize(horizontal: true, vertical: false)
       }
       .padding(.horizontal, 14)
       .padding(.vertical, 8)
@@ -1757,55 +1741,6 @@ struct PlayerView: View {
     }
   }
 
-  private var chatWidthSliderControl: some View {
-    let isFocused = focus == .chatWidthSlider
-    let range = ChatAppearance.widthRange
-    let span = range.upperBound - range.lowerBound
-    let fraction = max(0, min(1, (chatWidth - range.lowerBound) / span))
-    let thumb: CGFloat = isFocused ? 26 : 20
-    return GeometryReader { geo in
-      let trackWidth = geo.size.width
-      ZStack(alignment: .leading) {
-        Capsule()
-          .fill(.white.opacity(0.18))
-          .frame(height: 6)
-        Capsule()
-          .fill(.white.opacity(isFocused ? 0.95 : 0.7))
-          .frame(width: max(6, trackWidth * fraction), height: 6)
-        Circle()
-          .fill(.white)
-          .frame(width: thumb, height: thumb)
-          .shadow(color: .black.opacity(isFocused ? 0.35 : 0.0), radius: isFocused ? 8 : 0, y: isFocused ? 3 : 0)
-          .offset(x: max(0, min(trackWidth - thumb, trackWidth * fraction - thumb / 2)))
-          .animation(.easeOut(duration: 0.12), value: fraction)
-          .animation(.easeOut(duration: 0.12), value: isFocused)
-      }
-      .frame(maxHeight: .infinity)
-    }
-    .frame(height: 30)
-    .frame(maxWidth: .infinity)
-    .contentShape(Rectangle())
-    .focusable()
-    .focused($focus, equals: .chatWidthSlider)
-    .focusEffectDisabled()
-    .onMoveCommand { direction in
-      switch direction {
-      case .left: nudgeChatWidth(-1)
-      case .right: nudgeChatWidth(1)
-      case .up: focus = .chatAnimatedToggle
-      case .down: focus = .chatResetButton
-      @unknown default: break
-      }
-    }
-  }
-
-  private func nudgeChatWidth(_ direction: CGFloat) {
-    let step: CGFloat = 12
-    let range = ChatAppearance.widthRange
-    let next = min(max(CGFloat(chatWidthValue) + direction * step, range.lowerBound), range.upperBound)
-    chatWidthValue = Double(next)
-  }
-
   private func adjustChatStepper(_ field: ChatStepperField, by direction: CGFloat) {
     let config = chatStepperConfig(field)
     let next = ChatAppearance.snap(
@@ -1837,7 +1772,6 @@ struct PlayerView: View {
   private func resetChatAppearance() {
     applyChatPreset(.normal)
     chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
-    chatWidthValue = Double(ChatAppearance.defaultWidth)
     chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
   }
 

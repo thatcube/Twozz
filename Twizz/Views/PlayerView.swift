@@ -226,6 +226,7 @@ struct PlayerView: View {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case chatSend
     case raidFollowCancel
+    case simulateRaidButton
     case chatSettingsButton
     case chatTextSizeOption(Int)
     case chatLineHeightOption(Int)
@@ -1050,6 +1051,7 @@ struct PlayerView: View {
       .chatSyncToggle,
       .chatLowLatencyToggle,
       .chatDiagnosticsToggle,
+      .simulateRaidButton,
       .youtubeMergeToggle,
       .youtubeMergeURL:
       return true
@@ -1284,6 +1286,21 @@ struct PlayerView: View {
           showLatencyDiagnostics.toggle()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+
+        if showLatencyDiagnostics {
+          // Debug-only: outgoing raids can't be triggered on demand, so this
+          // injects a simulated one (raiding to Monstercat, a near-24/7 stream)
+          // to exercise the auto-follow banner + redirect. Visible only while the
+          // Diagnostics overlay is enabled.
+          settingsPill(
+            title: "Simulate Outgoing Raid",
+            isSelected: false,
+            focusTag: .simulateRaidButton
+          ) {
+            simulateOutgoingRaid()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
 
         Text(
           "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
@@ -1737,6 +1754,19 @@ struct PlayerView: View {
   private func cancelOutgoingRaid() {
     clearOutgoingRaidState()
     focus = .video
+  }
+
+  /// Debug-only: inject a simulated outgoing raid so the auto-follow flow can be
+  /// tested without waiting for a real raid. Targets Monstercat, which streams
+  /// almost continuously, so the redirect lands on a live channel.
+  private func simulateOutgoingRaid() {
+    showChatSettings = false
+    eventSub.pendingOutgoingRaid = OutgoingRaidEvent(
+      toLogin: "monstercat",
+      toDisplayName: "Monstercat",
+      toBroadcasterID: "",
+      viewerCount: 0
+    )
   }
 
   private func clearOutgoingRaidState() {

@@ -6,26 +6,26 @@ import Foundation
 /// from the older enum-based settings both resolve to values here.
 enum ChatAppearance {
 
-  // MARK: - Bounds & steps (kept sensible — no extreme values)
+  // MARK: - Bounds & steps (Advanced allows a wider, more expressive range)
 
   /// Body/name font point size.
-  static let textSizeRange: ClosedRange<CGFloat> = 20...32
+  static let textSizeRange: ClosedRange<CGFloat> = 16...44
   static let textSizeStep: CGFloat = 2
 
   /// Explicit emote height when not tracking the text size.
-  static let emoteSizeRange: ClosedRange<CGFloat> = 24...46
+  static let emoteSizeRange: ClosedRange<CGFloat> = 18...64
   static let emoteSizeStep: CGFloat = 2
 
   /// Extra spacing applied *within* a wrapped message line.
-  static let lineHeightRange: ClosedRange<CGFloat> = -2...8
+  static let lineHeightRange: ClosedRange<CGFloat> = -4...16
   static let lineHeightStep: CGFloat = 1
 
   /// Vertical gap *between* messages.
-  static let messageSpacingRange: ClosedRange<CGFloat> = 4...20
+  static let messageSpacingRange: ClosedRange<CGFloat> = 0...32
   static let messageSpacingStep: CGFloat = 2
 
   /// Continuous docked-chat width.
-  static let widthRange: ClosedRange<CGFloat> = 340...760
+  static let widthRange: ClosedRange<CGFloat> = 300...820
   static let widthStep: CGFloat = 20
 
   // MARK: - Defaults (a fresh install lands on the "Normal" preset)

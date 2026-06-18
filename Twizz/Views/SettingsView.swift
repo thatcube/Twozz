@@ -23,8 +23,6 @@ struct SettingsView: View {
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage("showChatByDefault") private var showChatByDefault = true
-  @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = false
-  @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
   private let labelColumnWidth: CGFloat = 360
 
@@ -43,7 +41,6 @@ struct SettingsView: View {
             .font(.system(size: 38, weight: .bold))
 
           preferencesGroup
-          experimentalSection
           accountSection
           topShelfSection
           AboutSection()
@@ -166,48 +163,6 @@ struct SettingsView: View {
     .focusSection()
   }
 
-  // MARK: - Experimental
-
-  private var experimentalSection: some View {
-    VStack(alignment: .leading, spacing: 24) {
-      VStack(alignment: .leading, spacing: 6) {
-        Text("Experimental")
-          .font(.system(size: 32, weight: .bold))
-          .foregroundStyle(.secondary)
-
-        Text("Unstable features that may change or break. Turn off if playback misbehaves.")
-          .font(.callout)
-          .foregroundStyle(.secondary)
-      }
-
-      Button {
-        lowLatencyProxyEnabled.toggle()
-      } label: {
-        ExperimentalToggleCard(
-          title: "Low-Latency Mode",
-          description:
-            "Fetches Twitch's prefetch segments to pull live streams closer to real time. May increase buffering on slower connections.",
-          isOn: lowLatencyProxyEnabled
-        )
-      }
-      .buttonStyle(.card)
-
-      Button {
-        showLatencyDiagnostics.toggle()
-      } label: {
-        ExperimentalToggleCard(
-          title: "Latency Diagnostics Overlay",
-          description:
-            "Shows live playback diagnostics (rendition, bitrate, buffer, edge gap) and counts stalls, jumps, and reloads on the player. Use it to troubleshoot freezes and jumps.",
-          isOn: showLatencyDiagnostics
-        )
-      }
-      .buttonStyle(.card)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .focusSection()
-  }
-
   private var accountSection: some View {
     Group {
       if auth.isAuthenticated {
@@ -284,42 +239,6 @@ struct SettingsView: View {
       }
     }
   }
-
-// MARK: - Experimental toggle card
-
-private struct ExperimentalToggleCard: View {
-  let title: String
-  let description: String
-  let isOn: Bool
-
-  var body: some View {
-    HStack(spacing: 28) {
-      Image(systemName: "bolt.horizontal.circle")
-        .font(.system(size: 44))
-        .foregroundStyle(isOn ? Color.green : Color.secondary)
-
-      VStack(alignment: .leading, spacing: 6) {
-        Text(title)
-          .font(.title3.weight(.semibold))
-        Text(description)
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-
-      Spacer(minLength: 24)
-
-      Text(isOn ? "On" : "Off")
-        .font(.headline)
-        .foregroundStyle(isOn ? Color.green : Color.secondary)
-      Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-        .font(.title2)
-        .foregroundStyle(isOn ? Color.green : Color.secondary)
-    }
-    .padding(28)
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-}
 
 // MARK: - Theme option card
 

@@ -27,6 +27,8 @@ questions" until proven.
 3. When **Low-Latency Mode** is on, `LowLatencyHLSProxy` sits in front of the
    playlists via an `AVAssetResourceLoaderDelegate` on a custom URL scheme
    (`twizz-ll://`).
+4. For new installs (no prior saved preference), **Low-Latency Mode defaults to
+   on**. Users can toggle it in in-player chat settings → Playback.
 
 ## Established facts (verified)
 
@@ -122,9 +124,10 @@ These are hypotheses. Do not treat them as fact until the Diagnostics overlay
 
 ## Diagnostics overlay (how to gather data)
 
-Settings → Experimental → **Latency Diagnostics Overlay**. With it on, the
-player shows a panel (while controls are visible) reporting, all measured live
-from the current item:
+Player → open chat settings (`slider.horizontal.3`) → **Playback**. The same
+section contains both **Low-Latency Mode** and **Diagnostics Overlay** toggles.
+With Diagnostics on, the player shows a panel (while controls are visible)
+reporting, all measured live from the current item:
 
 - **Mode** — proxy on/off and whether quality is Auto/adaptive or pinned.
 - **Render** — actual decoded video size (`presentationSize`) and playback rate.

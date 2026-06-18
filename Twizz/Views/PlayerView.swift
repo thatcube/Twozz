@@ -53,7 +53,7 @@ struct PlayerView: View {
   @AppStorage("chatSyncToStream") private var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
   @AppStorage("experimentalYouTubeMergeChannelOrURL") private var experimentalYouTubeMergeChannelOrURL = ""
-  @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = false
+  @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = true
   @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
   @State private var chat = ChatService()
@@ -182,6 +182,8 @@ struct PlayerView: View {
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
     case chatSyncToggle
+    case chatLowLatencyToggle
+    case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
     case raidFollow
@@ -702,6 +704,10 @@ struct PlayerView: View {
 
     let edge = liveEdgeLatencySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "—"
     let wall = wallClockLatencySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "—"
+    let chatHold =
+      chatSyncToStream
+      ? (chatSyncDelaySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "measuring")
+      : "off"
     if diagIsFrozen {
       let frozenFor = diagFrozenSince.map { max(0, Int(Date().timeIntervalSince($0).rounded())) } ?? 0
       lines.append("State: FROZEN (\(frozenFor)s) · Waiting: \(diagWaitingReasonDescription())")
@@ -709,6 +715,7 @@ struct PlayerView: View {
       lines.append("State: Playing/waiting · Waiting: \(diagWaitingReasonDescription())")
     }
     lines.append("Edge gap: \(edge) · Encoder: \(wall)")
+    lines.append("Chat hold: \(chatHold)")
     lines.append("Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
 
     return lines
@@ -895,6 +902,8 @@ struct PlayerView: View {
       .chatWidthOption,
       .chatLayoutOption,
       .chatSyncToggle,
+      .chatLowLatencyToggle,
+      .chatDiagnosticsToggle,
       .youtubeMergeToggle,
       .youtubeMergeURL:
       return true
@@ -1104,6 +1113,39 @@ struct PlayerView: View {
           .font(.caption2)
           .foregroundStyle(.white.opacity(0.6))
           .fixedSize(horizontal: false, vertical: true)
+      }
+      .focusSection()
+
+      VStack(alignment: .leading, spacing: 7) {
+        Text("Playback")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
+
+        settingsPill(
+          title: lowLatencyProxyEnabled ? "Low-Latency Mode On" : "Low-Latency Mode Off",
+          isSelected: lowLatencyProxyEnabled,
+          focusTag: .chatLowLatencyToggle
+        ) {
+          lowLatencyProxyEnabled.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        settingsPill(
+          title: showLatencyDiagnostics ? "Diagnostics Overlay On" : "Diagnostics Overlay Off",
+          isSelected: showLatencyDiagnostics,
+          focusTag: .chatDiagnosticsToggle
+        ) {
+          showLatencyDiagnostics.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        Text(
+          "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
+        )
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.6))
+        .fixedSize(horizontal: false, vertical: true)
       }
       .focusSection()
 

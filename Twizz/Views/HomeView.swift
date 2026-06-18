@@ -28,6 +28,7 @@ struct HomeView: View {
   @State private var browsePath: [TwitchCategory] = []
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
+  @State private var refreshToast: RefreshToastState?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedEnabled = true
@@ -44,6 +45,22 @@ struct HomeView: View {
 
   private var streamCardSize: StreamCardSize {
     StreamCardSize.resolve(streamCardSizeRaw)
+  }
+
+  /// Drives the tab selection while also detecting a "re-tap" of the already
+  /// active Home tab — tvOS `TabView` invokes a selection binding's setter even
+  /// when the value is unchanged, which gives us a place to trigger a manual
+  /// refresh (there's no dedicated reselection callback in SwiftUI).
+  private var sidebarSelection: Binding<SidebarTab> {
+    Binding(
+      get: { selectedSidebarTab },
+      set: { newValue in
+        if newValue == .home && selectedSidebarTab == .home {
+          performManualRefresh()
+        }
+        selectedSidebarTab = newValue
+      }
+    )
   }
 
   private var targetVisibleCards: CGFloat {
@@ -79,7 +96,7 @@ struct HomeView: View {
   }
 
   var body: some View {
-    TabView(selection: $selectedSidebarTab) {
+    TabView(selection: sidebarSelection) {
       tabContainer { homeTab }
         .tag(SidebarTab.home)
         .tabItem {
@@ -143,6 +160,13 @@ struct HomeView: View {
     .background(AppBackground(palette: resolvedPalette))
     .environment(\.themePalette, resolvedPalette)
     .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    .overlay(alignment: .top) {
+      if let refreshToast {
+        RefreshToastView(state: refreshToast)
+          .padding(.top, 48)
+          .transition(.move(edge: .top).combined(with: .opacity))
+      }
+    }
     .task {
       auth.restore()
       promptFirstLaunchSignInIfNeeded()
@@ -579,6 +603,23 @@ struct HomeView: View {
     }
   }
 
+  /// Force-refreshes every Home rail and surfaces a brief toast so the viewer
+  /// gets feedback that a refresh actually happened. Triggered by re-tapping the
+  /// already-active Home tab. Ignores re-taps while a refresh is already running.
+  private func performManualRefresh() {
+    guard refreshToast == nil else { return }
+    Task {
+      withAnimation(.easeOut(duration: 0.25)) { refreshToast = .refreshing }
+      await refreshFollowedChannelsIfNeeded(force: true)
+      await refreshRecommendationsIfNeeded(force: true)
+      await refreshPersonalizedIfNeeded(force: true)
+      requestFocusIfPossible(force: true)
+      withAnimation(.easeOut(duration: 0.25)) { refreshToast = .done }
+      try? await Task.sleep(for: .seconds(1.6))
+      withAnimation(.easeOut(duration: 0.25)) { refreshToast = nil }
+    }
+  }
+
   private func refreshFollowedChannelsIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshFollowedChannels() else { return }
     await follows.refresh(using: auth)
@@ -726,4 +767,43 @@ private struct HomeCategoryCard: View {
 
 #Preview {
   HomeView(deepLinkRouter: DeepLinkRouter())
+}
+
+// MARK: - Refresh toast
+
+enum RefreshToastState {
+  case refreshing
+  case done
+}
+
+/// Small pill that confirms a manual Home refresh is happening / finished, so a
+/// re-tap of the Home tab gives the viewer visible feedback.
+private struct RefreshToastView: View {
+  let state: RefreshToastState
+
+  var body: some View {
+    HStack(spacing: 14) {
+      switch state {
+      case .refreshing:
+        ProgressView()
+          .scaleEffect(0.9)
+        Text("Refreshing…")
+      case .done:
+        Icon(glyph: .circleCheckFilled, size: 30)
+          .foregroundStyle(.green)
+        Text("Refreshed")
+      }
+    }
+    .font(.headline)
+    .padding(.horizontal, 30)
+    .padding(.vertical, 18)
+    .background {
+      if #available(tvOS 26.0, *) {
+        Capsule().glassEffect(.regular, in: Capsule())
+      } else {
+        Capsule().fill(.ultraThinMaterial)
+      }
+    }
+    .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+  }
 }

@@ -1228,20 +1228,6 @@ struct PlayerView: View {
         useLighterOverlayBackground: useLighterOverlayBackground
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      // The settings panel floats to the LEFT of the chat so the whole chat
-      // stays visible while you adjust it. Anchoring the overlay to the message
-      // area (not the whole pane) makes it span the full height down to — but
-      // never overlapping — the composer bar below.
-      .overlay(alignment: .topLeading) {
-        if showChatSettings {
-          chatSettingsPanel
-            .frame(width: chatSettingsPanelWidth)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .padding(.vertical, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
-            .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
-            .transition(.move(edge: .trailing).combined(with: .opacity))
-        }
-      }
 
       chatComposerBar
     }
@@ -1250,6 +1236,19 @@ struct PlayerView: View {
     // Prevent the glass container from showing a focus glow when interactive
     // elements inside (e.g. the chat input) receive focus.
     .focusEffectDisabled()
+    // The settings panel floats to the LEFT of the chat so the whole chat stays
+    // visible while you adjust it. It is attached *outside* GlassChatPaneStyle so
+    // the glass pane's rounded clip never hides it in glass layout mode.
+    .overlay(alignment: .topLeading) {
+      if showChatSettings {
+        chatSettingsPanel
+          .frame(width: chatSettingsPanelWidth)
+          .frame(maxHeight: .infinity, alignment: .top)
+          .padding(.vertical, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
+          .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
+          .transition(.move(edge: .trailing).combined(with: .opacity))
+      }
+    }
     // Keep the settings button pinned to the top-right of the chat. It stays put
     // while the panel opens to the left — intentionally disconnected so the chat
     // is never covered.
@@ -3036,17 +3035,19 @@ private struct ChatSettingsGlassStyle: ViewModifier {
   }
 
   private var strokeOpacity: Double {
-    if isFocused { return isSelected ? 0.85 : 0.62 }
+    if isFocused { return 0.0 }
     return isSelected ? 0.42 : 0.16
   }
 
   @ViewBuilder
   func body(content: Content) -> some View {
+    let tinted = content
+      .foregroundStyle(isFocused ? AnyShapeStyle(.black) : AnyShapeStyle(.white))
     if #available(tvOS 26.0, *) {
-      content
+      tinted
         .glassEffect(
           isFocused
-            ? .regular.tint(.white.opacity(isSelected ? 0.45 : 0.30))
+            ? .regular.tint(.white)
             : (isSelected ? .regular.tint(.white.opacity(0.18)) : .regular),
           in: shape
         )
@@ -3055,11 +3056,11 @@ private struct ChatSettingsGlassStyle: ViewModifier {
         .shadow(color: .black.opacity(isFocused ? 0.25 : 0.0),
                 radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)
     } else {
-      content
-        .background(shape.fill(.ultraThinMaterial))
+      tinted
+        .background(shape.fill(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.ultraThinMaterial)))
         .background(
           shape.fill(.white.opacity(
-            isFocused ? (isSelected ? 0.30 : 0.20) : (isSelected ? 0.18 : 0.08)
+            isFocused ? 0.0 : (isSelected ? 0.18 : 0.08)
           ))
         )
         .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1))

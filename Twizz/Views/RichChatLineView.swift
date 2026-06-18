@@ -128,8 +128,7 @@ struct RichChatLineView: View {
             RoundedRectangle(cornerRadius: sourceBadgeCornerRadius, style: .continuous)
                 .fill(sourceBadgeFill)
 
-            Image(systemName: "play.fill")
-                .font(.system(size: sourceBadgePlayIconSize, weight: .bold))
+            PhIcon(icon: .play, filled: true, size: sourceBadgePlayIconSize)
                 .foregroundStyle(.white)
                 .offset(x: 0.8)
         }

@@ -163,7 +163,7 @@ private struct BrowseStreamsView: View {
           HStack(spacing: 20) {
             Button(action: { dismiss() }) {
               HStack(spacing: 8) {
-                Image(systemName: "chevron.left")
+                PhIcon(icon: .caretLeft, filled: false, size: 22)
                 Text("Categories")
               }
               .font(.callout.weight(.medium))

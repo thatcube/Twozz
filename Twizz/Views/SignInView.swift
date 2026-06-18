@@ -198,8 +198,7 @@ struct SignInView: View {
 
   private var signedInContent: some View {
     VStack(spacing: 36) {
-      Image(systemName: "checkmark.circle.fill")
-        .font(.system(size: 96))
+      PhIcon(icon: .checkCircle, filled: true, size: 96)
         .foregroundStyle(.green)
 
       VStack(spacing: 8) {

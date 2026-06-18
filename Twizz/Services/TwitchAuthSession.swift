@@ -455,6 +455,41 @@ final class TwitchAuthSession {
         return error.localizedDescription
     }
 
+    // MARK: - EventSub support
+
+    /// Credentials needed to open an EventSub WebSocket and create
+    /// subscriptions on behalf of the signed-in user. `nil` when signed out.
+    var eventSubCredentials: TwitchEventSubCredentials? {
+        guard isAuthenticated,
+              let clientID,
+              let accessToken,
+              let userID else {
+            return nil
+        }
+        return TwitchEventSubCredentials(
+            clientID: clientID,
+            accessToken: accessToken,
+            userID: userID
+        )
+    }
+
+    /// Resolve a channel login to its numeric Twitch user id, reusing the shared
+    /// broadcaster-id cache and transparently refreshing the user token on 401.
+    /// Public wrapper so EventSub can resolve the `from_broadcaster_user_id`
+    /// without duplicating auth/HTTP logic.
+    func broadcasterID(forLogin login: String) async throws -> String {
+        guard isAuthenticated, let clientID else {
+            throw ChatSendError.notSignedIn
+        }
+        return try await withUserTokenRefreshRetry { accessToken in
+            try await resolveBroadcasterID(
+                forLogin: login,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+        }
+    }
+
     // MARK: - Sending chat
 
     /// Send a chat message to `channelLogin` on behalf of the signed-in user via
@@ -780,6 +815,14 @@ final class TwitchAuthSession {
             throw FollowActionError.mutationFailed(reason: opError)
         }
     }
+}
+
+/// Credentials required to open an EventSub WebSocket and create subscriptions
+/// for the signed-in user.
+struct TwitchEventSubCredentials: Equatable {
+    let clientID: String
+    let accessToken: String
+    let userID: String
 }
 
 enum FollowActionError: LocalizedError {

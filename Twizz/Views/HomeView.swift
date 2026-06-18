@@ -221,7 +221,7 @@ struct HomeView: View {
       )
 
       ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 40) {
+        VStack(alignment: .leading, spacing: 72) {
           followingSection(rail: rail)
           recommendedChannelsSection(rail: rail)
           recommendedCategoriesSection(rail: rail)

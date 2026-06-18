@@ -71,6 +71,8 @@ struct PlayerView: View {
   @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
   @State private var chat = ChatService()
+  /// Detects *outgoing* raids (the watched channel raiding away) via EventSub.
+  @State private var eventSub = EventSubService()
   @State private var player = AVPlayer()
   /// Drives the audio-only visualizer orb. Reacts to real audio when the player
   /// item exposes a tappable audio track (best effort on live HLS), otherwise
@@ -140,6 +142,10 @@ struct PlayerView: View {
   @State private var lastControlFocus: Focusable = .quality
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
+  /// The outgoing raid currently being followed (with a cancel window).
+  @State private var outgoingRaid: OutgoingRaidEvent?
+  @State private var outgoingRaidSecondsRemaining = 0
+  @State private var outgoingRaidFollowTask: Task<Void, Never>?
 
   // MARK: Diagnostics (experimental troubleshooting overlay)
   // Counters and a rolling event log so freezes/jumps can be observed on-device
@@ -219,6 +225,8 @@ struct PlayerView: View {
   private enum Focusable: Hashable {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case chatSend
+    case raidFollowCancel
+    case simulateRaidButton
     case chatSettingsButton
     case chatTextSizeOption(Int)
     case chatLineHeightOption(Int)
@@ -335,6 +343,12 @@ struct PlayerView: View {
           .transition(.move(edge: .bottom).combined(with: .opacity))
           .zIndex(10)
       }
+
+      if let raid = outgoingRaid {
+        outgoingRaidBanner(raid)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .zIndex(11)
+      }
     }
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
@@ -349,12 +363,20 @@ struct PlayerView: View {
         withAnimation { chat.pendingRaid = nil }
       }
     }
+    .onChange(of: eventSub.pendingOutgoingRaid) { _, newRaid in
+      // Outgoing raids (the channel you're watching raiding someone else):
+      // mirror Twitch's native behavior and follow by default, but give a brief
+      // cancelable window first.
+      guard let newRaid else { return }
+      beginOutgoingRaidFollow(newRaid)
+    }
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
       configurePlayerForLive()
       resetDiagnostics()
       applyExperimentalYouTubeSettings()
       chat.connect(to: activeChannel)
+      eventSub.start(forChannel: activeChannel, auth: auth)
       async let metadataTask: Void = refreshChannelMetadata()
       await load()
       _ = await metadataTask
@@ -372,11 +394,13 @@ struct PlayerView: View {
       hideTask?.cancel()
       focusRecoveryTask?.cancel()
       chatSyncSendClearTask?.cancel()
+      outgoingRaidFollowTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
       audioLevelMonitor.stop()
       player.pause()
       chat.disconnect()
+      eventSub.stop()
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
@@ -1031,6 +1055,7 @@ struct PlayerView: View {
       .chatSyncToggle,
       .chatLowLatencyToggle,
       .chatDiagnosticsToggle,
+      .simulateRaidButton,
       .youtubeMergeToggle,
       .youtubeMergeURL:
       return true
@@ -1265,6 +1290,21 @@ struct PlayerView: View {
           showLatencyDiagnostics.toggle()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+
+        if showLatencyDiagnostics {
+          // Debug-only: outgoing raids can't be triggered on demand, so this
+          // injects a simulated one (raiding to Monstercat, a near-24/7 stream)
+          // to exercise the auto-follow banner + redirect. Visible only while the
+          // Diagnostics overlay is enabled.
+          settingsPill(
+            title: "Simulate Outgoing Raid",
+            isSelected: false,
+            focusTag: .simulateRaidButton
+          ) {
+            simulateOutgoingRaid()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
 
         Text(
           "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
@@ -1630,6 +1670,7 @@ struct PlayerView: View {
   private func followRaid(_ login: String) {
     raidBannerDismissTask?.cancel()
     chat.pendingRaid = nil
+    clearOutgoingRaidState()
     activeChannel = login
     stopPlaybackWatchdog()
     stopLatencyMonitor()
@@ -1637,6 +1678,10 @@ struct PlayerView: View {
     player.replaceCurrentItem(with: nil)
     currentSourceURL = nil
     chat.disconnect()
+    // Restart the outgoing-raid listener for the new channel so a stale
+    // subscription from the previous channel never lingers.
+    eventSub.stop()
+    eventSub.start(forChannel: login, auth: auth)
     resetDiagnostics()
     isLoading = true
     errorMessage = nil
@@ -1650,6 +1695,91 @@ struct PlayerView: View {
       _ = await metadataTask
       focus = .video
     }
+  }
+
+  // MARK: - Outgoing raid (auto-follow)
+
+  /// Banner shown when the watched channel is raiding away. Defaults to
+  /// following after a short countdown; the focusable Cancel button opts out.
+  @ViewBuilder
+  private func outgoingRaidBanner(_ raid: OutgoingRaidEvent) -> some View {
+    VStack {
+      Spacer()
+      HStack(spacing: 20) {
+        Icon(glyph: .userPlus, size: 34)
+          .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Raiding to \(raid.toDisplayName)")
+            .font(.headline).bold()
+            .foregroundStyle(.white)
+          Text("Auto-following in \(outgoingRaidSecondsRemaining)s · Cancel to stay here")
+            .font(.subheadline)
+            .foregroundStyle(.white.opacity(0.85))
+        }
+        Button("Cancel") {
+          cancelOutgoingRaid()
+        }
+        .focused($focus, equals: .raidFollowCancel)
+      }
+      .padding(.horizontal, 36)
+      .padding(.vertical, 20)
+      .background(Color(red: 0.40, green: 0.25, blue: 0.78).opacity(0.95), in: Capsule())
+      .padding(.bottom, 60)
+    }
+    .ignoresSafeArea()
+  }
+
+  /// Start the cancelable countdown that ends in following the raid target.
+  private func beginOutgoingRaidFollow(_ raid: OutgoingRaidEvent) {
+    // Don't redirect onto the channel we're already watching.
+    guard raid.toLogin.lowercased() != activeChannel.lowercased() else {
+      eventSub.pendingOutgoingRaid = nil
+      return
+    }
+
+    outgoingRaidFollowTask?.cancel()
+    withAnimation {
+      outgoingRaid = raid
+      outgoingRaidSecondsRemaining = 6
+    }
+    focus = .raidFollowCancel
+
+    let target = raid.toLogin
+    outgoingRaidFollowTask = Task {
+      while outgoingRaidSecondsRemaining > 0 {
+        try? await Task.sleep(for: .seconds(1))
+        guard !Task.isCancelled else { return }
+        outgoingRaidSecondsRemaining -= 1
+      }
+      guard !Task.isCancelled else { return }
+      // followRaid clears outgoing state and restarts the listener.
+      followRaid(target)
+    }
+  }
+
+  private func cancelOutgoingRaid() {
+    clearOutgoingRaidState()
+    focus = .video
+  }
+
+  /// Debug-only: inject a simulated outgoing raid so the auto-follow flow can be
+  /// tested without waiting for a real raid. Targets AlveusSanctuary.
+  private func simulateOutgoingRaid() {
+    showChatSettings = false
+    eventSub.pendingOutgoingRaid = OutgoingRaidEvent(
+      toLogin: "alveussanctuary",
+      toDisplayName: "AlveusSanctuary",
+      toBroadcasterID: "",
+      viewerCount: 0
+    )
+  }
+
+  private func clearOutgoingRaidState() {
+    outgoingRaidFollowTask?.cancel()
+    outgoingRaidFollowTask = nil
+    eventSub.pendingOutgoingRaid = nil
+    withAnimation { outgoingRaid = nil }
+    outgoingRaidSecondsRemaining = 0
   }
 
   // MARK: - Quality picker

@@ -48,10 +48,10 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
   }
 
   /// Resolves the concrete palette. When set to `.system`, the device's current
-  /// scheme decides between the OLED (dark side) and Light palettes.
+  /// scheme decides between the Dark (dark side) and Light palettes.
   func palette(systemColorScheme: ColorScheme) -> ThemePalette {
     switch self {
-    case .system: return systemColorScheme == .dark ? .oled : .light
+    case .system: return systemColorScheme == .dark ? .dark : .light
     case .dark: return .dark
     case .oled: return .oled
     case .light: return .light

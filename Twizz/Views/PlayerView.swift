@@ -230,8 +230,6 @@ struct PlayerView: View {
     case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
-    case raidFollow
-    case raidStay
   }
 
   private var chatTextSize: ChatTextSizeOption {
@@ -339,14 +337,17 @@ struct PlayerView: View {
       }
     }
     .onChange(of: chat.pendingRaid) { _, newRaid in
+      // Incoming raids (someone raiding the channel you're watching) are purely
+      // informational: show a passive banner and auto-dismiss it. We never steal
+      // focus or offer to "follow", because following would take you away from
+      // the channel that is actually being raided.
       guard newRaid != nil else { return }
       raidBannerDismissTask?.cancel()
       raidBannerDismissTask = Task {
-        try? await Task.sleep(for: .seconds(30))
+        try? await Task.sleep(for: .seconds(12))
         guard !Task.isCancelled else { return }
         withAnimation { chat.pendingRaid = nil }
       }
-      withAnimation { focus = .raidFollow }
     }
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
@@ -1600,53 +1601,29 @@ struct PlayerView: View {
 
   // MARK: - Raid banner
 
+  /// A passive, non-interactive banner announcing an *incoming* raid (someone
+  /// raiding the channel you're watching). It deliberately has no buttons and
+  /// cannot take focus — you're already on the channel being raided, so there's
+  /// nothing to follow.
   @ViewBuilder
   private func raidBanner(_ raid: RaidEvent) -> some View {
     VStack {
       Spacer()
-      HStack(spacing: 24) {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("\(raid.displayName) is raiding!")
-            .font(.title2).bold()
-            .foregroundStyle(.white)
-          Text("\(raid.viewerCount) viewers incoming")
-            .font(.headline)
-            .foregroundStyle(.white.opacity(0.8))
-        }
-        Spacer()
-        Button {
-          withAnimation { followRaid(raid.login) }
-        } label: {
-          Text("Follow Raid")
-            .font(.headline).bold()
-            .padding(.horizontal, 28)
-            .padding(.vertical, 14)
-        }
-        .buttonStyle(.plain)
-        .background(Color.purple)
-        .clipShape(Capsule())
-        .focused($focus, equals: .raidFollow)
-
-        Button {
-          raidBannerDismissTask?.cancel()
-          withAnimation { chat.pendingRaid = nil }
-        } label: {
-          Text("Stay Here")
-            .font(.headline)
-            .padding(.horizontal, 28)
-            .padding(.vertical, 14)
-        }
-        .buttonStyle(.plain)
-        .background(.white.opacity(0.18))
-        .clipShape(Capsule())
-        .focused($focus, equals: .raidStay)
+      VStack(spacing: 4) {
+        Text("\(raid.displayName) is raiding this channel")
+          .font(.headline).bold()
+          .foregroundStyle(.white)
+        Text("\(raid.viewerCount) viewers incoming")
+          .font(.subheadline)
+          .foregroundStyle(.white.opacity(0.85))
       }
-      .padding(32)
-      .background(.black.opacity(0.75))
-      .clipShape(RoundedRectangle(cornerRadius: 20))
-      .padding(.horizontal, 60)
+      .multilineTextAlignment(.center)
+      .padding(.horizontal, 32)
+      .padding(.vertical, 18)
+      .background(.purple.opacity(0.85), in: Capsule())
       .padding(.bottom, 60)
     }
+    .allowsHitTesting(false)
     .ignoresSafeArea()
   }
 

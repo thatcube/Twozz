@@ -35,7 +35,7 @@ Chat:
 - Send messages when signed in (`user:write:chat`).
 - Twitch badges (global + channel-specific).
 - Emotes: Twitch native (incl. channel/sub), 7TV, BTTV, and FFZ (global + channel).
-- Raid detection with a "Follow Raid" banner to hop to the raid target.
+- Incoming raid detection with a passive banner (no "follow" — you're already on the channel being raided).
 - Experimental: merge a YouTube live chat into the Twitch chat pane.
 
 ## Tech Stack

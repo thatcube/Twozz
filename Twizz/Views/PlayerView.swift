@@ -1736,7 +1736,7 @@ struct PlayerView: View {
         // SettingsView pills. Shown only when selected (not a reserved-space
         // placeholder), so unselected pills stay compact with no empty padding.
         if isSelected {
-          Icon(glyph: .check, size: 20)
+          Icon(glyph: .check, size: 26)
         }
       }
     }
@@ -3472,11 +3472,16 @@ private struct ChatSettingsPanelGlassStyle: ViewModifier {
   func body(content: Content) -> some View {
     if #available(tvOS 26.0, *) {
       content
+        // Same darkening scrim the Glass chat pane paints over its glass
+        // (ChatView uses Color.black.opacity(0.22)); without it the panel's bare
+        // glass read noticeably lighter than the chat beside it.
+        .background(Color.black.opacity(0.22), in: shape)
         .glassEffect(.regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
     } else {
       content
         .background(.ultraThinMaterial, in: shape)
+        .background(Color.black.opacity(0.22), in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
     }
   }

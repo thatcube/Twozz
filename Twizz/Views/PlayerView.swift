@@ -2365,6 +2365,9 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
     field.font = .preferredFont(forTextStyle: .callout)
     field.returnKeyType = .send
     field.enablesReturnKeyAutomatically = true
+    // Shown as the prompt on the tvOS keyboard entry screen so it's clear the
+    // message posts immediately on confirm — there's no separate review step.
+    field.placeholder = "Posts to chat as soon as you press Send"
     field.autocorrectionType = .no
     field.smartQuotesType = .no
     field.smartDashesType = .no

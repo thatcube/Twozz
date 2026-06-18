@@ -20,7 +20,6 @@ struct SearchView: View {
         onWatchChannel: { selectedChannel = $0 },
         onSelectCategory: onSelectCategory
       )
-      .navigationTitle("Search")
     }
     .searchable(
       text: $query,
@@ -100,10 +99,8 @@ private struct SearchResultsView: View {
       Image(systemName: "magnifyingglass")
         .font(.system(size: 48, weight: .regular))
         .foregroundStyle(.secondary)
-      Text("Search Twitch")
-        .font(.title2.weight(.semibold))
       Text("Find live channels and categories by name.")
-        .font(.callout)
+        .font(.title3)
         .foregroundStyle(.secondary)
     }
     .padding(.top, 24)

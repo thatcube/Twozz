@@ -109,6 +109,10 @@ struct StreamChannelCard: View {
   @State private var livePreviewOpacity = 0.0
   @State private var hasConfiguredPreviewPlayer = false
 
+  /// Hairline inset that pulls the live video plane inside the rounded media
+  /// boundary so tvOS's hardware video overlay can't bleed past the corners.
+  private static let previewVideoInset: CGFloat = 3
+
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       media
@@ -187,9 +191,20 @@ struct StreamChannelCard: View {
       }
 
       if isShowingLivePreviewSurface {
-        PreviewVideoSurface(player: previewPlayer, cornerRadius: layout.mediaCornerRadius)
-          .opacity(livePreviewOpacity)
-          .transition(.opacity)
+        // Inset the hardware video plane a hair inside the media's clean,
+        // SwiftUI-clipped rounded boundary. tvOS composites live video on an
+        // overlay plane that ignores CALayer corner masks, so the video bleeds
+        // ~1-2px past any rounded clip. Pulling it inside means that bleed lands
+        // within the rounded boundary; the static thumbnail (same stream, and
+        // clipped perfectly) fills the resulting hairline ring so the corners
+        // read as clean rounded video with no visible bleed.
+        PreviewVideoSurface(
+          player: previewPlayer,
+          cornerRadius: max(0, layout.mediaCornerRadius - Self.previewVideoInset)
+        )
+        .padding(Self.previewVideoInset)
+        .opacity(livePreviewOpacity)
+        .transition(.opacity)
       }
 
       LinearGradient(

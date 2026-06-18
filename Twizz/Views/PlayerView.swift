@@ -128,6 +128,9 @@ struct PlayerView: View {
   @State private var diagIsFrozen = false
   @State private var diagFrozenSince: Date?
   @State private var diagSessionStartedAt: Date?
+  @State private var diagInstabilityScore = 0
+  @State private var diagLastInstabilityAt: Date?
+  @State private var diagAdaptiveFallbackCount = 0
 
   private let controlsAutoHideSeconds: Double = 10
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
@@ -165,6 +168,11 @@ struct PlayerView: View {
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
   private let diagJumpForwardThresholdSeconds: Double = 2.0
   private let diagJumpBackwardThresholdSeconds: Double = 1.0
+  // Stability guard: if stalls/jumps stack up within this rolling window while
+  // pinned to a fixed rendition, fall back to Auto/adaptive before we keep
+  // fighting the network with no ABR escape hatch.
+  private let diagInstabilityWindowSeconds: Double = 75
+  private let diagFallbackScoreThreshold = 3
   private let chatReplayMessageCount = 30
   private let chatComposerRowHeight: CGFloat = 62
   private let chatInputFocusedHeight: CGFloat = 62
@@ -717,6 +725,7 @@ struct PlayerView: View {
     lines.append("Edge gap: \(edge) · Encoder: \(wall)")
     lines.append("Chat hold: \(chatHold)")
     lines.append("Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
+    lines.append("Stability score: \(diagInstabilityScore) · Auto-fallbacks: \(diagAdaptiveFallbackCount)")
 
     return lines
   }
@@ -781,6 +790,34 @@ struct PlayerView: View {
       if showLatencyDiagnostics {
         logDiagnosticsEvent("stall (\(reason))")
       }
+      registerInstability(points: 2, reason: reason)
+    }
+  }
+
+  private func registerInstability(points: Int, reason: String) {
+    let now = Date()
+    if let last = diagLastInstabilityAt, now.timeIntervalSince(last) > diagInstabilityWindowSeconds {
+      diagInstabilityScore = 0
+    }
+    diagLastInstabilityAt = now
+    diagInstabilityScore += points
+    maybeTriggerAdaptiveFallback(trigger: reason)
+  }
+
+  /// If fixed-quality playback becomes unstable, switch to Auto/adaptive so ABR
+  /// can step down instead of stalling/jumping repeatedly.
+  private func maybeTriggerAdaptiveFallback(trigger: String) {
+    guard diagInstabilityScore >= diagFallbackScoreThreshold else { return }
+    guard preferredQuality != "Auto" else { return }
+    guard playback != nil else { return }
+
+    preferredQuality = "Auto"
+    applyQualityPreference("Auto")
+    diagAdaptiveFallbackCount += 1
+    diagInstabilityScore = 0
+
+    if showLatencyDiagnostics {
+      logDiagnosticsEvent("stability fallback -> Auto (\(trigger))")
     }
   }
 
@@ -812,9 +849,11 @@ struct PlayerView: View {
       if forwardDrift >= diagJumpForwardThresholdSeconds {
         diagJumpCount += 1
         logDiagnosticsEvent("jump +\(diagFormat(forwardDrift, decimals: 1))s forward")
+        registerInstability(points: 1, reason: "jump forward")
       } else if advanced <= -diagJumpBackwardThresholdSeconds {
         diagJumpCount += 1
         logDiagnosticsEvent("jump \(diagFormat(advanced, decimals: 1))s back")
+        registerInstability(points: 1, reason: "jump back")
       }
 
       if advanced >= 0.05 {
@@ -839,6 +878,9 @@ struct PlayerView: View {
     diagIsFrozen = false
     diagFrozenSince = nil
     diagSessionStartedAt = Date()
+    diagInstabilityScore = 0
+    diagLastInstabilityAt = nil
+    diagAdaptiveFallbackCount = 0
   }
 
   // MARK: - Controls visibility

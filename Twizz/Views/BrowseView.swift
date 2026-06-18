@@ -108,6 +108,7 @@ private struct BrowseCategoriesView: View {
             .zIndex(isFocused ? 2 : 0)
           }
         }
+        .twizzLiquidGlassCluster(spacing: 24)
         .padding(.vertical, 8)
         .focusSection()
       }
@@ -237,6 +238,7 @@ private struct BrowseStreamsView: View {
                 .zIndex(isFocused ? 2 : 0)
               }
             }
+            .twizzLiquidGlassCluster(spacing: gridSpacing)
             .focusSection()
           }
         }
@@ -284,13 +286,13 @@ private struct CategoryCard: View {
       VStack(alignment: .leading, spacing: 4) {
         Text(category.name)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
+          .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
           .lineLimit(2, reservesSpace: true)
 
         if let viewers = category.viewerCount {
           Text("\(viewers) watching")
             .font(.caption2)
-            .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
+            .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
         } else {
           Text(" ")
             .font(.caption2)
@@ -306,5 +308,13 @@ private struct CategoryCard: View {
       isFocused: isFocused,
       palette: palette
     )
+  }
+
+  private var usesLiftFocusedText: Bool {
+    guard isFocused else { return false }
+    if #available(tvOS 26.0, *) {
+      return false
+    }
+    return true
   }
 }

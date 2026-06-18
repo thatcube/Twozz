@@ -266,6 +266,7 @@ struct HomeView: View {
             .zIndex(isFocused ? 2 : 0)
           }
         }
+        .twizzLiquidGlassCluster(spacing: rail.spacing)
         .padding(.vertical, channelRailVerticalPadding)
       }
       .scrollClipDisabled()
@@ -329,6 +330,7 @@ struct HomeView: View {
               .zIndex(isFocused ? 2 : 0)
             }
           }
+          .twizzLiquidGlassCluster(spacing: rail.spacing)
           .padding(.vertical, channelRailVerticalPadding)
         }
         .scrollClipDisabled()
@@ -371,6 +373,7 @@ struct HomeView: View {
               .zIndex(isFocused ? 2 : 0)
             }
           }
+          .twizzLiquidGlassCluster(spacing: rail.spacing)
           .padding(.vertical, channelRailVerticalPadding)
         }
         .scrollClipDisabled()
@@ -572,13 +575,13 @@ private struct HomeCategoryCard: View {
       VStack(alignment: .leading, spacing: 4) {
         Text(category.name)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
+          .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
           .lineLimit(2, reservesSpace: true)
 
         if let viewers = category.viewerCount {
           Text("\(viewers) watching")
             .font(.caption2)
-            .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
+            .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
         } else {
           Text(" ")
             .font(.caption2)
@@ -595,6 +598,14 @@ private struct HomeCategoryCard: View {
       isFocused: isFocused,
       palette: palette
     )
+  }
+
+  private var usesLiftFocusedText: Bool {
+    guard isFocused else { return false }
+    if #available(tvOS 26.0, *) {
+      return false
+    }
+    return true
   }
 }
 

@@ -120,19 +120,19 @@ struct StreamChannelCard: View {
         VStack(alignment: .leading, spacing: 4) {
           Text(channel.displayName)
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
+            .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
             .lineLimit(1)
 
           Text(channel.title.isEmpty ? "No title" : channel.title)
             .font(.footnote)
-            .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
+            .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
             .lineLimit(2, reservesSpace: true)
             .frame(maxWidth: .infinity, alignment: .leading)
 
           if showsGameName {
             Text(channel.gameName)
               .font(.caption2)
-              .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
+              .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
               .lineLimit(1)
           }
         }
@@ -208,6 +208,14 @@ struct StreamChannelCard: View {
   private var railCardWidth: CGFloat? {
     guard let mediaWidth = layout.mediaWidth else { return nil }
     return mediaWidth + (layout.focusHorizontalInset * 2)
+  }
+
+  private var usesLiftFocusedText: Bool {
+    guard isFocused else { return false }
+    if #available(tvOS 26.0, *) {
+      return false
+    }
+    return true
   }
 
   @MainActor

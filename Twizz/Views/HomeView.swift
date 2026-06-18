@@ -266,7 +266,6 @@ struct HomeView: View {
             .zIndex(isFocused ? 2 : 0)
           }
         }
-        .twizzLiquidGlassCluster(spacing: rail.spacing)
         .padding(.vertical, channelRailVerticalPadding)
       }
       .scrollClipDisabled()
@@ -330,7 +329,6 @@ struct HomeView: View {
               .zIndex(isFocused ? 2 : 0)
             }
           }
-          .twizzLiquidGlassCluster(spacing: rail.spacing)
           .padding(.vertical, channelRailVerticalPadding)
         }
         .scrollClipDisabled()
@@ -373,7 +371,6 @@ struct HomeView: View {
               .zIndex(isFocused ? 2 : 0)
             }
           }
-          .twizzLiquidGlassCluster(spacing: rail.spacing)
           .padding(.vertical, channelRailVerticalPadding)
         }
         .scrollClipDisabled()

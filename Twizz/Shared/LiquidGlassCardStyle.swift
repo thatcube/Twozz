@@ -13,10 +13,7 @@ struct TwizzLiquidGlassCardModifier: ViewModifier {
 
     if #available(tvOS 26.0, *) {
       content
-        .glassEffect(
-          isFocused ? .regular.tint(.white.opacity(0.12)).interactive() : .regular,
-          in: .rect(cornerRadius: cornerRadius)
-        )
+        .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
         .clipShape(shape)
     } else {
       content
@@ -40,16 +37,5 @@ extension View {
         palette: palette
       )
     )
-  }
-
-  @ViewBuilder
-  func twizzLiquidGlassCluster(spacing: CGFloat) -> some View {
-    if #available(tvOS 26.0, *) {
-      GlassEffectContainer(spacing: spacing) {
-        self
-      }
-    } else {
-      self
-    }
   }
 }

@@ -108,7 +108,6 @@ private struct BrowseCategoriesView: View {
             .zIndex(isFocused ? 2 : 0)
           }
         }
-        .twizzLiquidGlassCluster(spacing: 24)
         .padding(.vertical, 8)
         .focusSection()
       }
@@ -238,7 +237,6 @@ private struct BrowseStreamsView: View {
                 .zIndex(isFocused ? 2 : 0)
               }
             }
-            .twizzLiquidGlassCluster(spacing: gridSpacing)
             .focusSection()
           }
         }

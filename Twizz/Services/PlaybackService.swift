@@ -7,7 +7,7 @@ import Foundation
 /// Verified working on-device with no client-integrity token, so no server is required.
 ///
 /// This is a non-commercial, ad-respecting client: it does not strip ads.
-enum PlaybackError: LocalizedError {
+enum PlaybackError: LocalizedError, Equatable {
     case http(Int)
     case integrityRequired
     case offline
@@ -43,6 +43,16 @@ struct ChannelMetadata {
     let displayName: String
     let title: String
     let profileImageURL: URL?
+}
+
+/// Authoritative live state for a channel, used to decide whether to surface the
+/// "offline" empty state. `.unknown` means the lookup itself failed (network,
+/// parse, throttling) and must NOT be treated as offline — only `.offline`
+/// positively confirms the broadcast has ended.
+enum StreamLiveStatus {
+    case live
+    case offline
+    case unknown
 }
 
 struct PlaybackService {
@@ -156,6 +166,47 @@ struct PlaybackService {
             title: title,
             profileImageURL: profileImageURL
         )
+    }
+
+    /// Authoritatively checks whether a channel is currently live.
+    ///
+    /// Twitch's GraphQL `user.stream` object is non-null only while a broadcast
+    /// is active, so it is a far more reliable "is this offline?" signal than the
+    /// HLS resolve path (which can briefly keep serving a stale playlist right as
+    /// a stream ends). Any failure returns `.unknown` so callers never mistake a
+    /// transient network hiccup for the channel going offline.
+    static func streamLiveStatus(for channel: String) async -> StreamLiveStatus {
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let query = "query StreamStatus($login: String!) { user(login: $login) { stream { id type } } }"
+        let body: [String: Any] = [
+            "query": query,
+            "variables": ["login": channel.lowercased()],
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        guard let (data, response) = try? await networkSession.data(for: req) else { return .unknown }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else { return .unknown }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .unknown }
+        // A GraphQL `errors` array means we can't trust the payload — stay unknown.
+        if json["errors"] != nil { return .unknown }
+        guard let dataObj = json["data"] as? [String: Any] else { return .unknown }
+
+        // `user` is present in `data` even for offline channels; only `stream`
+        // disappears when the broadcast ends. An explicitly-null `user` means the
+        // login doesn't exist, which we also treat as offline.
+        guard dataObj.keys.contains("user") else { return .unknown }
+        let userObj = dataObj["user"] as? [String: Any]
+        guard let userObj else { return .offline }
+
+        guard userObj.keys.contains("stream") else { return .unknown }
+        let streamObj = userObj["stream"] as? [String: Any]
+        return streamObj == nil ? .offline : .live
     }
 
     // MARK: - On-demand (clips + VODs)

@@ -83,6 +83,7 @@ struct PlayerView: View {
   @State private var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
   @State private var playback: StreamPlayback?
   @State private var errorMessage: String?
+  @State private var isOffline = false
   @State private var isLoading = true
   @State private var showChat: Bool = UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
   @State private var chatReplayStartMessageID: ChatMessage.ID?
@@ -222,9 +223,11 @@ struct PlayerView: View {
   @FocusState private var focus: Focusable?
   private enum Focusable: Hashable {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
+    case offlineViewChannel, offlineTryAgain
     case chatSend
     case raidFollowCancel
     case simulateRaidButton
+    case simulateOfflineButton
     case chatSettingsButton
     case chatTextSizeOption(Int)
     case chatLineHeightOption(Int)
@@ -500,7 +503,7 @@ struct PlayerView: View {
       VideoSurface(player: player)
         .ignoresSafeArea()
 
-      if isAudioOnlyActive, !isLoading, errorMessage == nil {
+      if isAudioOnlyActive, !isLoading, errorMessage == nil, !isOffline {
         AudioVisualizerView(
           level: audioLevelMonitor.level,
           avatarURL: channelAvatarURL,
@@ -517,7 +520,7 @@ struct PlayerView: View {
       }
 
       if showControls, !isLoading,
-        errorMessage == nil
+        errorMessage == nil, !isOffline
       {
         VStack {
           HStack {
@@ -540,7 +543,7 @@ struct PlayerView: View {
       // Only expose the video focus target while controls are hidden.
       // Otherwise, left-edge movement from the control cluster can escape
       // into this invisible target and appear as lost focus.
-      if !showControls {
+      if !showControls, !isOffline {
         Color.clear
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .contentShape(Rectangle())
@@ -555,7 +558,9 @@ struct PlayerView: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       }
 
-      if let errorMessage {
+      if isOffline {
+        offlineState
+      } else if let errorMessage {
         VStack(spacing: 24) {
           Text("Couldn't play \(activeChannel)")
             .font(.title2).bold()
@@ -569,6 +574,101 @@ struct PlayerView: View {
       } else if showControls {
         bottomOverlay
       }
+    }
+  }
+
+  // MARK: - Offline empty state
+
+  private var offlineDisplayName: String {
+    channelDisplayName.isEmpty ? activeChannel : channelDisplayName
+  }
+
+  private var offlineState: some View {
+    ZStack {
+      // Opaque backdrop so the frozen last frame never bleeds through.
+      palette.playerBackdrop.ignoresSafeArea()
+
+      VStack(spacing: 28) {
+        offlineAvatar
+
+        VStack(spacing: 10) {
+          Text("OFFLINE")
+            .font(.caption.weight(.bold))
+            .tracking(2.5)
+            .foregroundStyle(.white.opacity(0.55))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(.white.opacity(0.10), in: Capsule())
+
+          Text(offlineDisplayName)
+            .font(.system(size: 46, weight: .bold))
+            .foregroundStyle(.white)
+
+          Text("The stream has ended.")
+            .font(.title3)
+            .foregroundStyle(.white.opacity(0.6))
+
+          Text("Catch up on recent videos and clips, or check back soon.")
+            .font(.body)
+            .foregroundStyle(.white.opacity(0.45))
+            .multilineTextAlignment(.center)
+        }
+
+        HStack(spacing: 20) {
+          Button {
+            presentChannelPage()
+          } label: {
+            Label("View Channel", systemImage: "play.rectangle.on.rectangle")
+              .font(.headline)
+              .padding(.horizontal, 10)
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(ThemePalette.brandPurple)
+          .focused($focus, equals: .offlineViewChannel)
+
+          Button {
+            retryFromOffline()
+          } label: {
+            Label("Try Again", systemImage: "arrow.clockwise")
+              .font(.headline)
+              .padding(.horizontal, 10)
+          }
+          .TwizzControlButtonStyle()
+          .focused($focus, equals: .offlineTryAgain)
+        }
+        .padding(.top, 8)
+      }
+      .frame(maxWidth: 760)
+      .padding(48)
+    }
+    .transition(.opacity)
+  }
+
+  @ViewBuilder
+  private var offlineAvatar: some View {
+    Group {
+      if let channelAvatarURL {
+        AsyncImage(url: channelAvatarURL) { image in
+          image.resizable().scaledToFill()
+        } placeholder: {
+          offlineAvatarPlaceholder
+        }
+      } else {
+        offlineAvatarPlaceholder
+      }
+    }
+    .frame(width: 132, height: 132)
+    .clipShape(Circle())
+    .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .grayscale(0.6)
+    .opacity(0.9)
+  }
+
+  private var offlineAvatarPlaceholder: some View {
+    ZStack {
+      Circle().fill(.white.opacity(0.10))
+      Icon(glyph: .userCircle, size: 64)
+        .foregroundStyle(.white.opacity(0.7))
     }
   }
 
@@ -1012,6 +1112,12 @@ struct PlayerView: View {
       followRaid(login)
       return
     }
+    // Don't resurrect a dead stream — if we entered the channel page from the
+    // offline empty state, return straight back to it.
+    if isOffline {
+      focus = .offlineViewChannel
+      return
+    }
     startPlayback()
     startLatencyMonitor()
     startPlaybackWatchdog()
@@ -1054,6 +1160,7 @@ struct PlayerView: View {
       .chatLowLatencyToggle,
       .chatDiagnosticsToggle,
       .simulateRaidButton,
+      .simulateOfflineButton,
       .youtubeMergeToggle,
       .youtubeMergeURL:
       return true
@@ -1300,6 +1407,20 @@ struct PlayerView: View {
             focusTag: .simulateRaidButton
           ) {
             simulateOutgoingRaid()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          // Debug-only: there's no way to force a watched channel offline, so
+          // this drops straight into the offline empty state to exercise its
+          // layout, copy, and View Channel / Try Again actions. Visible only
+          // while the Diagnostics overlay is enabled.
+          settingsPill(
+            title: "Simulate Stream Offline",
+            isSelected: false,
+            focusTag: .simulateOfflineButton
+          ) {
+            showChatSettings = false
+            presentOfflineState()
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1673,6 +1794,7 @@ struct PlayerView: View {
     resetDiagnostics()
     isLoading = true
     errorMessage = nil
+    isOffline = false
     streamTitle = ""
     channelDisplayName = ""
     channelAvatarURL = nil
@@ -1940,6 +2062,7 @@ struct PlayerView: View {
   {
     isLoading = true
     errorMessage = nil
+    isOffline = false
     if resetMetadata {
       streamTitle = ""
     }
@@ -1978,6 +2101,20 @@ struct PlayerView: View {
     consecutiveLoadFailures += 1
     stopPlaybackWatchdog()
     stopLatencyMonitor()
+
+    // Before surfacing a hard error, decide whether this is simply an offline /
+    // ended stream. A definitive `.offline` resolve error is already a strong
+    // signal; otherwise confirm authoritatively via GraphQL so we never show the
+    // offline state for a transient failure on a channel that's actually live.
+    let resolvedOffline = (lastError as? PlaybackError) == .offline
+    if resolvedOffline || lastError == nil || lastError is LoadTimeoutError {
+      let status = await PlaybackService.streamLiveStatus(for: activeChannel)
+      if status == .offline || (resolvedOffline && status != .live) {
+        presentOfflineState()
+        return
+      }
+    }
+
     let fallback = "Failed to load stream (\(reason))."
     errorMessage = lastError?.localizedDescription ?? fallback
     isLoading = false
@@ -2221,7 +2358,7 @@ struct PlayerView: View {
   }
 
   private func samplePlaybackHealth() {
-    guard !isLoading, errorMessage == nil
+    guard !isLoading, errorMessage == nil, !isOffline
     else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
@@ -2274,7 +2411,19 @@ struct PlayerView: View {
 
   private func recoverFromPlaybackStall(reason: String) async {
     guard !isRecoveringPlayback else { return }
+    guard !isOffline else { return }
     isRecoveringPlayback = true
+    defer { isRecoveringPlayback = false }
+
+    // Before blindly reloading (which can loop forever on a frozen last frame
+    // once a broadcast ends), authoritatively check whether the channel is still
+    // live. Only act on a definitive `.offline`; `.live`/`.unknown` fall through
+    // to the normal reload-based recovery for genuine transient stalls.
+    if await PlaybackService.streamLiveStatus(for: activeChannel) == .offline {
+      presentOfflineState()
+      return
+    }
+
     diagReloadCount += 1
     if showLatencyDiagnostics { logDiagnosticsEvent("reload (\(reason))") }
     // A reload restarts the timeline, so clear the jump baseline to avoid
@@ -2282,7 +2431,43 @@ struct PlayerView: View {
     diagLastPlayheadSeconds = nil
     diagLastSampleAt = nil
     await load(maxAttempts: 2, reason: reason, resetMetadata: false)
+  }
+
+  // MARK: - Offline empty state
+
+  /// Switches the player into the clean "offline / stream ended" empty state.
+  /// Tears down the live machinery and drops the current item so the frozen last
+  /// frame is replaced by the empty-state backdrop.
+  private func presentOfflineState() {
+    stopPlaybackWatchdog()
+    stopLatencyMonitor()
+    audioLevelMonitor.stop()
+    player.pause()
+    player.replaceCurrentItem(with: nil)
+    currentSourceURL = nil
     isRecoveringPlayback = false
+    hideTask?.cancel()
+    showControls = false
+    showChatSettings = false
+    isLoading = false
+    errorMessage = nil
+    isOffline = true
+    focus = .offlineViewChannel
+  }
+
+  /// Re-attempts playback from the offline empty state (e.g. the streamer just
+  /// came back). `load()` clears `isOffline` and re-confirms offline on failure.
+  private func retryFromOffline() {
+    guard !isLoading else { return }
+    isOffline = false
+    Task {
+      async let metadataTask: Void = refreshChannelMetadata()
+      await load(reason: "offline retry", resetMetadata: false)
+      _ = await metadataTask
+      if !isOffline, errorMessage == nil {
+        focus = .video
+      }
+    }
   }
 
   /// Exponential moving average of the raw latency estimate so the on-screen

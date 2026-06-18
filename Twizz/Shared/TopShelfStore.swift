@@ -115,6 +115,40 @@ enum TopShelfStore {
         return try? decoder.decode(TopShelfSnapshot.self, from: data)
     }
 
+    /// Appends a timestamped breadcrumb so the (otherwise invisible) Top Shelf
+    /// extension process can be observed off-device. Writes to the process's own
+    /// Caches (always available) and records whether the shared App Group
+    /// container is reachable. Temporary diagnostic.
+    static func appendExtensionBreadcrumb(_ message: String) {
+        let groupStatus = containerURL?.path ?? "GROUP_CONTAINER_NIL"
+        let line = "\(ISO8601DateFormatter().string(from: Date())) [group=\(groupStatus)] \(message)\n"
+
+        // Own sandbox caches — does not require the App Group entitlement.
+        if let ownCaches = FileManager.default.urls(
+            for: .cachesDirectory, in: .userDomainMask
+        ).first {
+            appendLine(line, to: ownCaches.appendingPathComponent("topshelf-ext-log.txt"))
+        }
+
+        // Also try the shared container (only works if the group is reachable).
+        if let directory = snapshotDirectoryURL {
+            try? FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true
+            )
+            appendLine(line, to: directory.appendingPathComponent("topshelf-ext-log.txt"))
+        }
+    }
+
+    private static func appendLine(_ line: String, to url: URL) {
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? Data(line.utf8).write(to: url)
+        }
+    }
+
     /// Whether the shared App Group container is reachable. If this is `false`
     /// the entitlement/provisioning for the App Group is not active at runtime
     /// and neither the app nor the extension can exchange the snapshot.

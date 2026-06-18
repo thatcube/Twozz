@@ -67,6 +67,19 @@ targets:
       - path: TopShelfExtension/ContentProvider.swift
       - path: Twizz/Shared/TopShelfSnapshot.swift
       - path: Twizz/Shared/TopShelfStore.swift
+    postBuildScripts:
+      - name: Set build number from git commit count
+        basedOnDependencyAnalysis: false
+        script: |
+          # Keep the extension's CFBundleVersion in lockstep with the app's.
+          # tvOS refuses to load an app extension whose CFBundleVersion does
+          # not match its containing app, which leaves the Top Shelf empty.
+          set -e
+          buildNumber=$(git -C "$SRCROOT" rev-list --count HEAD 2>/dev/null || echo 1)
+          plist="${BUILT_PRODUCTS_DIR}/${INFOPLIST_PATH}"
+          if [ -f "$plist" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $buildNumber" "$plist"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Twizz.TopShelfExtension

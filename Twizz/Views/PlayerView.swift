@@ -2472,20 +2472,22 @@ struct PlayerView: View {
   }
 
   /// Makes an educated guess at a channel's YouTube live source from its Twitch
-  /// profile: a YouTube social link first, then a YouTube channel URL mentioned
-  /// in the bio, then a `@<twitch-login>` guess as a last resort.
+  /// profile. Streamers often list several YouTube links (main channel, a VOD
+  /// channel, a podcast, …), so we score each one against the streamer's Twitch
+  /// identity instead of blindly taking the first. Falls back to a YouTube link
+  /// in the bio, then a `@<twitch-login>` guess.
   private static func resolveYouTubeTarget(forTwitchLogin login: String) async -> String {
     let fallback = "@\(login)"
     guard let profile = await ChannelProfileService.fetch(login: login) else {
       return fallback
     }
 
-    if let link = profile.socialLinks.first(where: { isYouTubeChannelURL($0.url) })?.url {
-      return link
-    }
-    if let anyYouTube = profile.socialLinks.first(where: { isYouTubeURL($0.url) })?.url,
-      isYouTubeChannelURL(anyYouTube) {
-      return anyYouTube
+    if let best = bestYouTubeChannelURL(
+      among: profile.socialLinks,
+      twitchLogin: login,
+      displayName: profile.displayName
+    ) {
+      return best
     }
     if let descLink = firstYouTubeChannelURL(in: profile.description ?? "") {
       return descLink
@@ -2493,9 +2495,60 @@ struct PlayerView: View {
     return fallback
   }
 
-  private static func isYouTubeURL(_ string: String) -> Bool {
-    let lower = string.lowercased()
-    return lower.contains("youtube.com") || lower.contains("youtu.be")
+  /// Picks the YouTube channel link most likely to be the streamer's *primary*
+  /// live channel. Returns nil when no candidate looks confident enough, so the
+  /// caller can fall back rather than merge with the wrong channel (e.g. a
+  /// podcast or clips channel the streamer also links).
+  private static func bestYouTubeChannelURL(
+    among links: [ChannelSocialLink],
+    twitchLogin: String,
+    displayName: String
+  ) -> String? {
+    let candidates = links.filter { isYouTubeChannelURL($0.url) }
+    guard !candidates.isEmpty else { return nil }
+
+    let loginKey = normalizeIdentity(twitchLogin)
+    let nameKey = normalizeIdentity(displayName)
+    let secondaryMarkers = [
+      "podcast", "vod", "vods", "clip", "clips", "shorts", "archive", "replay",
+      "replays", "music", "topic", "highlight", "highlights", "fan", "second",
+    ]
+
+    func score(_ link: ChannelSocialLink) -> Int {
+      var score = 0
+      let handle = normalizeIdentity(youtubeHandle(from: link.url) ?? "")
+      let label = link.title.lowercased()
+      let haystack = "\(label) \(handle)"
+
+      // Strongest signal: the YouTube handle matches the Twitch identity.
+      if !handle.isEmpty {
+        if handle == loginKey || (!nameKey.isEmpty && handle == nameKey) {
+          score += 100
+        } else if !loginKey.isEmpty, handle.contains(loginKey) {
+          score += 60
+        } else if nameKey.count >= 3, handle.contains(nameKey) {
+          score += 50
+        }
+      }
+
+      // The streamer labelled it as their main YouTube.
+      if ["youtube", "youtube channel", "main", "main channel", "live"].contains(label) {
+        score += 20
+      }
+
+      // Down-rank obvious secondary channels (podcasts, VOD/clip dumps, …).
+      if secondaryMarkers.contains(where: { haystack.contains($0) }) {
+        score -= 40
+      }
+
+      return score
+    }
+
+    let scored = candidates.map { ($0.url, score($0)) }
+    guard let best = scored.max(by: { $0.1 < $1.1 }), best.1 > 0 else {
+      return nil
+    }
+    return best.0
   }
 
   /// True for URLs that point at a YouTube *channel* (rather than a single video),
@@ -2507,6 +2560,27 @@ struct PlayerView: View {
       || lower.contains("/channel/")
       || lower.contains("/c/")
       || lower.contains("/user/")
+  }
+
+  /// Extracts the channel handle / id segment from a YouTube channel URL.
+  private static func youtubeHandle(from urlString: String) -> String? {
+    let normalized = urlString.contains("://") ? urlString : "https://\(urlString)"
+    guard let comps = URLComponents(string: normalized) else { return nil }
+    let parts = comps.path.split(separator: "/").map(String.init)
+    if let at = parts.first(where: { $0.hasPrefix("@") }) {
+      return String(at.dropFirst())
+    }
+    if parts.count >= 2, ["channel", "c", "user"].contains(parts[0].lowercased()) {
+      return parts[1]
+    }
+    return parts.first
+  }
+
+  /// Lowercases and strips everything but letters/digits for loose comparison.
+  private static func normalizeIdentity(_ raw: String) -> String {
+    String(String.UnicodeScalarView(raw.lowercased().unicodeScalars.filter {
+      CharacterSet.alphanumerics.contains($0)
+    }))
   }
 
   private static func firstYouTubeChannelURL(in text: String) -> String? {

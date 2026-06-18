@@ -10,42 +10,57 @@ struct StreamBackdropView: View {
   @State private var player = AVPlayer()
   @State private var previewTask: Task<Void, Never>?
   @State private var revealVideoTask: Task<Void, Never>?
+  @State private var thumbnailCleanupTask: Task<Void, Never>?
   @State private var activeChannelID: String?
   @State private var activeThumbnailURL: URL?
   @State private var fallbackThumbnailURL: URL?
+  @State private var activeThumbnailOpacity = 0.0
+  @State private var fallbackThumbnailOpacity = 0.0
+  @State private var activeThumbnailDidLoad = false
   @State private var isShowingVideoPreview = false
   @State private var videoOpacity = 0.0
   @State private var hasConfiguredPlayer = false
 
-  private let channelFade = Animation.easeInOut(duration: 0.45)
+  private let channelFade = Animation.easeInOut(duration: 0.55)
   private let videoFade = Animation.easeInOut(duration: 0.55)
 
   var body: some View {
     ZStack {
-      if let thumbnailURL = activeThumbnailURL {
-        AsyncImage(url: thumbnailURL) { image in
+      if let fallbackThumbnailURL {
+        AsyncImage(url: fallbackThumbnailURL) { image in
           image
             .resizable()
             .scaledToFill()
-            .onAppear {
-              if fallbackThumbnailURL != nil {
-                withAnimation(channelFade) {
-                  fallbackThumbnailURL = nil
-                }
-              }
-            }
         } placeholder: {
-          fallbackThumbnailLayer
+          Color.clear
         }
-        .transition(.opacity)
-      } else {
-        fallbackThumbnailLayer
+        .opacity(fallbackThumbnailOpacity)
+      }
+
+      if let activeThumbnailURL {
+        AsyncImage(url: activeThumbnailURL) { phase in
+          switch phase {
+          case .success(let image):
+            image
+              .resizable()
+              .scaledToFill()
+              .onAppear {
+                markActiveThumbnailLoaded(for: activeThumbnailURL)
+              }
+          case .empty:
+            Color.clear
+          case .failure:
+            Color.clear
+          @unknown default:
+            Color.clear
+          }
+        }
+        .opacity(activeThumbnailOpacity)
       }
 
       if isShowingVideoPreview {
         VideoSurface(player: player)
           .opacity(videoOpacity)
-          .transition(.opacity)
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -59,13 +74,13 @@ struct StreamBackdropView: View {
         endPoint: .bottom
       )
     }
-    .animation(channelFade, value: activeThumbnailURL)
-    .animation(channelFade, value: fallbackThumbnailURL)
+    .animation(channelFade, value: activeThumbnailOpacity)
+    .animation(channelFade, value: fallbackThumbnailOpacity)
     .animation(videoFade, value: videoOpacity)
     .allowsHitTesting(false)
     .onAppear {
       configurePlayerIfNeeded()
-      activeThumbnailURL = channel?.thumbnailURL
+      primeThumbnailState(channel)
       handleChannelChange(channel)
     }
     .onChange(of: channel?.id) { _, _ in
@@ -73,6 +88,8 @@ struct StreamBackdropView: View {
     }
     .onDisappear {
       stopPreviewPlayback(clearItem: true)
+      thumbnailCleanupTask?.cancel()
+      thumbnailCleanupTask = nil
     }
   }
 
@@ -83,6 +100,52 @@ struct StreamBackdropView: View {
     player.actionAtItemEnd = .pause
     player.automaticallyWaitsToMinimizeStalling = true
     hasConfiguredPlayer = true
+  }
+
+  @MainActor
+  private func primeThumbnailState(_ channel: FollowedChannel?) {
+    let initialThumbnailURL = channel?.thumbnailURL
+    activeThumbnailURL = initialThumbnailURL
+    fallbackThumbnailURL = nil
+    activeThumbnailOpacity = initialThumbnailURL == nil ? 0 : 1
+    fallbackThumbnailOpacity = 0
+    activeThumbnailDidLoad = initialThumbnailURL != nil
+  }
+
+  @MainActor
+  private func transitionToThumbnail(_ thumbnailURL: URL?) {
+    guard activeThumbnailURL != thumbnailURL else { return }
+    thumbnailCleanupTask?.cancel()
+    thumbnailCleanupTask = nil
+
+    fallbackThumbnailURL = activeThumbnailURL ?? fallbackThumbnailURL
+    fallbackThumbnailOpacity = fallbackThumbnailURL == nil ? 0 : 1
+    activeThumbnailURL = thumbnailURL
+    activeThumbnailDidLoad = false
+    activeThumbnailOpacity = 0
+  }
+
+  @MainActor
+  private func markActiveThumbnailLoaded(for url: URL) {
+    guard activeThumbnailURL == url else { return }
+    guard !activeThumbnailDidLoad else { return }
+    activeThumbnailDidLoad = true
+
+    withAnimation(channelFade) {
+      activeThumbnailOpacity = 1
+      fallbackThumbnailOpacity = 0
+    }
+
+    thumbnailCleanupTask?.cancel()
+    thumbnailCleanupTask = Task {
+      try? await Task.sleep(for: .milliseconds(700))
+      guard !Task.isCancelled else { return }
+      await MainActor.run {
+        guard fallbackThumbnailOpacity == 0 else { return }
+        fallbackThumbnailURL = nil
+        thumbnailCleanupTask = nil
+      }
+    }
   }
 
   @MainActor
@@ -100,20 +163,12 @@ struct StreamBackdropView: View {
 
     guard let channel else {
       activeChannelID = nil
-      withAnimation(channelFade) {
-        fallbackThumbnailURL = activeThumbnailURL
-        activeThumbnailURL = nil
-      }
+      transitionToThumbnail(nil)
       return
     }
 
-    if activeThumbnailURL != channel.thumbnailURL {
-      withAnimation(channelFade) {
-        fallbackThumbnailURL = activeThumbnailURL
-        activeThumbnailURL = channel.thumbnailURL
-      }
-    }
     activeChannelID = channel.id
+    transitionToThumbnail(channel.thumbnailURL)
     guard channel.isLive else { return }
 
     let channelID = channel.id
@@ -121,9 +176,11 @@ struct StreamBackdropView: View {
 
     previewTask = Task { [channelID, login] in
       do {
-        try await Task.sleep(for: .seconds(2))
+        async let hoverDelay: Void = Task.sleep(for: .seconds(2))
+        async let sourceURLTask: URL = PlaybackService.hlsURL(for: login)
+        try await hoverDelay
         guard !Task.isCancelled else { return }
-        let sourceURL = try await PlaybackService.hlsURL(for: login)
+        let sourceURL = try await sourceURLTask
         guard !Task.isCancelled else { return }
         await MainActor.run {
           guard activeChannelID == channelID else { return }
@@ -211,22 +268,6 @@ struct StreamBackdropView: View {
     player.pause()
     if clearItem {
       player.replaceCurrentItem(with: nil)
-    }
-  }
-
-  @ViewBuilder
-  private var fallbackThumbnailLayer: some View {
-    if let fallbackThumbnailURL {
-      AsyncImage(url: fallbackThumbnailURL) { image in
-        image
-          .resizable()
-          .scaledToFill()
-      } placeholder: {
-        Color.clear
-      }
-      .transition(.opacity)
-    } else {
-      Color.clear
     }
   }
 }

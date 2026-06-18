@@ -98,9 +98,11 @@ struct StreamChannelCard: View {
   @Environment(\.themePalette) private var palette
   @State private var previewPlayer = AVPlayer()
   @State private var previewTask: Task<Void, Never>?
+  @State private var revealVideoTask: Task<Void, Never>?
   @State private var previewSourceURL: URL?
   @State private var cachedPreviewURL: URL?
-  @State private var isShowingLivePreview = false
+  @State private var isShowingLivePreviewSurface = false
+  @State private var livePreviewOpacity = 0.0
   @State private var hasConfiguredPreviewPlayer = false
 
   var body: some View {
@@ -169,15 +171,16 @@ struct StreamChannelCard: View {
     ZStack(alignment: .bottomLeading) {
       Color.primary.opacity(0.08)
 
-      if isShowingLivePreview {
+      AsyncImage(url: channel.thumbnailURL) { image in
+        image.resizable().scaledToFill()
+      } placeholder: {
+        Color.clear
+      }
+
+      if isShowingLivePreviewSurface {
         VideoSurface(player: previewPlayer)
+          .opacity(livePreviewOpacity)
           .transition(.opacity)
-      } else {
-        AsyncImage(url: channel.thumbnailURL) { image in
-          image.resizable().scaledToFill()
-        } placeholder: {
-          Color.clear
-        }
       }
 
       LinearGradient(
@@ -202,7 +205,7 @@ struct StreamChannelCard: View {
     .frame(maxWidth: layout.mediaWidth == nil ? .infinity : nil, alignment: .leading)
     .aspectRatio(layout.mediaWidth == nil ? 16 / 9 : nil, contentMode: .fit)
     .clipShape(RoundedRectangle(cornerRadius: layout.mediaCornerRadius))
-    .animation(.easeOut(duration: 0.2), value: isShowingLivePreview)
+    .animation(.easeOut(duration: 0.22), value: livePreviewOpacity)
   }
 
   private var railCardWidth: CGFloat? {
@@ -232,9 +235,11 @@ struct StreamChannelCard: View {
 
     previewTask = Task { [cachedURL, login] in
       do {
-        try await Task.sleep(for: .seconds(2))
+        async let hoverDelay: Void = Task.sleep(for: .seconds(2))
+        async let sourceURLTask: URL = resolvePreviewURL(cachedURL: cachedURL, login: login)
+        try await hoverDelay
         guard !Task.isCancelled else { return }
-        let sourceURL = try await resolvePreviewURL(cachedURL: cachedURL, login: login)
+        let sourceURL = try await sourceURLTask
         guard !Task.isCancelled else { return }
         await MainActor.run {
           startPreviewPlayback(from: sourceURL)
@@ -273,15 +278,57 @@ struct StreamChannelCard: View {
       previewPlayer.replaceCurrentItem(with: item)
       previewSourceURL = sourceURL
     }
+    livePreviewOpacity = 0
+    isShowingLivePreviewSurface = true
     previewPlayer.play()
-    isShowingLivePreview = true
+    beginLivePreviewRevealWhenReady()
+  }
+
+  @MainActor
+  private func beginLivePreviewRevealWhenReady() {
+    revealVideoTask?.cancel()
+    guard let previewItem = previewPlayer.currentItem else { return }
+    revealVideoTask = Task { [previewItem] in
+      var isReadyToReveal = false
+      for _ in 0..<30 {
+        try? await Task.sleep(for: .milliseconds(100))
+        guard !Task.isCancelled else { return }
+        let readiness = await MainActor.run {
+          (
+            previewPlayer.currentItem === previewItem,
+            previewItem.status == .readyToPlay,
+            previewItem.isPlaybackLikelyToKeepUp || !previewItem.loadedTimeRanges.isEmpty,
+            previewPlayer.timeControlStatus == .playing
+          )
+        }
+        let (isCurrentItem, isReady, hasBuffer, isPlaying) = readiness
+        guard isCurrentItem else { return }
+        if isReady && hasBuffer && isPlaying {
+          isReadyToReveal = true
+          break
+        }
+      }
+      guard isReadyToReveal else { return }
+      try? await Task.sleep(for: .milliseconds(180))
+      guard !Task.isCancelled else { return }
+      await MainActor.run {
+        guard previewPlayer.currentItem === previewItem else { return }
+        withAnimation(.easeInOut(duration: 0.24)) {
+          livePreviewOpacity = 1
+        }
+        revealVideoTask = nil
+      }
+    }
   }
 
   @MainActor
   private func stopPreviewPlayback(clearCachedURL: Bool) {
     previewTask?.cancel()
     previewTask = nil
-    isShowingLivePreview = false
+    revealVideoTask?.cancel()
+    revealVideoTask = nil
+    livePreviewOpacity = 0
+    isShowingLivePreviewSurface = false
     previewPlayer.pause()
     previewPlayer.replaceCurrentItem(with: nil)
     previewSourceURL = nil

@@ -2330,6 +2330,15 @@ private struct ChatGlassFieldStyle: ViewModifier {
   }
 }
 
+/// A `UITextField` subclass that refuses focus-engine focus on tvOS. The chat
+/// composer's SwiftUI `Button` owns focus and draws the visible capsule; this
+/// field exists only to host the keyboard via `becomeFirstResponder()`. Without
+/// this, the tvOS focus engine focuses the embedded field too and paints its own
+/// rounded platter, producing a "button inside the input" look.
+private final class NonFocusableTextField: UITextField {
+  override var canBecomeFocused: Bool { false }
+}
+
 /// Hosts the tvOS keyboard for the chat composer. The visible capsule and draft
 /// text are drawn in SwiftUI; this `UITextField` stays visually clear so only
 /// the Liquid Glass capsule shows. It deliberately keeps a normal (non‑zero)
@@ -2343,7 +2352,7 @@ private struct ChatKeyboardHostField: UIViewRepresentable {
   var onSubmit: () -> Void = {}
 
   func makeUIView(context: Context) -> UITextField {
-    let field = UITextField()
+    let field = NonFocusableTextField()
     field.delegate = context.coordinator
     field.borderStyle = .none
     field.backgroundColor = .clear

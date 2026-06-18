@@ -350,7 +350,6 @@ struct PlayerView: View {
       chatSyncSendClearTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
-      audioLevelMonitor.unbind()
       audioLevelMonitor.stop()
       player.pause()
       chat.disconnect()
@@ -444,6 +443,12 @@ struct PlayerView: View {
     return audioName == preferredQuality
   }
 
+  /// Direct media-playlist URL for the audio-only rendition, used by the
+  /// visualizer's level decoder.
+  private var audioOnlyPlaylistURL: URL? {
+    playback?.qualities.first(where: { $0.isAudioOnly })?.url
+  }
+
   private var videoColumn: some View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
@@ -456,14 +461,13 @@ struct PlayerView: View {
           palette: palette
         )
         .transition(.opacity)
-        .onAppear { audioLevelMonitor.start() }
-        .onDisappear {
-          audioLevelMonitor.unbind()
-          audioLevelMonitor.stop()
+        .onAppear {
+          audioLevelMonitor.start(
+            audioPlaylistURL: audioOnlyPlaylistURL,
+            headers: PlaybackService.streamHeaders
+          )
         }
-        .task(id: currentSourceURL) {
-          audioLevelMonitor.bind(to: player.currentItem)
-        }
+        .onDisappear { audioLevelMonitor.stop() }
       }
 
       if showControls, !isLoading,

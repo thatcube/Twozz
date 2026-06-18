@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 /// Numeric, independently-tunable chat appearance values. These are the source
 /// of truth persisted via `@AppStorage`; the size presets and the migration
@@ -13,7 +14,7 @@ enum ChatAppearance {
   static let textSizeStep: CGFloat = 2
 
   /// Explicit emote height when not tracking the text size.
-  static let emoteSizeRange: ClosedRange<CGFloat> = 18...64
+  static let emoteSizeRange: ClosedRange<CGFloat> = 18...96
   static let emoteSizeStep: CGFloat = 2
 
   /// Extra spacing applied *within* a wrapped message line.
@@ -37,6 +38,8 @@ enum ChatAppearance {
   static let defaultEmoteAuto = true
   static let defaultEmoteSize: CGFloat = 34
   static let defaultAnimatedEmotes = true
+  static let defaultFontStyle = ChatFontStyle.standard
+  static let defaultShowBadges = true
 
   // MARK: - Derived values
 
@@ -112,6 +115,36 @@ enum ChatAppearancePreset: String, CaseIterable, Identifiable {
       return v.textSize == textSize
         && v.lineHeight == lineHeight
         && v.messageSpacing == messageSpacing
+    }
+  }
+}
+
+/// Selectable typeface for chat text. Maps onto SwiftUI's built-in system font
+/// designs so every option ships with the OS (no bundled font files) and scales
+/// cleanly at any size on tvOS.
+enum ChatFontStyle: String, CaseIterable, Identifiable {
+  case standard
+  case rounded
+  case serif
+  case monospaced
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .standard: return "Standard"
+    case .rounded: return "Rounded"
+    case .serif: return "Serif"
+    case .monospaced: return "Mono"
+    }
+  }
+
+  var design: Font.Design {
+    switch self {
+    case .standard: return .default
+    case .rounded: return .rounded
+    case .serif: return .serif
+    case .monospaced: return .monospaced
     }
   }
 }

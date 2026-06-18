@@ -66,6 +66,8 @@ struct PlayerView: View {
   @AppStorage("chatMessageSpacingValue") private var chatMessageSpacingValue = Double(ChatAppearance.defaultMessageSpacing)
   @AppStorage("chatWidthValue") private var chatWidthValue = Double(ChatAppearance.defaultWidth)
   @AppStorage("chatAnimatedEmotes") private var chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
+  @AppStorage("chatFontStyle") private var chatFontStyleRaw = ChatAppearance.defaultFontStyle.rawValue
+  @AppStorage("chatShowBadges") private var chatShowBadges = ChatAppearance.defaultShowBadges
   @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
   @AppStorage("chatSyncToStream") private var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
@@ -253,6 +255,8 @@ struct PlayerView: View {
     case chatStepperInc(ChatStepperField)
     case chatEmoteAutoToggle
     case chatAnimatedToggle
+    case chatFontOption(Int)
+    case chatBadgesToggle
     case chatResetButton
   }
 
@@ -311,6 +315,10 @@ struct PlayerView: View {
 
   private var chatWidth: CGFloat {
     CGFloat(chatWidthValue)
+  }
+
+  private var chatFontStyle: ChatFontStyle {
+    ChatFontStyle(rawValue: chatFontStyleRaw) ?? .standard
   }
 
   private var visibleChatMessages: [ChatMessage] {
@@ -1220,6 +1228,8 @@ struct PlayerView: View {
       .chatStepperInc,
       .chatEmoteAutoToggle,
       .chatAnimatedToggle,
+      .chatFontOption,
+      .chatBadgesToggle,
       .chatResetButton:
       return true
     default:
@@ -1239,6 +1249,8 @@ struct PlayerView: View {
         messageSpacing: chatMessageSpacing,
         lineHeight: chatLineHeight,
         animatedEmotes: chatAnimatedEmotes,
+        fontDesign: chatFontStyle.design,
+        showBadges: chatShowBadges,
         isConnected: chat.isConnected,
         emoteURLs: chat.emoteURLs,
         badgeURLs: chat.badgeURLs,
@@ -1624,6 +1636,43 @@ struct PlayerView: View {
           .fixedSize(horizontal: false, vertical: true)
       }
 
+      VStack(alignment: .leading, spacing: 10) {
+        settingsSectionHeader("Typeface")
+
+        HStack(spacing: 8) {
+          ForEach(Array(ChatFontStyle.allCases.enumerated()), id: \.element) { index, style in
+            settingsPill(
+              title: style.title,
+              isSelected: style == chatFontStyle,
+              focusTag: .chatFontOption(index)
+            ) {
+              chatFontStyleRaw = style.rawValue
+            }
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+      }
+
+      VStack(alignment: .leading, spacing: 10) {
+        settingsSectionHeader("Badges")
+
+        settingsPill(
+          title: chatShowBadges ? "Badges On" : "Badges Off",
+          isSelected: chatShowBadges,
+          focusTag: .chatBadgesToggle
+        ) {
+          chatShowBadges.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+
+        Text("Hides the small mod, sub, and other badges shown before each name.")
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.55))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
       Button {
         resetChatAppearance()
       } label: {
@@ -1785,7 +1834,7 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 8)
-    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06)))
+    .background(Capsule(style: .continuous).fill(.white.opacity(0.06)))
     .focusSection()
   }
 
@@ -1800,7 +1849,7 @@ struct PlayerView: View {
     return Button(action: action) {
       Icon(glyph: glyph, size: 22)
         .frame(width: 42, height: 34)
-        .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: false, cornerRadius: 10))
+        .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: false))
         .opacity(enabled ? 1.0 : 0.35)
     }
     .buttonStyle(ChatSettingsPillButtonStyle())
@@ -3057,10 +3106,11 @@ private struct ChatSettingsHeightKey: PreferenceKey {
 private struct ChatSettingsGlassStyle: ViewModifier {
   let isFocused: Bool
   var isSelected: Bool = false
-  var cornerRadius: CGFloat = 11
 
-  private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+  // A Capsule keeps these controls fully rounded so they match the chat input
+  // and the rest of the app's Liquid Glass controls.
+  private var shape: Capsule {
+    Capsule(style: .continuous)
   }
 
   private var strokeOpacity: Double {

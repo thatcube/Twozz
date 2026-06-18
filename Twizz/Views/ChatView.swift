@@ -10,6 +10,8 @@ struct ChatView: View {
     var messageSpacing: CGFloat = ChatAppearance.defaultMessageSpacing
     var lineHeight: CGFloat = ChatAppearance.defaultLineHeight
     var animatedEmotes: Bool = true
+    var fontDesign: Font.Design = ChatAppearance.defaultFontStyle.design
+    var showBadges: Bool = ChatAppearance.defaultShowBadges
     var isConnected: Bool = false
     var emoteURLs: [String: URL] = [:]
     var badgeURLs: [String: URL] = [:]
@@ -97,6 +99,8 @@ struct ChatView: View {
             emoteSize: emoteSize,
             lineHeight: lineHeight,
             animatedEmotes: animatedEmotes,
+            fontDesign: fontDesign,
+            showBadges: showBadges,
             bodyColorOverride: isSideLayout ? palette.chatSidePrimaryText : nil
         )
     }

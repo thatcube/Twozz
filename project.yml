@@ -65,8 +65,10 @@ targets:
     platform: tvOS
     sources:
       - path: TopShelfExtension/ContentProvider.swift
+      - path: TopShelfExtension/TopShelfLiveFeed.swift
       - path: Twizz/Shared/TopShelfSnapshot.swift
       - path: Twizz/Shared/TopShelfStore.swift
+      - path: Twizz/Shared/TopShelfCredentialStore.swift
     postBuildScripts:
       - name: Set build number from git commit count
         basedOnDependencyAnalysis: false

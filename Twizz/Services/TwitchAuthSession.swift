@@ -26,7 +26,13 @@ final class TwitchAuthSession {
     private(set) var statusMessage: String?
     private(set) var errorMessage: String?
 
-    private let userDefaults = UserDefaults.standard
+    private let userDefaults: UserDefaults = {
+        guard let suite = UserDefaults(suiteName: TopShelf.appGroupID) else {
+            return .standard
+        }
+        TwitchAuthSession.migrateLegacyAuthIfNeeded(into: suite)
+        return suite
+    }()
     private var pollTask: Task<Void, Never>?
     private var broadcasterIDCache: [String: String] = [:]
 
@@ -78,12 +84,36 @@ final class TwitchAuthSession {
     }
 
     private enum StorageKey {
-        static let accessToken = "twitch.auth.accessToken"
-        static let refreshToken = "twitch.auth.refreshToken"
-        static let userID = "twitch.auth.userID"
+        static let accessToken = TopShelfCredentialStore.accessTokenKey
+        static let refreshToken = TopShelfCredentialStore.refreshTokenKey
+        static let userID = TopShelfCredentialStore.userIDKey
+        static let clientID = TopShelfCredentialStore.clientIDKey
         static let userLogin = "twitch.auth.userLogin"
         static let userDisplayName = "twitch.auth.userDisplayName"
         static let profileImageURL = "twitch.auth.profileImageURL"
+    }
+
+    /// One-time copy of any auth previously stored in `UserDefaults.standard`
+    /// into the shared App Group suite. Auth now lives in the App Group so the
+    /// Top Shelf extension can read it (and write back refreshed tokens). Without
+    /// this migration, already-signed-in users would appear signed out after the
+    /// switch. The legacy values are left in place harmlessly.
+    private static func migrateLegacyAuthIfNeeded(into suite: UserDefaults) {
+        guard suite.string(forKey: TopShelfCredentialStore.accessTokenKey) == nil else { return }
+        let legacy = UserDefaults.standard
+        let keys = [
+            TopShelfCredentialStore.accessTokenKey,
+            TopShelfCredentialStore.refreshTokenKey,
+            TopShelfCredentialStore.userIDKey,
+            "twitch.auth.userLogin",
+            "twitch.auth.userDisplayName",
+            "twitch.auth.profileImageURL"
+        ]
+        for key in keys {
+            if let value = legacy.string(forKey: key) {
+                suite.set(value, forKey: key)
+            }
+        }
     }
 
     func restore() {
@@ -103,6 +133,12 @@ final class TwitchAuthSession {
         isAuthenticated = accessToken != nil && userID != nil
         statusMessage = nil
         errorMessage = nil
+
+        // Mirror the client id into the shared App Group suite so the Top Shelf
+        // extension can perform its own Helix requests for fresh live streams.
+        if isAuthenticated, let clientID {
+            userDefaults.set(clientID, forKey: StorageKey.clientID)
+        }
     }
 
     func signOut() {
@@ -126,6 +162,7 @@ final class TwitchAuthSession {
         userDefaults.removeObject(forKey: StorageKey.accessToken)
         userDefaults.removeObject(forKey: StorageKey.refreshToken)
         userDefaults.removeObject(forKey: StorageKey.userID)
+        userDefaults.removeObject(forKey: StorageKey.clientID)
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
         userDefaults.removeObject(forKey: StorageKey.profileImageURL)
@@ -144,6 +181,7 @@ final class TwitchAuthSession {
         userDefaults.removeObject(forKey: StorageKey.accessToken)
         userDefaults.removeObject(forKey: StorageKey.refreshToken)
         userDefaults.removeObject(forKey: StorageKey.userID)
+        userDefaults.removeObject(forKey: StorageKey.clientID)
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
         userDefaults.removeObject(forKey: StorageKey.profileImageURL)
@@ -300,6 +338,7 @@ final class TwitchAuthSession {
             userDefaults.removeObject(forKey: StorageKey.refreshToken)
         }
         userDefaults.set(identity.userID, forKey: StorageKey.userID)
+        userDefaults.set(clientID, forKey: StorageKey.clientID)
         userDefaults.set(resolvedLogin, forKey: StorageKey.userLogin)
         userDefaults.set(resolvedDisplayName, forKey: StorageKey.userDisplayName)
         if let resolvedImageURL {

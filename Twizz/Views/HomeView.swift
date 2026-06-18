@@ -389,8 +389,7 @@ struct HomeView: View {
       }
       // Future: a "Search" entry point can be added here as another menu item.
     } label: {
-      Image(systemName: "slider.horizontal.3")
-        .font(.headline)
+      Icon(glyph: .adjustmentsHorizontal, size: 34)
     }
     .accessibilityLabel("View settings")
   }
@@ -428,8 +427,7 @@ struct HomeView: View {
   private var authBanner: some View {
     if !auth.isAuthenticated {
       HStack(spacing: 28) {
-        Image(systemName: "person.crop.circle.badge.plus")
-          .font(.system(size: 44))
+        Icon(glyph: .userPlus, size: 44)
           .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
 
         VStack(alignment: .leading, spacing: 6) {

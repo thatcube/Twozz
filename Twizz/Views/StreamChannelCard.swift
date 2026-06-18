@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 struct StreamChannelCard: View {
@@ -95,6 +96,12 @@ struct StreamChannelCard: View {
   var showsGameName: Bool = false
 
   @Environment(\.themePalette) private var palette
+  @State private var previewPlayer = AVPlayer()
+  @State private var previewTask: Task<Void, Never>?
+  @State private var previewSourceURL: URL?
+  @State private var cachedPreviewURL: URL?
+  @State private var isShowingLivePreview = false
+  @State private var hasConfiguredPreviewPlayer = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -145,6 +152,16 @@ struct StreamChannelCard: View {
       radius: layout.usesFocusedShadow ? 20 : 0,
       y: layout.usesFocusedShadow ? 10 : 0
     )
+    .onAppear {
+      configurePreviewPlayerIfNeeded()
+      handleFocusChange(isFocused)
+    }
+    .onChange(of: isFocused) { _, focused in
+      handleFocusChange(focused)
+    }
+    .onDisappear {
+      stopPreviewPlayback(clearCachedURL: true)
+    }
   }
 
   @ViewBuilder
@@ -152,10 +169,15 @@ struct StreamChannelCard: View {
     ZStack(alignment: .bottomLeading) {
       Color.primary.opacity(0.08)
 
-      AsyncImage(url: channel.thumbnailURL) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        Color.clear
+      if isShowingLivePreview {
+        VideoSurface(player: previewPlayer)
+          .transition(.opacity)
+      } else {
+        AsyncImage(url: channel.thumbnailURL) { image in
+          image.resizable().scaledToFill()
+        } placeholder: {
+          Color.clear
+        }
       }
 
       LinearGradient(
@@ -180,10 +202,91 @@ struct StreamChannelCard: View {
     .frame(maxWidth: layout.mediaWidth == nil ? .infinity : nil, alignment: .leading)
     .aspectRatio(layout.mediaWidth == nil ? 16 / 9 : nil, contentMode: .fit)
     .clipShape(RoundedRectangle(cornerRadius: layout.mediaCornerRadius))
+    .animation(.easeOut(duration: 0.2), value: isShowingLivePreview)
   }
 
   private var railCardWidth: CGFloat? {
     guard let mediaWidth = layout.mediaWidth else { return nil }
     return mediaWidth + (layout.focusHorizontalInset * 2)
+  }
+
+  @MainActor
+  private func configurePreviewPlayerIfNeeded() {
+    guard !hasConfiguredPreviewPlayer else { return }
+    previewPlayer.isMuted = true
+    previewPlayer.actionAtItemEnd = .pause
+    previewPlayer.automaticallyWaitsToMinimizeStalling = true
+    hasConfiguredPreviewPlayer = true
+  }
+
+  @MainActor
+  private func handleFocusChange(_ focused: Bool) {
+    guard focused, channel.isLive else {
+      stopPreviewPlayback(clearCachedURL: false)
+      return
+    }
+
+    guard previewTask == nil else { return }
+    let login = channel.login
+    let cachedURL = cachedPreviewURL
+
+    previewTask = Task { [cachedURL, login] in
+      do {
+        try await Task.sleep(for: .seconds(2))
+        guard !Task.isCancelled else { return }
+        let sourceURL = try await resolvePreviewURL(cachedURL: cachedURL, login: login)
+        guard !Task.isCancelled else { return }
+        await MainActor.run {
+          startPreviewPlayback(from: sourceURL)
+          previewTask = nil
+        }
+      } catch is CancellationError {
+        await MainActor.run {
+          previewTask = nil
+        }
+      } catch {
+        await MainActor.run {
+          previewTask = nil
+          stopPreviewPlayback(clearCachedURL: true)
+        }
+      }
+    }
+  }
+
+  private func resolvePreviewURL(cachedURL: URL?, login: String) async throws -> URL {
+    if let cachedURL {
+      return cachedURL
+    }
+    return try await PlaybackService.hlsURL(for: login)
+  }
+
+  @MainActor
+  private func startPreviewPlayback(from sourceURL: URL) {
+    configurePreviewPlayerIfNeeded()
+    cachedPreviewURL = sourceURL
+    if previewSourceURL != sourceURL {
+      let asset = AVURLAsset(
+        url: sourceURL,
+        options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
+      )
+      let item = AVPlayerItem(asset: asset)
+      previewPlayer.replaceCurrentItem(with: item)
+      previewSourceURL = sourceURL
+    }
+    previewPlayer.play()
+    isShowingLivePreview = true
+  }
+
+  @MainActor
+  private func stopPreviewPlayback(clearCachedURL: Bool) {
+    previewTask?.cancel()
+    previewTask = nil
+    isShowingLivePreview = false
+    previewPlayer.pause()
+    previewPlayer.replaceCurrentItem(with: nil)
+    previewSourceURL = nil
+    if clearCachedURL {
+      cachedPreviewURL = nil
+    }
   }
 }

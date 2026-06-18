@@ -81,6 +81,9 @@ struct PlayerView: View {
   @State private var showChat: Bool = UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
   @State private var chatReplayStartMessageID: ChatMessage.ID?
   @State private var showQualityPicker = false
+  /// Live resolution AVPlayer's adaptive (Auto) selection is currently showing,
+  /// e.g. "1080p60". Drives the "Auto (1080p60)" label on the quality button.
+  @State private var resolvedQualityName: String?
   @State private var showSignInSheet = false
   @State private var showChatSettings = false
   @State private var showControls = false
@@ -483,14 +486,14 @@ struct PlayerView: View {
               } placeholder: {
                 ZStack {
                   Circle().fill(.white.opacity(0.16))
-                  Image(systemName: "person.crop.circle.fill")
+                  Icon(glyph: .userCircle, size: 36)
                     .foregroundStyle(.white.opacity(0.85))
                 }
               }
             } else {
               ZStack {
                 Circle().fill(.white.opacity(0.16))
-                Image(systemName: "person.crop.circle.fill")
+                Icon(glyph: .userCircle, size: 36)
                   .foregroundStyle(.white.opacity(0.85))
               }
             }
@@ -527,8 +530,13 @@ struct PlayerView: View {
           showQualityPicker = true
           hideTask?.cancel()
         } label: {
-          Label("Quality", systemImage: "gauge.with.dots.needle.67percent")
-            .labelStyle(.iconOnly)
+          Text(qualityButtonLabel)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityLabel("Quality, \(qualityButtonLabel)")
         }
         .focused($focus, equals: .quality)
         .onMoveCommand { direction in
@@ -549,11 +557,8 @@ struct PlayerView: View {
           }
           scheduleHide()
         } label: {
-          Label(
-            showChat ? "Hide Chat" : "Show Chat",
-            systemImage: showChat ? "sidebar.right" : "bubble.left.and.bubble.right.fill"
-          )
-          .labelStyle(.iconOnly)
+          Icon(glyph: showChat ? .sidebarRightCollapse : .sidebarRightExpand)
+            .accessibilityLabel(showChat ? "Hide Chat" : "Show Chat")
         }
         .focused($focus, equals: .chatToggle)
         .onMoveCommand { direction in
@@ -972,9 +977,8 @@ struct PlayerView: View {
       Button {
         toggleChatSettings()
       } label: {
-        Image(systemName: showChatSettings ? "xmark" : "slider.horizontal.3")
-          .font(.system(size: 22, weight: .semibold))
-          .frame(width: 30, height: 30)
+        Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
+          .frame(width: Icon.controlButtonSize, height: Icon.controlButtonSize)
       }
       .TwizzControlButtonStyle()
       .focused($focus, equals: .chatSettingsButton)
@@ -1203,8 +1207,7 @@ struct PlayerView: View {
         if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
           HStack(spacing: 6) {
             if status.hasPrefix("YouTube chat connected") {
-              Image(systemName: "checkmark.circle.fill")
-                .font(.caption)
+              Icon(glyph: .circleCheckFilled, size: 18)
                 .foregroundStyle(.green)
             }
 
@@ -1245,8 +1248,7 @@ struct PlayerView: View {
     return Button(action: action) {
       HStack(spacing: 8) {
         if isSelected {
-          Image(systemName: "checkmark")
-            .font(.caption.weight(.bold))
+          Icon(glyph: .check, size: 24)
         }
         Text(title)
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -1370,8 +1372,7 @@ struct PlayerView: View {
                 ProgressView()
                   .frame(width: 24, height: 24)
               } else {
-                Image(systemName: "paperplane.fill")
-                  .font(.system(size: 20, weight: .semibold))
+                Icon(glyph: .send, size: 24)
                   .frame(width: 24, height: 24)
               }
             }
@@ -1588,7 +1589,7 @@ struct PlayerView: View {
               Text(qualityDisplayLabel(option))
               Spacer()
               if option == preferredQuality {
-                Image(systemName: "checkmark")
+                Icon(glyph: .check, size: 32)
               }
             }
             .frame(width: 420)
@@ -1613,6 +1614,73 @@ struct PlayerView: View {
     ["Auto"] + (playback?.qualities.map(\.name) ?? [])
   }
 
+  /// Text shown on the player's quality button: the selected variant (e.g.
+  /// "1080p60"), or "Auto (1080p60)" reflecting the live adaptive resolution.
+  private var qualityButtonLabel: String {
+    if preferredQuality == "Auto" {
+      if let resolvedQualityName {
+        return "Auto (\(resolvedQualityName))"
+      }
+      return "Auto"
+    }
+    return Self.shortQualityName(preferredQuality)
+  }
+
+  /// Drops the "(Source)" suffix so the button reads "1080p60", not
+  /// "1080p60 (Source)".
+  private static func shortQualityName(_ name: String) -> String {
+    name.replacingOccurrences(of: " (Source)", with: "")
+      .replacingOccurrences(of: " (source)", with: "")
+      .trimmingCharacters(in: .whitespaces)
+  }
+
+  /// Parses the vertical resolution from a variant name, e.g. "1080p60" -> 1080.
+  private static func verticalResolution(from name: String) -> Int? {
+    let lower = name.lowercased()
+    guard let pIndex = lower.firstIndex(of: "p") else { return nil }
+    let digits = lower[lower.startIndex..<pIndex].filter(\.isNumber)
+    return Int(digits)
+  }
+
+  /// Maps AVPlayer's current presentation size to the closest known variant
+  /// name while on the adaptive ("Auto") master playlist.
+  private func updateResolvedQuality() {
+    guard preferredQuality == "Auto" else {
+      resolvedQualityName = nil
+      return
+    }
+    guard let playback else { return }
+
+    let videoVariants = playback.qualities.filter { !$0.isAudioOnly }
+    // Named variants that advertise a parseable resolution, e.g. "720p60".
+    let namedCandidates: [(Int, String)] = videoVariants.compactMap { quality in
+      guard let resolution = Self.verticalResolution(from: quality.name) else { return nil }
+      return (resolution, Self.shortQualityName(quality.name))
+    }
+
+    // Preferred path: match the live adaptive resolution to the nearest named
+    // variant so we keep its exact label (including frame rate).
+    if let size = player.currentItem?.presentationSize, size.height > 0 {
+      let height = Int(size.height.rounded())
+      if let best = namedCandidates.min(by: { abs($0.0 - height) < abs($1.0 - height) }) {
+        resolvedQualityName = best.1
+        return
+      }
+      // Variants don't expose a parseable resolution (e.g. transcoding
+      // disabled, source named "chunked"): derive the label from the decoded
+      // frame height directly so it still shows something accurate.
+      resolvedQualityName = "\(height)p"
+      return
+    }
+
+    // Presentation size not yet known. If the stream offers a single video
+    // rendition, Auto is effectively that rendition — show it rather than
+    // leaving the label stuck on a bare "Auto".
+    if videoVariants.count == 1 {
+      resolvedQualityName = Self.shortQualityName(videoVariants[0].name)
+    }
+  }
+
   /// Display label for a quality option. "Auto" is the adaptive-bitrate choice;
   /// when the low-latency proxy is on it's also the low-latency choice (and,
   /// because ABR can step down instead of stalling, the smoothest one), so we
@@ -1628,6 +1696,7 @@ struct PlayerView: View {
     preferredQuality = option
     showQualityPicker = false
     applyQualityPreference(option)
+    updateResolvedQuality()
     focus = .quality
     scheduleHide()
   }
@@ -1910,6 +1979,7 @@ struct PlayerView: View {
       while !Task.isCancelled {
         await MainActor.run {
           updateLatencyMetrics()
+          updateResolvedQuality()
           updateSmoothedLatency()
           sampleDiagnostics()
           applyChatSyncSettings()
@@ -2418,8 +2488,7 @@ private struct ChatSyncSendIndicator: View {
       let remaining = max(0, deadline.timeIntervalSince(context.date))
       let progress = total > 0 ? min(1, max(0, 1 - remaining / total)) : 1
       HStack(spacing: 10) {
-        Image(systemName: "clock.arrow.circlepath")
-          .font(.caption2)
+        Icon(glyph: .clock, size: 16)
           .foregroundStyle(.white.opacity(0.7))
         VStack(alignment: .leading, spacing: 4) {
           Text(remaining > 0.5

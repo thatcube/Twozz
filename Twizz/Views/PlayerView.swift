@@ -96,6 +96,9 @@ struct PlayerView: View {
   @State private var showSignInSheet = false
   @State private var showChatSettings = false
   @State private var chatSettingsPage: ChatSettingsPage = .main
+  /// Natural (content) height of the current settings page, used to size the
+  /// floating panel to its content and animate when the page/content changes.
+  @State private var chatSettingsContentHeight: CGFloat = 0
   @State private var showControls = false
   @State private var streamTitle: String = ""
   @State private var channelDisplayName: String = ""
@@ -1256,12 +1259,15 @@ struct PlayerView: View {
     // the glass pane's rounded clip never hides it in glass layout mode.
     .overlay(alignment: .topLeading) {
       if showChatSettings {
-        chatSettingsPanel
-          .frame(width: chatSettingsPanelWidth)
-          .frame(maxHeight: .infinity, alignment: .top)
-          .padding(.vertical, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
-          .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
-          .transition(.move(edge: .trailing).combined(with: .opacity))
+        let inset: CGFloat = isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16
+        GeometryReader { geo in
+          chatSettingsPanel(maxHeight: max(geo.size.height - inset * 2, 0))
+            .frame(width: chatSettingsPanelWidth)
+            .padding(.vertical, inset)
+            .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
+        }
+        .frame(width: chatSettingsPanelWidth)
+        .transition(.move(edge: .trailing).combined(with: .opacity))
       }
     }
     // Keep the settings button pinned to the top-right of the chat. It stays put
@@ -1312,8 +1318,15 @@ struct PlayerView: View {
     }
   }
 
-  private var chatSettingsPanel: some View {
-    ScrollView(.vertical, showsIndicators: false) {
+  private func chatSettingsPanel(maxHeight: CGFloat) -> some View {
+    // Measured content height, capped to the space available beside the chat.
+    // When the content is shorter than the cap the panel shrinks to fit; only
+    // when it would overflow does the inner ScrollView start scrolling.
+    let resolvedHeight = chatSettingsContentHeight > 0
+      ? min(chatSettingsContentHeight, maxHeight)
+      : maxHeight
+
+    return ScrollView(.vertical, showsIndicators: false) {
       Group {
         switch chatSettingsPage {
         case .main:
@@ -1327,8 +1340,20 @@ struct PlayerView: View {
       .padding(.vertical, 18)
       .padding(.horizontal, 20)
       .frame(maxWidth: .infinity, alignment: .leading)
+      .background(
+        GeometryReader { proxy in
+          Color.clear.preference(
+            key: ChatSettingsHeightKey.self,
+            value: proxy.size.height
+          )
+        }
+      )
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .frame(maxWidth: .infinity)
+    .frame(height: resolvedHeight, alignment: .top)
+    .onPreferenceChange(ChatSettingsHeightKey.self) { height in
+      chatSettingsContentHeight = height
+    }
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     .overlay(
       RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -1337,13 +1362,14 @@ struct PlayerView: View {
     // Intentionally avoid clipShape here: tvOS focus effects can scale beyond
     // bounds, and clipping reintroduces visibly cut-off hover/focus states.
     .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
+    .animation(.easeOut(duration: 0.22), value: resolvedHeight)
     .focusSection()
   }
 
   // MARK: Main settings page
 
   private var mainSettingsContent: some View {
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: 30) {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Appearance")
 
@@ -1419,7 +1445,7 @@ struct PlayerView: View {
   // MARK: Playback & diagnostics sub-page
 
   private var playbackSettingsContent: some View {
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: 30) {
       subpageHeader("Playback & Diagnostics")
 
       VStack(alignment: .leading, spacing: 7) {
@@ -1552,7 +1578,7 @@ struct PlayerView: View {
   // MARK: Appearance (Advanced) sub-page
 
   private var appearanceSettingsContent: some View {
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: 30) {
       subpageHeader("Advanced")
 
       VStack(alignment: .leading, spacing: 10) {
@@ -1681,7 +1707,7 @@ struct PlayerView: View {
 
         // No dedicated right-chevron glyph exists, so reuse the left chevron
         // rotated 180°.
-        Icon(glyph: .chevronLeft, size: 18)
+        Icon(glyph: .chevronLeft, size: 36)
           .rotationEffect(.degrees(180))
           .opacity(0.7)
       }
@@ -1736,7 +1762,7 @@ struct PlayerView: View {
       Spacer(minLength: 12)
 
       stepperButton(
-        rotated: false,
+        glyph: .minus,
         enabled: canDecrement,
         focusTag: .chatStepperDec(field)
       ) {
@@ -1750,7 +1776,7 @@ struct PlayerView: View {
         .monospacedDigit()
 
       stepperButton(
-        rotated: true,
+        glyph: .plus,
         enabled: canIncrement,
         focusTag: .chatStepperInc(field)
       ) {
@@ -1764,7 +1790,7 @@ struct PlayerView: View {
   }
 
   private func stepperButton(
-    rotated: Bool,
+    glyph: Glyph,
     enabled: Bool,
     focusTag: Focusable,
     action: @escaping () -> Void
@@ -1772,8 +1798,7 @@ struct PlayerView: View {
     let isFocused = focus == focusTag
 
     return Button(action: action) {
-      Icon(glyph: .chevronLeft, size: 22)
-        .rotationEffect(.degrees(rotated ? 180 : 0))
+      Icon(glyph: glyph, size: 22)
         .frame(width: 42, height: 34)
         .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: false, cornerRadius: 10))
         .opacity(enabled ? 1.0 : 0.35)
@@ -3013,6 +3038,15 @@ private struct ChatSettingsPillButtonStyle: ButtonStyle {
   }
 }
 
+/// Reports the natural height of the chat-settings content so the floating panel
+/// can size itself to fit (and animate) rather than always filling the pane.
+private struct ChatSettingsHeightKey: PreferenceKey {
+  static var defaultValue: CGFloat { 0 }
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = max(value, nextValue())
+  }
+}
+
 /// The focus/selection treatment for the compact chat-settings controls. Modeled
 /// on `ChatGlassFieldStyle` (the chat input): one view subtree whose parameters
 /// change with `isFocused`/`isSelected`, so it lifts as a single Liquid Glass
@@ -3040,14 +3074,10 @@ private struct ChatSettingsGlassStyle: ViewModifier {
       .foregroundStyle(isFocused ? AnyShapeStyle(.black) : AnyShapeStyle(.white))
     if #available(tvOS 26.0, *) {
       tinted
-        // A deterministic dark base sits *behind* the glass so a resting pill
-        // never lightens to the point of making its white text illegible over
-        // bright video. Focused pills get a bright white glass + black text.
-        .background(
-          shape.fill(isFocused
-            ? AnyShapeStyle(.clear)
-            : AnyShapeStyle(.black.opacity(isSelected ? 0.45 : 0.55)))
-        )
+        // Same native Liquid Glass treatment as the chat input: real glass at
+        // rest (lightly white-tinted when selected so the active pill reads),
+        // a bright white glass + black text on focus, scaling and shadowing as
+        // one element. No opaque dark base — these match the "Glass" chat look.
         .glassEffect(
           isFocused
             ? .regular.tint(.white)
@@ -3060,10 +3090,10 @@ private struct ChatSettingsGlassStyle: ViewModifier {
                 radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)
     } else {
       tinted
-        .background(shape.fill(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.black.opacity(0.55))))
+        .background(shape.fill(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.ultraThinMaterial)))
         .background(
           shape.fill(.white.opacity(
-            isFocused ? 0.0 : (isSelected ? 0.20 : 0.06)
+            isFocused ? 0.0 : (isSelected ? 0.18 : 0.08)
           ))
         )
         .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1))

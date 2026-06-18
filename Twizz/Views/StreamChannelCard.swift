@@ -187,7 +187,7 @@ struct StreamChannelCard: View {
       }
 
       if isShowingLivePreviewSurface {
-        VideoSurface(player: previewPlayer, cornerRadius: layout.mediaCornerRadius)
+        PreviewVideoSurface(player: previewPlayer, cornerRadius: layout.mediaCornerRadius)
           .opacity(livePreviewOpacity)
           .transition(.opacity)
       }

@@ -1853,7 +1853,9 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 22)
     .padding(.vertical, 8)
-    .background(Capsule(style: .continuous).fill(.white.opacity(0.06)))
+    // Match the neutral Liquid Glass of the pills instead of a flat translucent
+    // fill, so the stepper row reads as the same material as every other control.
+    .modifier(ChatSettingsRowGlassBackground())
     .focusSection()
   }
 
@@ -3129,6 +3131,27 @@ private struct ChatSettingsHeightKey: PreferenceKey {
   }
 }
 
+/// The neutral Liquid Glass backing for a non-button settings row (e.g. the
+/// stepper row) so it matches the pills' resting material instead of a flat
+/// translucent fill. No focus/selection states — the focusable buttons inside
+/// carry those themselves.
+private struct ChatSettingsRowGlassBackground: ViewModifier {
+  private var shape: Capsule { Capsule(style: .continuous) }
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(tvOS 26.0, *) {
+      content
+        .glassEffect(.regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    } else {
+      content
+        .background(shape.fill(.ultraThinMaterial))
+        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    }
+  }
+}
+
 /// The focus/selection treatment for the compact chat-settings controls. Modeled
 /// on `ChatGlassFieldStyle` (the chat input): one view subtree whose parameters
 /// change with `isFocused`/`isSelected`, so it lifts as a single Liquid Glass
@@ -3146,9 +3169,19 @@ private struct ChatSettingsGlassStyle: ViewModifier {
     Capsule(style: .continuous)
   }
 
+  // Selection is shown with a crisp white hairline ring rather than a glass
+  // tint: a white-tinted glass blends with whatever (often saturated) video sits
+  // behind the panel and muddies to brown/taupe, which read as a different
+  // material than the neutral native glass used by the chat input and the
+  // playback controls. A ring is background-independent, so the selected pill
+  // stays the same neutral Liquid Glass as everything else.
   private var strokeOpacity: Double {
     if isFocused { return 0.0 }
-    return isSelected ? 0.42 : 0.16
+    return isSelected ? 0.85 : 0.16
+  }
+
+  private var strokeWidth: Double {
+    isSelected && !isFocused ? 2.5 : 1
   }
 
   @ViewBuilder
@@ -3157,29 +3190,19 @@ private struct ChatSettingsGlassStyle: ViewModifier {
       .foregroundStyle(isFocused ? AnyShapeStyle(.black) : AnyShapeStyle(.white))
     if #available(tvOS 26.0, *) {
       tinted
-        // Same native Liquid Glass treatment as the chat input: real glass at
-        // rest (lightly white-tinted when selected so the active pill reads),
-        // a bright white glass + black text on focus, scaling and shadowing as
-        // one element. No opaque dark base — these match the "Glass" chat look.
-        .glassEffect(
-          isFocused
-            ? .regular.tint(.white)
-            : (isSelected ? .regular.tint(.white.opacity(0.22)) : .regular),
-          in: shape
-        )
-        .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1))
+        // Same native Liquid Glass treatment as the chat input and playback
+        // controls: neutral `.regular` glass at rest, a bright white glass +
+        // black text on focus, scaling and shadowing as one element. Selection
+        // is the ring above, not a tint, so the material always matches.
+        .glassEffect(isFocused ? .regular.tint(.white) : .regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: strokeWidth))
         .scaleEffect(isFocused ? 1.05 : 1.0)
         .shadow(color: .black.opacity(isFocused ? 0.25 : 0.0),
                 radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)
     } else {
       tinted
         .background(shape.fill(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.ultraThinMaterial)))
-        .background(
-          shape.fill(.white.opacity(
-            isFocused ? 0.0 : (isSelected ? 0.18 : 0.08)
-          ))
-        )
-        .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1))
+        .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: strokeWidth))
         .scaleEffect(isFocused ? 1.05 : 1.0)
         .shadow(color: .black.opacity(isFocused ? 0.25 : 0.0),
                 radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)

@@ -100,7 +100,7 @@ struct PlayerView: View {
   @State private var chatSyncSendClearTask: Task<Void, Never>?
   @State private var hideTask: Task<Void, Never>?
   @State private var focusRecoveryTask: Task<Void, Never>?
-  @State private var isQualityMenuPresented = false
+  @State private var showQualityDialog = false
   @State private var latencyTask: Task<Void, Never>?
   @State private var playbackWatchdogTask: Task<Void, Never>?
   @State private var wallClockLatencySeconds: Double?
@@ -394,8 +394,8 @@ struct PlayerView: View {
         focusRecoveryTask?.cancel()
         lastControlFocus = newFocus
         scheduleHide()
-      } else if newFocus == nil, !isQualityMenuPresented {
-        // tvOS can briefly drop focus to nil after system surfaces (like Menu)
+      } else if newFocus == nil, !showQualityDialog {
+        // tvOS can briefly drop focus to nil after system surfaces
         // dismiss. Re-assert the last control if focus doesn't come back.
         focusRecoveryTask?.cancel()
         let target = lastControlFocus
@@ -403,7 +403,7 @@ struct PlayerView: View {
           try? await Task.sleep(for: .milliseconds(140))
           guard !Task.isCancelled else { return }
           await MainActor.run {
-            guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
+            guard showControls, !showChatSettings, !showQualityDialog else { return }
             guard focus == nil else { return }
             focus = target
           }
@@ -553,43 +553,39 @@ struct PlayerView: View {
         // focus system had no live binding to restore to and focus only snapped
         // back on the next unrelated re-render (~1-2s later). Keeping `.focused`
         // here keeps the binding live so focus returns to the button instantly.
-        QualityMenu(
-          options: qualityOptions,
-          selectedOption: preferredQuality,
-          buttonLabel: qualityButtonLabel,
-          displayLabel: { qualityDisplayLabel($0) },
-          onSelect: { selectQuality(at: $0) },
-          onMenuPresented: {
-            focusRecoveryTask?.cancel()
-            isQualityMenuPresented = true
-            // Native Menu takes over focus. Clearing our app-level focus state
-            // immediately prevents a stale focused shadow from lingering behind
-            // the popup until the next render tick.
-            focus = nil
-          },
-          onMenuDismissed: {
-            isQualityMenuPresented = false
-            focusRecoveryTask?.cancel()
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-              focus = .quality
-            }
-            focusRecoveryTask = Task {
-              // Let close animation settle, then restore anchor focus if needed.
-              try? await Task.sleep(for: .milliseconds(40))
-              guard !Task.isCancelled else { return }
-              await MainActor.run {
-                guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
-                guard focus == nil || focus == .quality else { return }
-                focus = .quality
-              }
+        Button {
+          focusRecoveryTask?.cancel()
+          lastControlFocus = .quality
+          showQualityDialog = true
+          // While the system dialog is open, let tvOS own focus entirely.
+          focus = nil
+        } label: {
+          Text(qualityButtonLabel)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityLabel("Quality, \(qualityButtonLabel)")
+        }
+        .focused($focus, equals: .quality)
+        .confirmationDialog("Quality", isPresented: $showQualityDialog, titleVisibility: .visible) {
+          ForEach(Array(qualityOptions.enumerated()), id: \.element) { index, option in
+            Button(option == preferredQuality ? "Current: \(qualityDisplayLabel(option))" : qualityDisplayLabel(option)) {
+              selectQuality(at: index)
             }
           }
-        )
-        .equatable()
-        .focused($focus, equals: .quality)
-        .focusEffectDisabled(isQualityMenuPresented)
+        }
+        .onChange(of: showQualityDialog) { _, isPresented in
+          if isPresented { return }
+          focusRecoveryTask?.cancel()
+          var transaction = Transaction()
+          transaction.disablesAnimations = true
+          withTransaction(transaction) {
+            focus = .quality
+          }
+          scheduleHide()
+        }
         .onMoveCommand { direction in
           switch direction {
           case .left:
@@ -889,6 +885,10 @@ struct PlayerView: View {
         // stay on screen. Normal auto-hide resumes once focus lands on another
         // control.
         if focus == .quality || (focus == nil && lastControlFocus == .quality) {
+          scheduleHide()
+          return
+        }
+        if showQualityDialog {
           scheduleHide()
           return
         }
@@ -2360,61 +2360,6 @@ private struct ChatInputShellStyle: ViewModifier {
             shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.75)
           )
       }
-    }
-  }
-}
-
-/// The native quality picker, extracted into its own `Equatable` view so the
-/// player's once-per-second latency/diagnostics state churn doesn't re-render
-/// (and visibly re-focus / "blink") the open `Menu`. SwiftUI only re-evaluates
-/// this view when one of the value inputs compared in `==` actually changes.
-private struct QualityMenu: View, Equatable {
-  let options: [String]
-  let selectedOption: String
-  let buttonLabel: String
-  let displayLabel: (String) -> String
-  let onSelect: (Int) -> Void
-  let onMenuPresented: () -> Void
-  let onMenuDismissed: () -> Void
-
-  nonisolated static func == (lhs: QualityMenu, rhs: QualityMenu) -> Bool {
-    lhs.options == rhs.options
-      && lhs.selectedOption == rhs.selectedOption
-      && lhs.buttonLabel == rhs.buttonLabel
-  }
-
-  /// Drives the inline `Picker` selection. Reading derives the current index
-  /// from `selectedOption`; writing routes through `onSelect` so the player
-  /// applies the quality change and its side effects.
-  private var selection: Binding<Int> {
-    Binding(
-      get: { options.firstIndex(of: selectedOption) ?? 0 },
-      set: { onSelect($0) }
-    )
-  }
-
-  var body: some View {
-    Menu {
-      // A `Picker` is Apple's recommended single-selection control inside a
-      // menu: it renders a checkmark in a reserved leading gutter so every
-      // row's text stays aligned (no per-row shift), unlike hand-placed
-      // checkmark labels.
-      Picker("Quality", selection: selection) {
-        ForEach(Array(options.enumerated()), id: \.element) { index, option in
-          Text(displayLabel(option)).tag(index)
-        }
-      }
-      .pickerStyle(.inline)
-      .onAppear(perform: onMenuPresented)
-      .onDisappear(perform: onMenuDismissed)
-    } label: {
-      Text(buttonLabel)
-        .font(.subheadline)
-        .fontWeight(.semibold)
-        .monospacedDigit()
-        .lineLimit(1)
-        .fixedSize()
-        .accessibilityLabel("Quality, \(buttonLabel)")
     }
   }
 }

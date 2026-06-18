@@ -14,6 +14,8 @@
 #   fastlane release    # build + upload to App Store + metadata
 #   fastlane build      # archive an .ipa locally, no upload
 
+require "shellwords"
+
 APP_IDENTIFIER = "com.thatcube.Twizz"
 SCHEME         = "Twizz"
 XCODEPROJ      = "Twizz.xcodeproj"
@@ -45,15 +47,24 @@ lane :generate_project do
 end
 
 desc "Archive and export a signed App Store .ipa (no upload)"
-lane :build do
+lane :build do |options|
   generate_project
+  # Let Xcode create/download the distribution certificate and provisioning
+  # profile on first run, authenticating with the same App Store Connect API key.
+  prov_args = "-allowProvisioningUpdates"
+  if ENV["ASC_KEY_ID"] && ENV["ASC_ISSUER_ID"] && ENV["ASC_KEY_PATH"]
+    prov_args += " -authenticationKeyPath #{ENV['ASC_KEY_PATH'].shellescape}" \
+                 " -authenticationKeyID #{ENV['ASC_KEY_ID'].shellescape}" \
+                 " -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID'].shellescape}"
+  end
   build_app(
     project: XCODEPROJ,
     scheme: SCHEME,
     configuration: "Release",
     export_method: "app-store",
     output_directory: OUTPUT_DIR,
-    clean: true
+    clean: true,
+    xcargs: prov_args
   )
 end
 

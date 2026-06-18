@@ -1313,30 +1313,31 @@ struct PlayerView: View {
           Button {
             chatInputActivationToken &+= 1
           } label: {
-            ZStack(alignment: .leading) {
-              ChatKeyboardHostField(
-                text: $chatDraft,
-                activationToken: chatInputActivationToken,
-                onSubmit: submitChatMessage
+            Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
+              .font(.subheadline)
+              .foregroundStyle(focus == .chatInput
+                ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
+                : .white.opacity(chatDraft.isEmpty ? 0.5 : 1.0))
+              .lineLimit(1)
+              .truncationMode(.tail)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(.horizontal, 28)
+              .frame(maxWidth: .infinity)
+              .frame(height: chatComposerRowHeight)
+              .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
+              // The keyboard host sits *behind* the glass capsule as a full-size,
+              // visually clear field. Keeping it out of the styled content (and at
+              // full size) avoids a second nested background blob and stops tvOS
+              // from resigning first responder on an undersized field.
+              .background(
+                ChatKeyboardHostField(
+                  text: $chatDraft,
+                  activationToken: chatInputActivationToken,
+                  onSubmit: submitChatMessage
+                )
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
               )
-              .frame(width: 1, height: 1)
-              .allowsHitTesting(false)
-              .accessibilityHidden(true)
-
-              Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
-                .font(.subheadline)
-                .foregroundStyle(focus == .chatInput
-                  ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
-                  : .white.opacity(chatDraft.isEmpty ? 0.5 : 1.0))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity)
-            .frame(height: chatComposerRowHeight)
-            .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
           }
           .buttonStyle(ChatInputButtonStyle())
           .focusEffectDisabled()

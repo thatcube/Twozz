@@ -536,6 +536,8 @@ struct PlayerView: View {
           .font(.headline)
           .foregroundStyle(.white)
           .lineLimit(2)
+          .minimumScaleFactor(0.5)
+          .truncationMode(.tail)
           .fixedSize(horizontal: false, vertical: true)
           .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
           .frame(maxWidth: .infinity, alignment: .leading)

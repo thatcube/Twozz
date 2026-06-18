@@ -529,19 +529,34 @@ struct PlayerView: View {
       Spacer(minLength: 18)
 
       HStack(spacing: 14) {
+        // The visible menu content is kept `.equatable()` so the player's
+        // once-per-second latency churn doesn't re-render (and blink) the open
+        // menu. The focus + navigation modifiers are applied OUTSIDE that
+        // equatable boundary on purpose: `.equatable()` freezes the wrapped
+        // subtree when its inputs are unchanged, and if `.focused` lived inside
+        // it the focus binding would freeze too — so when the menu closed the
+        // focus system had no live binding to restore to and focus only snapped
+        // back on the next unrelated re-render (~1-2s later). Keeping `.focused`
+        // here keeps the binding live so focus returns to the button instantly.
         QualityMenu(
           options: qualityOptions,
           selectedOption: preferredQuality,
           buttonLabel: qualityButtonLabel,
-          isFocused: focus == .quality,
           displayLabel: { qualityDisplayLabel($0) },
-          onSelect: { selectQuality(at: $0) },
-          focus: $focus,
-          focusValue: .quality,
-          leftFocus: .streamInfo,
-          rightFocus: .chatToggle
+          onSelect: { selectQuality(at: $0) }
         )
         .equatable()
+        .focused($focus, equals: .quality)
+        .onMoveCommand { direction in
+          switch direction {
+          case .left:
+            focus = .streamInfo
+          case .right:
+            focus = .chatToggle
+          default:
+            break
+          }
+        }
 
         Button {
           toggleChatVisibility()
@@ -2310,23 +2325,17 @@ private struct ChatInputShellStyle: ViewModifier {
 /// player's once-per-second latency/diagnostics state churn doesn't re-render
 /// (and visibly re-focus / "blink") the open `Menu`. SwiftUI only re-evaluates
 /// this view when one of the value inputs compared in `==` actually changes.
-private struct QualityMenu<F: Hashable>: View, Equatable {
+private struct QualityMenu: View, Equatable {
   let options: [String]
   let selectedOption: String
   let buttonLabel: String
-  let isFocused: Bool
   let displayLabel: (String) -> String
   let onSelect: (Int) -> Void
-  var focus: FocusState<F>.Binding
-  let focusValue: F
-  let leftFocus: F
-  let rightFocus: F
 
-  nonisolated static func == (lhs: QualityMenu<F>, rhs: QualityMenu<F>) -> Bool {
+  nonisolated static func == (lhs: QualityMenu, rhs: QualityMenu) -> Bool {
     lhs.options == rhs.options
       && lhs.selectedOption == rhs.selectedOption
       && lhs.buttonLabel == rhs.buttonLabel
-      && lhs.isFocused == rhs.isFocused
   }
 
   /// Drives the inline `Picker` selection. Reading derives the current index
@@ -2359,17 +2368,6 @@ private struct QualityMenu<F: Hashable>: View, Equatable {
         .lineLimit(1)
         .fixedSize()
         .accessibilityLabel("Quality, \(buttonLabel)")
-    }
-    .focused(focus, equals: focusValue)
-    .onMoveCommand { direction in
-      switch direction {
-      case .left:
-        focus.wrappedValue = leftFocus
-      case .right:
-        focus.wrappedValue = rightFocus
-      default:
-        break
-      }
     }
   }
 }

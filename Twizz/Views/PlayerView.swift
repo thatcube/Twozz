@@ -90,7 +90,6 @@ struct PlayerView: View {
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
   @State private var chatDraft: String = ""
-  @State private var chatInputActivationToken: Int = 0
   @State private var isSendingChat = false
   @State private var chatSendError: String?
   /// When chat sync is active, a sent message is held until it appears in the
@@ -1175,12 +1174,15 @@ struct PlayerView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        ChatInputField(
-          text: $experimentalYouTubeMergeChannelOrURL,
-          placeholder: "YouTube handle/URL (defaults to @\(activeChannel))",
-          isFocused: focus == .youtubeMergeURL
-        )
-        .frame(height: 44)
+        TextField("YouTube handle/URL (defaults to @\(activeChannel))", text: $experimentalYouTubeMergeChannelOrURL)
+          .textFieldStyle(.plain)
+          .font(.callout)
+          .foregroundStyle(focus == .youtubeMergeURL ? .black : .white)
+          .tint(focus == .youtubeMergeURL ? .black : .white)
+          .lineLimit(1)
+          .padding(.horizontal, 14)
+          .focusEffectDisabled()
+          .frame(height: 44)
         .frame(maxWidth: .infinity)
         .background(.white.opacity(focus == .youtubeMergeURL ? 0.86 : 0.09), in: RoundedRectangle(cornerRadius: 11))
         .overlay(
@@ -1308,52 +1310,34 @@ struct PlayerView: View {
       }
 
       if auth.isAuthenticated {
-        ZStack(alignment: .trailing) {
-          Button {
-            chatInputActivationToken &+= 1
-          } label: {
-            ZStack {
-              ChatInputField(
-                text: $chatDraft,
-                placeholder: "Send a message",
-                isFocused: focus == .chatInput,
-                activationToken: chatInputActivationToken
-              )
-              .allowsHitTesting(false)
-              .frame(maxWidth: .infinity, maxHeight: .infinity)
-              Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
-                .font(.callout)
-                .foregroundStyle(focus == .chatInput
-                  ? (chatDraft.isEmpty ? Color.black.opacity(0.45) : Color.black)
-                  : .white.opacity(chatDraft.isEmpty ? 0.45 : 1.0))
-                .lineLimit(1)
-                .padding(.leading, 18)
-                .padding(.trailing, hasChatDraft ? 118 : 24)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(height: hasChatDraft ? chatInputFocusedHeight : (focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight))
-            .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
-            .padding(.trailing, hasChatDraft ? 108 : 0)
+        HStack(spacing: 16) {
+          TextField("Send a message", text: $chatDraft)
+            .textFieldStyle(.plain)
+            .font(.callout)
+            .foregroundStyle(.white)
+            .tint(.white)
+            .lineLimit(1)
+            .submitLabel(.send)
+            .onSubmit(submitChatMessage)
+            .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
-            .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
-          }
-          .buttonStyle(ChatInputButtonStyle())
-          .focusEffectDisabled()
-          .focused($focus, equals: .chatInput)
-          .onMoveCommand { direction in
-            switch direction {
-            case .left:
-              revealControls(preferredFocus: .chatToggle)
-            case .up:
-              focus = .chatSettingsButton
-            case .right:
-              if hasChatDraft { focus = .chatSend } else { focus = .chatInput }
-            default:
-              break
+            .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+            .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
+            .focused($focus, equals: .chatInput)
+            .focusEffectDisabled()
+            .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+            .onMoveCommand { direction in
+              switch direction {
+              case .left:
+                revealControls(preferredFocus: .chatToggle)
+              case .up:
+                focus = .chatSettingsButton
+              case .right:
+                if hasChatDraft { focus = .chatSend }
+              default:
+                break
+              }
             }
-          }
 
           if hasChatDraft {
             Button {
@@ -1368,8 +1352,7 @@ struct PlayerView: View {
               }
             }
             .TwizzControlButtonStyle()
-            .frame(height: chatInputFocusedHeight)
-            .padding(.trailing, 8)
+            .frame(width: chatComposerRowHeight, height: chatComposerRowHeight)
             .disabled(isSendingChat)
             .focused($focus, equals: .chatSend)
             .transition(.opacity)
@@ -1392,29 +1375,15 @@ struct PlayerView: View {
           showSignInSheet = true
           scheduleHide()
         } label: {
-          ZStack {
-            ChatInputField(
-              text: .constant(""),
-              placeholder: "Sign in to send messages",
-              isFocused: focus == .chatInput,
-              allowsEditing: false
-            )
-            .allowsHitTesting(false)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Text("Sign in to send messages")
-              .font(.callout)
-              .foregroundStyle(.white.opacity(0.45))
-              .lineLimit(1)
-              .padding(.leading, 18)
-              .padding(.trailing, 24)
-              .allowsHitTesting(false)
-              .accessibilityHidden(true)
-              .frame(maxWidth: .infinity, alignment: .leading)
-          }
-          .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
-          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
-          .frame(maxWidth: .infinity)
-          .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
+          Text("Sign in to send messages")
+            .font(.callout)
+            .foregroundStyle(.white.opacity(focus == .chatInput ? 0.85 : 0.45))
+            .lineLimit(1)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+            .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
+            .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
         }
         .buttonStyle(ChatInputButtonStyle())
         .focusEffectDisabled()
@@ -2313,9 +2282,10 @@ private struct ChatInputButtonStyle: ButtonStyle {
   }
 }
 
-/// Gives the chat composer field a glassy shell while preserving the UIKit
-/// text field behavior and focus handling.
-private struct ChatInputShellStyle: ViewModifier {
+/// Gives the chat composer field a Liquid Glass capsule shell. Uses native
+/// `.glassEffect` on tvOS 26+ and an `.ultraThinMaterial` fallback on older
+/// systems. Focus is conveyed with a brighter ring, a subtle lift, and a glow.
+private struct ChatGlassFieldStyle: ViewModifier {
   let isFocused: Bool
 
   private var shape: Capsule {
@@ -2325,135 +2295,17 @@ private struct ChatInputShellStyle: ViewModifier {
   @ViewBuilder
   func body(content: Content) -> some View {
     if #available(tvOS 26.0, *) {
-      if isFocused {
-        content
-          .background(.white, in: shape)
-          .scaleEffect(1.02)
-          .shadow(color: .white.opacity(0.25), radius: 12, x: 0, y: 0)
-          .shadow(color: .black.opacity(0.22), radius: 7, x: 0, y: 3)
-      } else {
-        content
-          .clipShape(shape)
-          .glassEffect(.regular, in: shape)
-          .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 2)
-      }
+      content
+        .glassEffect(.regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.5 : 0.10), lineWidth: isFocused ? 1.5 : 0.75))
+        .scaleEffect(isFocused ? 1.02 : 1.0)
+        .shadow(color: .white.opacity(isFocused ? 0.25 : 0.0), radius: isFocused ? 12 : 0, x: 0, y: 0)
+        .shadow(color: .black.opacity(0.18), radius: 5, x: 0, y: 2)
     } else {
-      if isFocused {
-        content
-          .background(.white, in: shape)
-          .scaleEffect(1.02)
-      } else {
-        content
-          .background(.ultraThinMaterial, in: shape)
-          .overlay(
-            shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.75)
-          )
-      }
-    }
-  }
-}
-
-/// A fully custom chat input backed by a `UITextField` so we control the
-/// background (clear — no native focus platter) and vertically center the text.
-/// SwiftUI's `TextField` on tvOS draws its own opaque focus platter that can't
-/// be removed and pins text near the top, which is why we drop down to UIKit.
-private struct ChatInputField: UIViewRepresentable {
-  @Binding var text: String
-  let placeholder: String
-  let isFocused: Bool
-  var activationToken: Int = 0
-  var allowsEditing: Bool = true
-  var onActivate: (() -> Void)? = nil
-
-  func makeUIView(context: Context) -> UITextField {
-    let field = UITextField()
-    field.delegate = context.coordinator
-    field.borderStyle = .none
-    field.backgroundColor = .clear
-    field.textColor = .white
-    field.tintColor = .white
-    field.font = .preferredFont(forTextStyle: .callout)
-    field.contentVerticalAlignment = .center
-    field.adjustsFontForContentSizeCategory = true
-    field.attributedPlaceholder = NSAttributedString(
-      string: placeholder,
-      attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.45)]
-    )
-    field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    field.addTarget(
-      context.coordinator,
-      action: #selector(Coordinator.editingChanged(_:)),
-      for: .editingChanged
-    )
-    field.alpha = 0.001
-    return field
-  }
-
-  func updateUIView(_ uiView: UITextField, context: Context) {
-    if uiView.text != text {
-      uiView.text = text
-    }
-
-    context.coordinator.allowsEditing = allowsEditing
-    context.coordinator.onActivate = onActivate
-
-    if context.coordinator.lastActivationToken != activationToken {
-      context.coordinator.lastActivationToken = activationToken
-      if allowsEditing {
-        uiView.becomeFirstResponder()
-      } else {
-        onActivate?()
-      }
-    }
-
-    uiView.alpha = 0.001
-    uiView.backgroundColor = .clear
-    uiView.textColor = .clear
-    uiView.tintColor = .clear
-    uiView.attributedPlaceholder = NSAttributedString(
-      string: placeholder,
-      attributes: [.foregroundColor: UIColor.clear]
-    )
-  }
-
-  func makeCoordinator() -> Coordinator {
-    Coordinator(
-      text: $text,
-      allowsEditing: allowsEditing,
-      onActivate: onActivate,
-      lastActivationToken: activationToken
-    )
-  }
-
-  final class Coordinator: NSObject, UITextFieldDelegate {
-    private let text: Binding<String>
-    var allowsEditing: Bool
-    var onActivate: (() -> Void)?
-    var lastActivationToken: Int
-
-    init(
-      text: Binding<String>,
-      allowsEditing: Bool,
-      onActivate: (() -> Void)?,
-      lastActivationToken: Int
-    ) {
-      self.text = text
-      self.allowsEditing = allowsEditing
-      self.onActivate = onActivate
-      self.lastActivationToken = lastActivationToken
-    }
-
-    func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
-      guard allowsEditing else {
-        onActivate?()
-        return false
-      }
-      return true
-    }
-
-    @objc func editingChanged(_ field: UITextField) {
-      text.wrappedValue = field.text ?? ""
+      content
+        .background(.ultraThinMaterial, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.5 : 0.10), lineWidth: isFocused ? 1.5 : 0.75))
+        .scaleEffect(isFocused ? 1.02 : 1.0)
     }
   }
 }

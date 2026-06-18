@@ -16,6 +16,10 @@ final class FollowedChannelsService {
   /// recommendation profile so it reflects the whole follow list, not just whoever
   /// happens to be live. Empty in demo mode or when the lookup fails.
   private(set) var followedCategories: [String: Int] = [:]
+  /// Lowercased logins of every channel the viewer follows (online and offline),
+  /// used to guarantee recommendations never include someone they already follow —
+  /// even a live follow beyond the first page of `/streams/followed`.
+  private(set) var followedLogins: Set<String> = []
   private(set) var isLoading = false
   private(set) var isUsingDemoData = false
   private(set) var errorMessage: String?
@@ -116,6 +120,7 @@ final class FollowedChannelsService {
       )
     } else {
       followedCategories = [:]
+      followedLogins = []
     }
   }
 
@@ -129,8 +134,14 @@ final class FollowedChannelsService {
       let ids = follows.map(\.broadcasterID)
       guard !ids.isEmpty else {
         followedCategories = [:]
+        followedLogins = []
         return
       }
+      followedLogins = Set(
+        follows.compactMap {
+          let login = $0.broadcasterLogin?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+          return (login?.isEmpty == false) ? login : nil
+        })
       followedCategories = try await fetchChannelCategoryCounts(
         clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
     } catch {
@@ -667,9 +678,11 @@ private struct HelixUser: Decodable {
 
 private struct FollowedBroadcaster: Decodable {
   let broadcasterID: String
+  let broadcasterLogin: String?
 
   private enum CodingKeys: String, CodingKey {
     case broadcasterID = "broadcaster_id"
+    case broadcasterLogin = "broadcaster_login"
   }
 }
 

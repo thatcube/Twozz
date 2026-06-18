@@ -622,6 +622,7 @@ struct HomeView: View {
     await personalized.refresh(
       follows: follows.channels,
       followedCategories: follows.followedCategories,
+      followedLogins: follows.followedLogins,
       history: watchHistory
     )
   }

@@ -33,6 +33,7 @@ final class PersonalizedRecommendationsService {
   func refresh(
     follows: [FollowedChannel],
     followedCategories: [String: Int],
+    followedLogins: Set<String>,
     history: WatchHistoryService
   ) async {
     guard history.isEnabled else {
@@ -71,9 +72,10 @@ final class PersonalizedRecommendationsService {
       maxPerCategory: 3
     )
 
-    // Don't recommend channels the viewer already follows or is currently being
-    // shown elsewhere on Home — those live in the Following rail.
-    let exclude = Set(follows.map { $0.login.lowercased() })
+    // Don't recommend channels the viewer already follows. Combine the full
+    // follow list (online + offline) with the currently-live follows so nothing
+    // they follow can slip into the rail.
+    let exclude = followedLogins.union(follows.map { $0.login.lowercased() })
     channels = recommended.filter { !exclude.contains($0.login.lowercased()) }
   }
 

@@ -279,6 +279,14 @@ struct PlayerView: View {
   var body: some View {
     ZStack {
       palette.playerBackdrop.ignoresSafeArea()
+        // Attached to the backdrop (a child) rather than the root ZStack so it
+        // doesn't collide with the sign-in `.fullScreenCover` below. Two
+        // presentation modifiers on the *same* view conflict on tvOS and only
+        // one fires, which previously left the avatar button doing nothing.
+        .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) { target in
+          ChannelPageView(target: target)
+            .environment(\.themePalette, palette)
+        }
 
       if chatLayoutMode.isOverlay {
         videoColumn
@@ -424,10 +432,6 @@ struct PlayerView: View {
     }
     .fullScreenCover(isPresented: $showSignInSheet) {
       SignInView(auth: auth)
-    }
-    .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) { target in
-      ChannelPageView(target: target)
-        .environment(\.themePalette, palette)
     }
   }
 

@@ -72,6 +72,10 @@ struct PlayerView: View {
 
   @State private var chat = ChatService()
   @State private var player = AVPlayer()
+  /// Drives the audio-only visualizer orb. Reacts to real audio when the player
+  /// item exposes a tappable audio track (best effort on live HLS), otherwise
+  /// runs an ambient animation.
+  @State private var audioLevelMonitor = AudioLevelMonitor()
   /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
   /// loader delegate weakly, so the proxy must be owned here to stay alive.
   @State private var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
@@ -346,6 +350,8 @@ struct PlayerView: View {
       chatSyncSendClearTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
+      audioLevelMonitor.unbind()
+      audioLevelMonitor.stop()
       player.pause()
       chat.disconnect()
       setIdleTimer(disabled: false)
@@ -428,10 +434,37 @@ struct PlayerView: View {
 
   // MARK: - Video + controls
 
+  /// True when the user has explicitly pinned the audio-only rendition, so the
+  /// player surface is black and the visualizer should take over.
+  private var isAudioOnlyActive: Bool {
+    guard let playback else { return false }
+    guard let audioName = playback.qualities.first(where: { $0.isAudioOnly })?.name else {
+      return false
+    }
+    return audioName == preferredQuality
+  }
+
   private var videoColumn: some View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
         .ignoresSafeArea()
+
+      if isAudioOnlyActive, !isLoading, errorMessage == nil {
+        AudioVisualizerView(
+          level: audioLevelMonitor.level,
+          avatarURL: channelAvatarURL,
+          palette: palette
+        )
+        .transition(.opacity)
+        .onAppear { audioLevelMonitor.start() }
+        .onDisappear {
+          audioLevelMonitor.unbind()
+          audioLevelMonitor.stop()
+        }
+        .task(id: currentSourceURL) {
+          audioLevelMonitor.bind(to: player.currentItem)
+        }
+      }
 
       if showControls, !isLoading,
         errorMessage == nil

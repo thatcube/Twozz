@@ -529,38 +529,18 @@ struct PlayerView: View {
       Spacer(minLength: 18)
 
       HStack(spacing: 14) {
-        Menu {
-          ForEach(Array(qualityOptions.enumerated()), id: \.element) { index, option in
-            Button {
-              selectQuality(at: index)
-            } label: {
-              if option == preferredQuality {
-                Label(qualityDisplayLabel(option), systemImage: "checkmark")
-              } else {
-                Text(qualityDisplayLabel(option))
-              }
-            }
-          }
-        } label: {
-          Text(qualityButtonLabel)
-            .font(.subheadline)
-            .fontWeight(.semibold)
-            .monospacedDigit()
-            .lineLimit(1)
-            .fixedSize()
-            .accessibilityLabel("Quality, \(qualityButtonLabel)")
-        }
-        .focused($focus, equals: .quality)
-        .onMoveCommand { direction in
-          switch direction {
-          case .left:
-            focus = .streamInfo
-          case .right:
-            focus = .chatToggle
-          default:
-            break
-          }
-        }
+        QualityMenu(
+          options: qualityOptions,
+          selectedOption: preferredQuality,
+          buttonLabel: qualityButtonLabel,
+          displayLabel: { qualityDisplayLabel($0) },
+          onSelect: { selectQuality(at: $0) },
+          focus: $focus,
+          focusValue: .quality,
+          leftFocus: .streamInfo,
+          rightFocus: .chatToggle
+        )
+        .equatable()
 
         Button {
           toggleChatVisibility()
@@ -843,6 +823,11 @@ struct PlayerView: View {
       try? await Task.sleep(for: .seconds(controlsAutoHideSeconds))
       guard !Task.isCancelled else { return }
       await MainActor.run {
+        // Don't auto-hide while the quality control is engaged. The native
+        // Menu keeps focus parked on `.quality` while it's open, and hiding
+        // the control bar here would dismiss the menu out from under the user.
+        // Normal auto-hide resumes once focus moves to another control.
+        if focus == .quality { return }
         hideControls()
       }
     }
@@ -2310,6 +2295,63 @@ private struct ChatInputShellStyle: ViewModifier {
           .overlay(
             shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.75)
           )
+      }
+    }
+  }
+}
+
+/// The native quality picker, extracted into its own `Equatable` view so the
+/// player's once-per-second latency/diagnostics state churn doesn't re-render
+/// (and visibly re-focus / "blink") the open `Menu`. SwiftUI only re-evaluates
+/// this view when one of the value inputs compared in `==` actually changes.
+private struct QualityMenu<F: Hashable>: View, Equatable {
+  let options: [String]
+  let selectedOption: String
+  let buttonLabel: String
+  let displayLabel: (String) -> String
+  let onSelect: (Int) -> Void
+  var focus: FocusState<F>.Binding
+  let focusValue: F
+  let leftFocus: F
+  let rightFocus: F
+
+  nonisolated static func == (lhs: QualityMenu<F>, rhs: QualityMenu<F>) -> Bool {
+    lhs.options == rhs.options
+      && lhs.selectedOption == rhs.selectedOption
+      && lhs.buttonLabel == rhs.buttonLabel
+  }
+
+  var body: some View {
+    Menu {
+      ForEach(Array(options.enumerated()), id: \.element) { index, option in
+        Button {
+          onSelect(index)
+        } label: {
+          if option == selectedOption {
+            Label(displayLabel(option), systemImage: "checkmark")
+          } else {
+            Text(displayLabel(option))
+          }
+        }
+      }
+    } label: {
+      Text(buttonLabel)
+        .font(.subheadline)
+        .fontWeight(.semibold)
+        .monospacedDigit()
+        .lineLimit(1)
+        .fixedSize()
+        .accessibilityLabel("Quality, \(buttonLabel)")
+    }
+    .focused(focus, equals: focusValue)
+    .onMoveCommand { direction in
+      switch direction {
+      case .left:
+        focus.wrappedValue = leftFocus
+      case .right:
+        focus.wrappedValue = rightFocus
+      default:
+        break
       }
     }
   }

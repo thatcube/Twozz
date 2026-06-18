@@ -109,7 +109,7 @@ struct HomeView: View {
         Label(SidebarTab.settings.rawValue, systemImage: SidebarTab.settings.systemImage)
       }
     }
-    .tabViewStyle(.sidebarAdaptable)
+    .tabViewStyle(.automatic)
     .background(
       LinearGradient(
         colors: resolvedPalette.backgroundColors,

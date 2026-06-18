@@ -9,6 +9,7 @@ final class TwitchAuthSession {
         // and may not reliably authorize Helix followed-channel endpoints.
         "kimne78kx3ncx6brgo4mv6wki5h1ko"
     ]
+    private static let twitchGraphQLPublicClientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 
     private(set) var isAuthenticated = false
     private(set) var userID: String?
@@ -436,6 +437,12 @@ final class TwitchAuthSession {
         return normalized.contains("invalid_refresh_token") || normalized.contains("invalid_grant")
     }
 
+    private func isInvalidClientIDError(_ error: TwitchAuthHTTPError) -> Bool {
+        guard error.status == 400 else { return false }
+        guard let normalized = normalizedOAuthMessage(error.message) else { return false }
+        return normalized.contains("client_id") && normalized.contains("invalid")
+    }
+
     private func describe(_ error: Error) -> String {
         if let authError = error as? TwitchAuthHTTPError {
             return authError.localizedDescription
@@ -655,6 +662,35 @@ final class TwitchAuthSession {
         clientID: String,
         accessToken: String
     ) async throws {
+        let normalizedClientID = clientID.lowercased()
+        do {
+            try await performFollowMutationWithAuthorizationFallback(
+                targetID: targetID,
+                follow: follow,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+        } catch let error as TwitchAuthHTTPError
+        where isInvalidClientIDError(error)
+            && normalizedClientID != Self.twitchGraphQLPublicClientID
+        {
+            // Some GQL routes reject app-issued client IDs even with valid user
+            // tokens; retry with Twitch's public web client ID.
+            try await performFollowMutationWithAuthorizationFallback(
+                targetID: targetID,
+                follow: follow,
+                clientID: Self.twitchGraphQLPublicClientID,
+                accessToken: accessToken
+            )
+        }
+    }
+
+    private func performFollowMutationWithAuthorizationFallback(
+        targetID: String,
+        follow: Bool,
+        clientID: String,
+        accessToken: String
+    ) async throws {
         do {
             try await performFollowMutationRequest(
                 targetID: targetID,
@@ -705,7 +741,7 @@ final class TwitchAuthSession {
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
         req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
-        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(
             withJSONObject: ["query": query, "variables": variables])

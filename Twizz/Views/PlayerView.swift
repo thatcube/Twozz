@@ -1415,10 +1415,14 @@ struct PlayerView: View {
     .onPreferenceChange(ChatSettingsHeightKey.self) { height in
       chatSettingsContentHeight = height
     }
+    // Clip scrolled content to the panel shape so rows that scroll past the top
+    // or bottom edge are hidden inside the menu instead of bleeding out over the
+    // chat. tvOS auto-scrolls a focused row fully into view, and the content's
+    // generous interior padding keeps focus halos off this clip edge.
+    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
     // Match the chat pane's real Liquid Glass (`.glassEffect(.regular)`) so the
     // panel reads the same as the Glass chat layout, instead of a flatter
-    // frosted material. Intentionally no clipShape: tvOS focus effects scale
-    // beyond bounds, and clipping reintroduces visibly cut-off focus states.
+    // frosted material.
     .modifier(ChatSettingsPanelGlassStyle())
     .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
     .animation(.easeOut(duration: 0.22), value: resolvedHeight)

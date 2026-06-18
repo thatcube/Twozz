@@ -204,8 +204,6 @@ struct PlayerView: View {
   private let diagFallbackScoreThreshold = 3
   private let chatReplayMessageCount = 30
   private let chatComposerRowHeight: CGFloat = 62
-  private let chatInputFocusedHeight: CGFloat = 62
-  private let chatInputUnfocusedHeight: CGFloat = 54
 
   @FocusState private var focus: Focusable?
   private enum Focusable: Hashable {
@@ -1326,7 +1324,9 @@ struct PlayerView: View {
 
               Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(chatDraft.isEmpty ? 0.5 : 1.0))
+                .foregroundStyle(focus == .chatInput
+                  ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
+                  : .white.opacity(chatDraft.isEmpty ? 0.5 : 1.0))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1334,7 +1334,7 @@ struct PlayerView: View {
             .padding(.horizontal, 28)
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity)
-            .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+            .frame(height: chatComposerRowHeight)
             .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
           }
           .buttonStyle(ChatInputButtonStyle())
@@ -1392,11 +1392,13 @@ struct PlayerView: View {
         } label: {
           Text("Sign in to send messages")
             .font(.subheadline)
-            .foregroundStyle(.white.opacity(focus == .chatInput ? 0.85 : 0.45))
+            .foregroundStyle(focus == .chatInput
+              ? .black.opacity(0.7)
+              : .white.opacity(0.45))
             .lineLimit(1)
             .padding(.horizontal, 28)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+            .frame(height: chatComposerRowHeight)
             .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
             .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
         }
@@ -2297,9 +2299,10 @@ private struct ChatInputButtonStyle: ButtonStyle {
   }
 }
 
-/// Gives the chat composer field a Liquid Glass capsule shell. Uses native
-/// `.glassEffect` on tvOS 26+ and an `.ultraThinMaterial` fallback on older
-/// systems. Focus is conveyed with a brighter ring, a subtle lift, and a glow.
+/// Gives the chat composer field a Liquid Glass capsule at rest and the standard
+/// tvOS focus treatment when focused: a solid white fill with a subtle lift and
+/// drop shadow, matching every other focusable control. Falls back to
+/// `.ultraThinMaterial` on systems older than tvOS 26.
 private struct ChatGlassFieldStyle: ViewModifier {
   let isFocused: Bool
 
@@ -2309,18 +2312,20 @@ private struct ChatGlassFieldStyle: ViewModifier {
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
+    if isFocused {
+      content
+        .background(.white, in: shape)
+        .scaleEffect(1.05)
+        .shadow(color: .black.opacity(0.28), radius: 14, x: 0, y: 8)
+    } else if #available(tvOS 26.0, *) {
       content
         .glassEffect(.regular, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.5 : 0.10), lineWidth: isFocused ? 1.5 : 0.75))
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .shadow(color: .white.opacity(isFocused ? 0.25 : 0.0), radius: isFocused ? 12 : 0, x: 0, y: 0)
+        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 0.75))
         .shadow(color: .black.opacity(0.18), radius: 5, x: 0, y: 2)
     } else {
       content
         .background(.ultraThinMaterial, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.5 : 0.10), lineWidth: isFocused ? 1.5 : 0.75))
-        .scaleEffect(isFocused ? 1.02 : 1.0)
+        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 0.75))
     }
   }
 }

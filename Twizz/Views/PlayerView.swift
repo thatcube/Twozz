@@ -1719,7 +1719,7 @@ struct PlayerView: View {
       }
       .padding(.horizontal, 36)
       .padding(.vertical, 20)
-      .background(.purple.opacity(0.9), in: Capsule())
+      .background(Color(red: 0.40, green: 0.25, blue: 0.78).opacity(0.95), in: Capsule())
       .padding(.bottom, 60)
     }
     .ignoresSafeArea()
@@ -1759,13 +1759,12 @@ struct PlayerView: View {
   }
 
   /// Debug-only: inject a simulated outgoing raid so the auto-follow flow can be
-  /// tested without waiting for a real raid. Targets Monstercat, which streams
-  /// almost continuously, so the redirect lands on a live channel.
+  /// tested without waiting for a real raid. Targets AlveusSanctuary.
   private func simulateOutgoingRaid() {
     showChatSettings = false
     eventSub.pendingOutgoingRaid = OutgoingRaidEvent(
-      toLogin: "monstercat",
-      toDisplayName: "Monstercat",
+      toLogin: "alveussanctuary",
+      toDisplayName: "AlveusSanctuary",
       toBroadcasterID: "",
       viewerCount: 0
     )

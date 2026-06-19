@@ -350,11 +350,24 @@ struct ChatView: View {
 
   /// Use the user's Twitch color, or a stable color derived from their name.
   private func color(for message: ChatMessage) -> Color {
-    if let hex = message.colorHex, let c = Color(twitchHex: hex) {
-      return c
+    let key = message.colorHex ?? "name:\(message.username)"
+    if let cached = Self.colorCache[key] {
+      return cached
     }
-    return Self.fallbackPalette[message.username.deterministicIndex(Self.fallbackPalette.count)]
+    let resolved: Color
+    if let hex = message.colorHex, let c = Color(twitchHex: hex) {
+      resolved = c
+    } else {
+      resolved = Self.fallbackPalette[message.username.deterministicIndex(Self.fallbackPalette.count)]
+    }
+    Self.colorCache[key] = resolved
+    return resolved
   }
+
+  /// Resolved name colors keyed by the user's color hex (or username for the
+  /// deterministic fallback). Parsing the hex and building a Color on every line
+  /// render is pure repeated work, so memoize it across the session.
+  private static var colorCache: [String: Color] = [:]
 
   /// Bright, readable defaults (Twitch-style) for users with no color set.
   private static let fallbackPalette: [Color] = [

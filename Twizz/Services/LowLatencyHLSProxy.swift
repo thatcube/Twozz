@@ -119,6 +119,11 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     private let llhlsBlockingTimeout: TimeInterval = 5
     /// How often to re-poll Twitch upstream while holding a blocking reload.
     private let llhlsPollInterval: TimeInterval = 0.25
+    /// Last successfully synthesized LL-HLS manifest per upstream URL. Lets a
+    /// blocking reload that hits its deadline return real content instead of
+    /// hanging or erroring. Mutated only on `delegateQueue`; cleared on channel
+    /// switch (`resetDVR`).
+    private var lastLLHLSManifest: [String: Data] = [:]
 
     /// One parsed HLS segment (a real `#EXTINF` segment or a promoted prefetch),
     /// kept as its full text block so per-segment tags (PROGRAM-DATE-TIME,
@@ -181,6 +186,7 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     func resetDVR() {
         delegateQueue.async { [weak self] in
             self?.dvrBuffers.removeAll()
+            self?.lastLLHLSManifest.removeAll()
         }
     }
 
@@ -215,8 +221,7 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         let key = ObjectIdentifier(loadingRequest)
 
         if synthesizeLLHLS, let target = blockingReloadTarget(from: requestURL) {
-            let deadline = Date().addingTimeInterval(llhlsBlockingTimeout)
-            pollBlockingReload(loadingRequest, upstream: upstream, target: target, key: key, deadline: deadline)
+            serveBlockingReload(loadingRequest, upstream: upstream, target: target, key: key)
             return true
         }
 
@@ -253,6 +258,34 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     }
 
     // MARK: - LL-HLS blocking playlist reload
+
+    /// Serves a blocking playlist reload with a hard safety guarantee: an absolute
+    /// `llhlsBlockingTimeout` watchdog resolves the request even if the network
+    /// stalls, returning the last good manifest instead of ever hanging AVPlayer.
+    /// A hung resource loader freezes the player, so this is the critical failsafe.
+    private func serveBlockingReload(
+        _ loadingRequest: AVAssetResourceLoadingRequest,
+        upstream: URL,
+        target: (msn: Int, part: Int),
+        key: ObjectIdentifier
+    ) {
+        let deadline = Date().addingTimeInterval(llhlsBlockingTimeout)
+        delegateQueue.asyncAfter(deadline: .now() + llhlsBlockingTimeout) { [weak self] in
+            guard let self else { return }
+            if loadingRequest.isFinished || loadingRequest.isCancelled { return }
+            // Network is still in flight at the deadline: cancel it and resolve now.
+            self.tasks[key]?.cancel()
+            self.tasks[key] = nil
+            if let cached = self.lastLLHLSManifest[upstream.absoluteString] {
+                self.fulfill(loadingRequest, with: cached)
+            } else {
+                // Nothing cached yet — finish with a retriable error rather than
+                // empty data so AVPlayer simply reissues the reload.
+                loadingRequest.finishLoading(with: PlaybackError.badResponse)
+            }
+        }
+        pollBlockingReload(loadingRequest, upstream: upstream, target: target, key: key, deadline: deadline)
+    }
 
     /// Holds a blocking playlist reload open, re-polling Twitch upstream every
     /// `llhlsPollInterval` until the synthesized LL-HLS playlist advertises the
@@ -292,11 +325,12 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
 
                 let text = String(decoding: data, as: UTF8.self)
                 let synthesis = self.llhlsSynthesis(from: text)
+                self.lastLLHLSManifest[upstream.absoluteString] = synthesis.data
                 if synthesis.availableMSN >= target.msn || Date() >= deadline {
                     self.fulfill(loadingRequest, with: synthesis.data)
                 } else {
-                    self.delegateQueue.asyncAfter(deadline: .now() + self.llhlsPollInterval) {
-                        self.pollBlockingReload(
+                    self.delegateQueue.asyncAfter(deadline: .now() + self.llhlsPollInterval) { [weak self] in
+                        self?.pollBlockingReload(
                             loadingRequest, upstream: upstream, target: target, key: key, deadline: deadline)
                     }
                 }
@@ -325,7 +359,9 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             return rewriteMasterPlaylist(text)
         }
         if synthesizeLLHLS {
-            return llhlsSynthesis(from: text).data
+            let data = llhlsSynthesis(from: text).data
+            lastLLHLSManifest[sourceURL.absoluteString] = data
+            return data
         }
         return rewriteMediaPlaylist(text, sourceURL: sourceURL)
     }

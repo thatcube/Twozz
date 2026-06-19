@@ -221,13 +221,22 @@ reloads with `_HLS_msn`/`_HLS_part` and consumes parts as they appear.
   `#EXT-X-PART-INF:PART-TARGET`, `#EXT-X-VERSION:9`, an `#EXT-X-PART`
   (`INDEPENDENT=YES`) per recent segment + per already-available prefetch, and a
   trailing `#EXT-X-PRELOAD-HINT:TYPE=PART` for the freshest prefetch.
-- **Blocking playlist reload** (`pollBlockingReload`). When AVPlayer requests the
-  playlist with `_HLS_msn`/`_HLS_part`, the resource loader strips those params
-  (Twitch upstream rejects them), then **holds the request open**, re-polling
-  Twitch every 250 ms until the synthesized playlist advertises that media
-  sequence (`availableMSN`) or a 5 s deadline passes, then returns. This is the
-  crux: it lets AVPlayer fetch the bleeding edge the instant Twitch publishes it
-  rather than waiting out a normal poll interval.
+- **Blocking playlist reload** (`serveBlockingReload` / `pollBlockingReload`).
+  When AVPlayer requests the playlist with `_HLS_msn`/`_HLS_part`, the resource
+  loader strips those params (Twitch upstream rejects them), then **holds the
+  request open**, re-polling Twitch every 250 ms until the synthesized playlist
+  advertises that media sequence (`availableMSN`) or a 5 s deadline passes, then
+  returns. This is the crux: it lets AVPlayer fetch the bleeding edge the instant
+  Twitch publishes it rather than waiting out a normal poll interval.
+- **Safety (a hung resource loader = frozen player, so this is non-negotiable).**
+  A hard `llhlsBlockingTimeout` (5 s) **watchdog** resolves every held reload even
+  if the network stalls — it cancels the in-flight fetch and returns the last good
+  manifest (cached per upstream URL), never hanging AVPlayer. The poll is fully
+  async (`URLSession` data tasks + `asyncAfter` on the delegate queue), so it never
+  blocks the shared callback queue and cannot starve segment/master requests
+  (segments bypass the proxy entirely). `didCancel` cancels the in-flight task and
+  rescheduled polls bail on `isCancelled`, so channel-change/teardown cannot leak a
+  poll. The manifest cache is cleared on every channel switch (`resetDVR`).
 - **Wiring.** `makeItem` gates `synthesizeLLHLS = llhlsExperimentEnabled &&
   lowLatencyProxyEnabled && !isStreamUnstable && !streamRewindEnabled`. It is
   mutually exclusive with DVR retention and supersedes plain promotion when on;

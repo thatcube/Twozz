@@ -233,16 +233,21 @@ struct StreamChannelCard: View {
   /// theme background nudged toward white to approximate the glass. Used for the
   /// media edge hairline so it blends with the card while still painting over
   /// the hardware video plane's corner bleed.
+  private static var edgeColorCache: [UIColor: Color] = [:]
+
   private var mediaEdgeColor: Color {
     let base = UIColor(palette.backgroundColors.last ?? .black)
+    if let cached = Self.edgeColorCache[base] { return cached }
     var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
     base.getRed(&r, green: &g, blue: &b, alpha: &a)
     let lift: CGFloat = 0.09
-    return Color(
+    let color = Color(
       red: Double(r + (1 - r) * lift),
       green: Double(g + (1 - g) * lift),
       blue: Double(b + (1 - b) * lift)
     )
+    Self.edgeColorCache[base] = color
+    return color
   }
 
   private var railCardWidth: CGFloat? {

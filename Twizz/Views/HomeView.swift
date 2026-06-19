@@ -30,6 +30,11 @@ struct HomeView: View {
   @State private var showSignIn = false
   @State private var refreshToast: RefreshToastState?
   @State private var goLive = GoLiveWatcher()
+  /// "Top streams" recommendations with already-followed and personalized
+  /// channels filtered out. Cached here and recomputed only when one of the
+  /// source lists changes, so we don't rebuild the lookup sets and refilter on
+  /// every HomeView body pass (focus changes, scrolling, animations).
+  @State private var topStreams: [FollowedChannel] = []
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedEnabled = true
@@ -180,6 +185,13 @@ struct HomeView: View {
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)
+      recomputeTopStreams()
+    }
+    .onChange(of: recommendations.channels) { _, _ in
+      recomputeTopStreams()
+    }
+    .onChange(of: personalized.channels) { _, _ in
+      recomputeTopStreams()
     }
     .onChange(of: auth.isAuthenticated) { _, _ in
       // Re-seed the go-live baseline against the new account's follows.
@@ -409,13 +421,17 @@ struct HomeView: View {
     }
   }
 
-  @ViewBuilder
-  private func topStreamsSection(rail: ChannelRailMetrics) -> some View {
+  private func recomputeTopStreams() {
     let followedIDs = Set(follows.channels.map(\.id))
     let personalizedLogins = Set(personalized.channels.map { $0.login.lowercased() })
-    let top = recommendations.channels.filter {
+    topStreams = recommendations.channels.filter {
       !followedIDs.contains($0.id) && !personalizedLogins.contains($0.login.lowercased())
     }
+  }
+
+  @ViewBuilder
+  private func topStreamsSection(rail: ChannelRailMetrics) -> some View {
+    let top = topStreams
 
     if !top.isEmpty {
       VStack(alignment: .leading, spacing: 2) {

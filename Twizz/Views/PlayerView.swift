@@ -622,8 +622,14 @@ struct PlayerView: View {
     }
     .onChange(of: showStillWatching) { _, showing in
       // Pull focus to the "Keep watching" button so an awake viewer can dismiss
-      // the pending sleep with a single press.
-      if showing { focus = .sleepKeepWatching }
+      // the pending sleep with a single press. Cancel the quality menu's focus
+      // recovery first so it can't yank focus back to the quality button (this
+      // matters when a short test timer surfaces the banner right as the menu
+      // is still closing).
+      if showing {
+        focusRecoveryTask?.cancel()
+        focus = .sleepKeepWatching
+      }
     }
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
@@ -1097,6 +1103,10 @@ struct PlayerView: View {
           onMenuDismissed: {
             isQualityMenuPresented = false
             focusRecoveryTask?.cancel()
+            // If selecting a (short) sleep timer already surfaced the
+            // still-watching banner or the sleeping overlay, don't yank focus
+            // back to the quality button — let those own it.
+            guard !showStillWatching, !isSleeping else { return }
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
@@ -1108,6 +1118,7 @@ struct PlayerView: View {
               guard !Task.isCancelled else { return }
               await MainActor.run {
                 guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
+                guard !showStillWatching, !isSleeping else { return }
                 guard focus == nil || focus == .quality else { return }
                 focus = .quality
               }
@@ -2719,6 +2730,7 @@ struct PlayerView: View {
   private static let sleepTimerOptions: [SleepTimerOption] = [
     .init(label: "Off", seconds: nil, isEndOfStream: false),
     .init(label: "10 seconds (test)", seconds: 10, isEndOfStream: false),
+    .init(label: "1 minute (test)", seconds: 60, isEndOfStream: false),
     .init(label: "15 minutes", seconds: 15 * 60, isEndOfStream: false),
     .init(label: "30 minutes", seconds: 30 * 60, isEndOfStream: false),
     .init(label: "45 minutes", seconds: 45 * 60, isEndOfStream: false),
@@ -2801,8 +2813,9 @@ struct PlayerView: View {
     focus = showControls ? .quality : .video
   }
 
-  /// Timer fired: pause playback, show the dim sleeping overlay, and crucially
-  /// release the idle timer so tvOS can actually put the device to sleep.
+  /// Timer fired: stop playback (and the monitors that would otherwise try to
+  /// "recover" the deliberate pause), show the dim sleeping overlay, and release
+  /// the idle timer so tvOS can actually put the device to sleep.
   private func enterSleepState() {
     sleepTimerTask?.cancel()
     sleepTimerTask = nil
@@ -2811,6 +2824,11 @@ struct PlayerView: View {
     sleepRemainingSeconds = nil
     sleepSelectionIndex = 0
     showStillWatching = false
+    // Tear down the watchdog/latency loops first so neither one sees the pause
+    // as a stall and resumes playback behind the overlay.
+    stopPlaybackWatchdog()
+    stopLatencyMonitor()
+    didRequestPlayback = false
     player.pause()
     setIdleTimer(disabled: false)
     withAnimation { isSleeping = true }
@@ -2822,7 +2840,9 @@ struct PlayerView: View {
     withAnimation { isSleeping = false }
     // Resume keeping the screen awake now that the viewer is back.
     setIdleTimer(disabled: true)
-    player.playImmediately(atRate: 1.0)
+    startPlayback()
+    startLatencyMonitor()
+    startPlaybackWatchdog()
     focus = showControls ? .quality : .video
   }
 

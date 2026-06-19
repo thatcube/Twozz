@@ -14,6 +14,7 @@ struct SearchView: View {
   var body: some View {
     NavigationStack(path: $path) {
       SearchResultsView(
+        query: $query,
         service: service,
         onSelectChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
         onWatchChannel: { selectedChannel = $0 },
@@ -27,11 +28,6 @@ struct SearchView: View {
         )
       }
     }
-    .searchable(
-      text: $query,
-      placement: .automatic,
-      prompt: "Search channels and categories"
-    )
     .task(id: query) {
       // Debounce keystrokes from the on-screen keyboard before hitting the API.
       let pending = query
@@ -45,6 +41,7 @@ struct SearchView: View {
 // MARK: - Results
 
 private struct SearchResultsView: View {
+  @Binding var query: String
   let service: SearchService
   let onSelectChannel: (FollowedChannel) -> Void
   let onWatchChannel: (FollowedChannel) -> Void
@@ -91,7 +88,11 @@ private struct SearchResultsView: View {
       .padding(.bottom, 24)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .searchable(
+      text: $query,
+      placement: .automatic,
+      prompt: "Search channels and categories"
+    )
   }
 
   private var categoriesSection: some View {

@@ -342,7 +342,48 @@ struct PlayerView: View {
   @State private var chatScrollTarget: ChatScrollTarget?
   @State private var chatScrollNonce = 0
   /// Messages to advance per up/down swipe while scrolling.
-  private let chatScrollStep = 3
+  private let chatScrollStep = 4
+  /// Swipe-to-scroll (Siri Remote trackpad) state. The monitor reports the
+  /// finger's position; a loop maps finger *travel* to scroll position so the
+  /// chat follows a swipe and holds still when the finger does. Discrete presses
+  /// still step (and press-and-hold repeats).
+  @State private var trackpad = RemoteTrackpadMonitor()
+  @State private var trackpadScrollTask: Task<Void, Never>?
+  @State private var trackpadScrollIndex: Double = 0
+  @State private var lastSentScrollIndex: Int = -1
+  /// When the swipe loop last moved the scroll, used to suppress the discrete
+  /// focus-move events a swipe also emits so a swipe and a press don't double up.
+  @State private var lastGestureScrollAt = Date.distantPast
+  /// Finger position magnitude below this reads as "not touching" (lifted).
+  private let chatScrollTouchEpsilon: Double = 0.02
+  /// Per-frame finger movement below this reads as "resting" (no swipe), so a
+  /// held/pressing finger's natural jitter doesn't register as a swipe — which
+  /// would otherwise keep resetting the gesture timer and block press-and-hold.
+  private let chatScrollMoveEpsilon: Double = 0.012
+  /// Messages scrolled per unit of finger travel across the trackpad.
+  private let chatScrollSwipeSensitivity: Double = 16
+  /// Per-frame velocity decay once the finger lifts, giving swipes momentum so
+  /// the chat coasts and eases to a stop instead of halting dead.
+  private let chatScrollFriction: Double = 0.94
+  /// Below this coasting speed (index-units per frame) momentum is considered
+  /// spent and stops.
+  private let chatScrollMomentumMin: Double = 0.04
+  /// Press-and-hold auto-repeat. tvOS won't emit system key-repeat here because
+  /// focus is trapped on the composer, so we drive an accelerating repeat
+  /// ourselves while the finger stays pressed/down on the pad.
+  @State private var chatHoldTask: Task<Void, Never>?
+  /// Delay after click-down before the continuous hold-scroll engages, so a quick
+  /// tap stays a single discrete step.
+  private let chatHoldInitialDelay: Double = 0.2
+  /// Continuous hold-scroll speed (messages per 60Hz frame) at engage time.
+  private let chatHoldStartVelocity: Double = 0.18
+  /// Top speed the hold accelerates to (messages per frame).
+  private let chatHoldMaxVelocity: Double = 1.4
+  /// Per-frame multiplier that ramps the hold speed up (acceleration).
+  private let chatHoldVelocityAccel: Double = 1.035
+  /// When the hold last scrolled, used to swallow the single discrete move event
+  /// the click also emits on release.
+  @State private var lastHoldRepeatAt = Date.distantPast
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
   @State private var chatInputFocusedAt = Date.distantPast
@@ -723,6 +764,7 @@ struct PlayerView: View {
     }
     .onAppear {
       setIdleTimer(disabled: true)
+      trackpad.start()
     }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) {
       notification in
@@ -753,6 +795,9 @@ struct PlayerView: View {
       chatSyncSendClearTask?.cancel()
       outgoingRaidFollowTask?.cancel()
       softPauseTask?.cancel()
+      trackpadScrollTask?.cancel()
+      chatHoldTask?.cancel()
+      trackpad.stop()
       sleepTimerTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
@@ -782,6 +827,17 @@ struct PlayerView: View {
       }
     }
     .onMoveCommand { direction in
+      // While actively scrolling with the chrome hidden, route every directional
+      // input through the scroll handler (and swallow horizontal) so a stray
+      // swipe can't surface the chrome and bump you out of the scroll.
+      if !showControls, showChat, isChatScrolling {
+        switch direction {
+        case .up: handleChatUpPress()
+        case .down: handleChatDownPress()
+        default: break
+        }
+        return
+      }
       if !showControls {
         // Directional movement should immediately surface controls. Pressing
         // right with chat open means the user wants the composer, so land
@@ -816,9 +872,19 @@ struct PlayerView: View {
       if newFocus == .chatInput, oldFocus != .chatInput {
         chatInputFocusedAt = Date()
       }
-      // If chat is frozen (soft pause or scroll) and the viewer navigates away
-      // to a real control, resume live so the frozen state can't get stranded.
-      if isChatScrolling || chatSoftPauseRemaining != nil {
+      // Keep the swipe target stable while chat is held.
+      if isChatScrolling {
+        // Active scroll traps focus on the composer so a stray diagonal swipe
+        // can't jump to a control and silently end the scroll. The only
+        // exception is `.video`, which is the page-level handler that drives
+        // scrolling while the chrome is hidden. Exit is via Back or scrolling
+        // back to the bottom.
+        if let newFocus, newFocus != .chatInput, newFocus != .video {
+          focus = .chatInput
+        }
+      } else if chatSoftPauseRemaining != nil {
+        // Lightweight read pause: navigating away to a real control resumes live
+        // so the frozen state can't get stranded.
         if let newFocus, newFocus != .chatInput, isControlFocus(newFocus) {
           resumeChatLive()
         }
@@ -1696,10 +1762,22 @@ struct PlayerView: View {
   }
 
   /// Up press while chat is open. First press soft-pauses (read mode with a
-  /// countdown). A second press promotes to manual scroll mode and scrolls up;
-  /// further up presses keep scrolling toward older messages.
+  /// countdown). A press while paused promotes to scroll mode and steps up;
+  /// press-and-hold repeats. A trackpad swipe scrolls continuously via the
+  /// gesture loop, which suppresses these discrete events while it's driving.
   private func handleChatUpPress() {
     if isChatScrolling {
+      // A swipe also emits these discrete move events; ignore them while the
+      // gesture loop is actively scrolling so a swipe doesn't double-step. A
+      // press (no recent gesture motion) still steps, and press-and-hold repeats.
+      if trackpad.hasController, Date().timeIntervalSince(lastGestureScrollAt) < 0.12 {
+        return
+      }
+      // The hold watcher already drove this; swallow the move event the click
+      // emits on release so a hold doesn't tack on an extra step.
+      if trackpad.hasController, Date().timeIntervalSince(lastHoldRepeatAt) < 0.3 {
+        return
+      }
       stepChatScroll(up: true)
     } else if chatSoftPauseRemaining != nil {
       beginChatScrolling()
@@ -1717,6 +1795,12 @@ struct PlayerView: View {
   /// once it reaches the bottom; from a plain soft pause it resumes immediately.
   private func handleChatDownPress() {
     if isChatScrolling {
+      if trackpad.hasController, Date().timeIntervalSince(lastGestureScrollAt) < 0.12 {
+        return
+      }
+      if trackpad.hasController, Date().timeIntervalSince(lastHoldRepeatAt) < 0.3 {
+        return
+      }
       stepChatScroll(up: false)
     } else if chatSoftPauseRemaining != nil {
       resumeChatLive()
@@ -1749,10 +1833,179 @@ struct PlayerView: View {
 
   /// Promote a soft pause into manual scroll mode, anchored at the newest message.
   private func beginChatScrolling() {
+    guard !isChatScrolling else { return }
     cancelSoftPause()
     isChatScrolling = true
-    chatScrollAnchorID = visibleChatMessages.last?.id
+    let msgs = visibleChatMessages
+    chatScrollAnchorID = msgs.last?.id
+    trackpadScrollIndex = Double(max(0, msgs.count - 1))
+    lastSentScrollIndex = msgs.count - 1
     scheduleHide()
+    startTrackpadScrollLoop()
+    startChatHoldWatcher()
+  }
+
+  /// Drive swipe-to-scroll from the Siri Remote trackpad. Runs at ~60 Hz while
+  /// scrolling and moves the chat by the finger's *per-frame travel*, so the
+  /// chat follows a swipe and a resting/pressing finger (no travel) is left
+  /// completely alone — that way it never fights the discrete press handler.
+  private func startTrackpadScrollLoop() {
+    guard trackpad.hasController, trackpadScrollTask == nil else { return }
+    trackpadScrollTask = Task { @MainActor in
+      var primed = false
+      var lastY = 0.0
+      // Coasting speed in index-units per frame, carried after the finger lifts.
+      var velocity = 0.0
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(16))
+        if Task.isCancelled { break }
+        guard isChatScrolling else { break }
+
+        let x = Double(trackpad.horizontalValue)
+        let y = Double(trackpad.verticalValue)
+        let touching =
+          abs(x) > chatScrollTouchEpsilon || abs(y) > chatScrollTouchEpsilon
+
+        if !touching {
+          // Finger lifted: coast with the velocity built up during the swipe so
+          // the chat eases to a stop (momentum) instead of halting dead.
+          primed = false
+          if abs(velocity) > chatScrollMomentumMin {
+            if !applyScrollDelta(velocity) { break }
+            velocity *= chatScrollFriction
+          } else {
+            velocity = 0
+          }
+          continue
+        }
+        // A fresh touch (including a press's finger-down) cancels any coast so it
+        // doesn't fight the press/step handler, then re-baselines travel.
+        if !primed {
+          primed = true
+          lastY = y
+          velocity = 0
+          continue
+        }
+        let dy = y - lastY
+        lastY = y
+        // A resting or pressing finger (dy ~ 0) is left alone; bleed off any
+        // leftover velocity so pausing mid-swipe doesn't later coast.
+        guard abs(dy) > chatScrollMoveEpsilon else {
+          velocity *= chatScrollFriction
+          continue
+        }
+        lastGestureScrollAt = Date()
+        // Up travel (y increases) scrolls toward older messages (lower index).
+        let delta = -dy * chatScrollSwipeSensitivity
+        // Smooth into the velocity estimate so the handoff to momentum is stable.
+        velocity = velocity * 0.35 + delta * 0.65
+        if !applyScrollDelta(delta) { break }
+      }
+      trackpadScrollTask = nil
+    }
+  }
+
+  /// Move the scroll position by `delta` messages (fractional). Returns false if
+  /// the move reached the live bottom and resumed the feed, signalling the loop
+  /// to stop.
+  @discardableResult
+  private func applyScrollDelta(_ delta: Double) -> Bool {
+    let msgs = visibleChatMessages
+    guard !msgs.isEmpty else { return false }
+    let lastIndex = Double(msgs.count - 1)
+    let idx = trackpadScrollIndex + delta
+    if idx >= lastIndex {
+      resumeChatLive()
+      return false
+    }
+    let clamped = max(0, idx)
+    trackpadScrollIndex = clamped
+    let target = Int(clamped.rounded())
+    guard target != lastSentScrollIndex else { return true }
+    lastSentScrollIndex = target
+    chatScrollAnchorID = msgs[target].id
+    sendChatScroll(to: msgs[target].id, animated: false)
+    return true
+  }
+
+  /// Continuously auto-scroll while the touch surface is physically *held*
+  /// clicked. tvOS gives no press-down/key-repeat event for a directional click
+  /// here — only a single move on release — and the live finger position is
+  /// unreliable once clicked, so we key off the reliable click button plus the
+  /// direction latched at click-down. Scrolls via the same continuous index model
+  /// as a swipe (un-animated, accelerating) so a hold feels fluid, not steppy.
+  private func startChatHoldWatcher() {
+    guard trackpad.hasController, chatHoldTask == nil else { return }
+    chatHoldTask = Task { @MainActor in
+      var pressStart: Date?
+      var active = false
+      var velocity = 0.0
+      // Direction resolved for the current hold. Sticks for the whole hold so the
+      // flickery live position can't flip it mid-scroll.
+      var heldDir = 0
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(16))
+        if Task.isCancelled { break }
+        guard isChatScrolling else { break }
+
+        guard trackpad.clickPressed else {
+          pressStart = nil
+          active = false
+          velocity = 0
+          heldDir = 0
+          continue
+        }
+
+        let now = Date()
+        if pressStart == nil {
+          pressStart = now
+          active = false
+          velocity = 0
+          heldDir = 0
+        }
+        // Resolve a direction for this hold. Prefer the click-down latch, but if
+        // it missed (click registered a frame before the finger position updated)
+        // recover from the live dpad/y signal and then stick with it.
+        if heldDir == 0 {
+          if trackpad.clickLatchedDirection != 0 {
+            heldDir = trackpad.clickLatchedDirection
+          } else if trackpad.dpadUpPressed || Double(trackpad.verticalValue) > 0.12 {
+            heldDir = 1
+          } else if trackpad.dpadDownPressed || Double(trackpad.verticalValue) < -0.12 {
+            heldDir = -1
+          }
+        }
+        guard heldDir != 0 else { continue }
+
+        // Let an active swipe own the scroll; pause the hold without resetting.
+        if Date().timeIntervalSince(lastGestureScrollAt) < 0.12 { continue }
+        if !active {
+          guard now.timeIntervalSince(pressStart!) >= chatHoldInitialDelay else {
+            continue
+          }
+          active = true
+          velocity = chatHoldStartVelocity
+        }
+        // Up (dir +1) scrolls toward older messages, i.e. a negative index delta.
+        let delta = heldDir > 0 ? -velocity : velocity
+        lastHoldRepeatAt = now
+        if !applyScrollDelta(delta) { break }  // reached the live bottom
+        velocity = min(chatHoldMaxVelocity, velocity * chatHoldVelocityAccel)
+      }
+      chatHoldTask = nil
+    }
+  }
+
+  private func stopChatHold() {
+    chatHoldTask?.cancel()
+    chatHoldTask = nil
+  }
+
+  private func stopTrackpadScrollLoop() {
+    trackpadScrollTask?.cancel()
+    trackpadScrollTask = nil
+    stopChatHold()
+    lastSentScrollIndex = -1
   }
 
   /// Advance the scroll anchor by `chatScrollStep` messages and tell ChatView to
@@ -1770,7 +2023,11 @@ struct PlayerView: View {
 
     if up {
       let target = max(0, currentIndex - chatScrollStep)
+      // Already at the top — don't re-send the same target (wasted scroll work).
+      guard target != currentIndex else { return }
       chatScrollAnchorID = msgs[target].id
+      trackpadScrollIndex = Double(target)
+      lastSentScrollIndex = target
       sendChatScroll(to: msgs[target].id)
     } else {
       let target = currentIndex + chatScrollStep
@@ -1778,15 +2035,21 @@ struct PlayerView: View {
         resumeChatLive()
       } else {
         chatScrollAnchorID = msgs[target].id
+        trackpadScrollIndex = Double(target)
+        lastSentScrollIndex = target
         sendChatScroll(to: msgs[target].id)
       }
     }
     scheduleHide()
   }
 
-  private func sendChatScroll(to id: ChatMessage.ID) {
+  private func sendChatScroll(to id: ChatMessage.ID, animated: Bool = true) {
     chatScrollNonce += 1
-    chatScrollTarget = ChatScrollTarget(id: id, anchor: .top, nonce: chatScrollNonce)
+    // Anchor the target at the bottom of the viewport. A `.top` anchor clamps
+    // hard near the live bottom (where every scroll starts), so the first swipes
+    // barely move; `.bottom` reveals a full step of older messages immediately.
+    chatScrollTarget = ChatScrollTarget(
+      id: id, anchor: .bottom, nonce: chatScrollNonce, animated: animated)
   }
 
   /// Leave any frozen state and let chat snap back to the live, newest message.
@@ -1794,6 +2057,7 @@ struct PlayerView: View {
     cancelSoftPause()
     isChatScrolling = false
     chatScrollAnchorID = nil
+    stopTrackpadScrollLoop()
     scheduleHide()
   }
 
@@ -5516,5 +5780,101 @@ private struct DiagnosticsPanel: View {
   private static func eventLine(_ event: DiagnosticsEvent) -> String {
     let ago = max(0, Int(Date().timeIntervalSince(event.at).rounded()))
     return "• \(event.text)  (\(ago)s ago)"
+  }
+}
+
+/// Reads the Siri Remote trackpad's absolute finger position so chat can be
+/// scrolled by gesture (and held). tvOS only delivers discrete focus-move
+/// events to SwiftUI, which makes scrolling feel like fixed little hops; for
+/// continuous, gesture-following scrolling we read the remote's micro-gamepad
+/// directly. `verticalValue` is +1 at the top of the trackpad, -1 at the
+/// bottom, and 0 when the finger is centered or lifted.
+final class RemoteTrackpadMonitor {
+  private(set) var verticalValue: Float = 0
+  private(set) var horizontalValue: Float = 0
+  private(set) var hasController = false
+  /// True while the touch surface is physically clicked (held down). Used to
+  /// drive press-and-hold repeat, which tvOS won't deliver via discrete events.
+  private(set) var clickPressed = false
+  /// Directional click/press states reported by the micro-gamepad dpad buttons.
+  /// These are what we probe to find a signal that distinguishes a *held*
+  /// directional press from a mere finger rest.
+  private(set) var dpadUpPressed = false
+  private(set) var dpadDownPressed = false
+  /// Direction (+1 up / -1 down / 0 none) captured at the instant of a click,
+  /// while the finger position is still trustworthy. The live dpad/`y` reading
+  /// flickers once the surface is clicked, so a held repeat keys off this latch
+  /// plus `clickPressed` rather than the live position.
+  private(set) var clickLatchedDirection = 0
+  private var observers: [NSObjectProtocol] = []
+
+  func start() {
+    for controller in GCController.controllers() { configure(controller) }
+    observers.append(
+      NotificationCenter.default.addObserver(
+        forName: .GCControllerDidConnect, object: nil, queue: .main
+      ) { [weak self] note in
+        if let controller = note.object as? GCController { self?.configure(controller) }
+      })
+    observers.append(
+      NotificationCenter.default.addObserver(
+        forName: .GCControllerDidDisconnect, object: nil, queue: .main
+      ) { [weak self] _ in
+        self?.hasController = !GCController.controllers().isEmpty
+        self?.verticalValue = 0
+        self?.horizontalValue = 0
+        self?.clickPressed = false
+        self?.dpadUpPressed = false
+        self?.dpadDownPressed = false
+        self?.clickLatchedDirection = 0
+      })
+  }
+
+  func stop() {
+    observers.forEach { NotificationCenter.default.removeObserver($0) }
+    observers.removeAll()
+    verticalValue = 0
+    horizontalValue = 0
+    clickPressed = false
+    dpadUpPressed = false
+    dpadDownPressed = false
+    clickLatchedDirection = 0
+  }
+
+  private func configure(_ controller: GCController) {
+    guard let micro = controller.microGamepad else { return }
+    hasController = true
+    // Absolute values report where the finger *is* on the pad. We use the change
+    // in position (finger travel) to drive a swipe, and treat ~(0,0) as lifted.
+    micro.reportsAbsoluteDpadValues = true
+    micro.dpad.valueChangedHandler = { [weak self] _, x, y in
+      self?.horizontalValue = x
+      self?.verticalValue = y
+    }
+    // buttonA is the physical click of the touch surface. Holding it down (with
+    // the finger over the up/down zone) is how we detect a held directional
+    // press for auto-repeat.
+    micro.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
+      guard let self else { return }
+      self.clickPressed = pressed
+      if pressed {
+        // Latch direction now, while the finger position is still reliable.
+        if self.dpadUpPressed || self.verticalValue > 0.2 {
+          self.clickLatchedDirection = 1
+        } else if self.dpadDownPressed || self.verticalValue < -0.2 {
+          self.clickLatchedDirection = -1
+        } else {
+          self.clickLatchedDirection = 0
+        }
+      } else {
+        self.clickLatchedDirection = 0
+      }
+    }
+    micro.dpad.up.pressedChangedHandler = { [weak self] _, _, pressed in
+      self?.dpadUpPressed = pressed
+    }
+    micro.dpad.down.pressedChangedHandler = { [weak self] _, _, pressed in
+      self?.dpadDownPressed = pressed
+    }
   }
 }

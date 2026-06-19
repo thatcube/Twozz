@@ -29,14 +29,19 @@ final class AudioLevelMonitor {
   /// showing — near zero means well aligned. Temporary diagnostic.
   private(set) var syncLagMs: Int = 0
 
-  private var decoder: AudioOnlyLevelDecoder?
-  private var ticker: Timer?
-  private var startTime = CACurrentMediaTime()
+  // Internal mechanism state is deliberately excluded from observation: only the
+  // view-facing diagnostics above (`level`, `isReceivingRealAudio`,
+  // `decodedSegmentCount`, `syncLagMs`) should drive SwiftUI invalidation. In
+  // particular `realQueue` mutates ~60Hz; observing it would invalidate the
+  // visualizer's host view every tick on top of its own `TimelineView` redraw.
+  @ObservationIgnored private var decoder: AudioOnlyLevelDecoder?
+  @ObservationIgnored private var ticker: Timer?
+  @ObservationIgnored private var startTime = CACurrentMediaTime()
 
   /// Returns the wall-clock date the player is *currently* playing, derived from
   /// the stream's `EXT-X-PROGRAM-DATE-TIME`. Lets us show the loudness for the
   /// audio actually leaving the speakers instead of the live edge we decoded.
-  private var playerClock: (() -> Date?)?
+  @ObservationIgnored private var playerClock: (() -> Date?)?
 
   // One decoded loudness sample, optionally stamped with the media wall-clock
   // time it represents so we can line it up with playback.
@@ -44,12 +49,12 @@ final class AudioLevelMonitor {
     let date: Date?
     let level: Double
   }
-  private var realQueue: [RealSample] = []
-  private var realSamplesAreDated = false
-  private var queueInterval: Double = 0.05
-  private var nextPopAt: CFTimeInterval = 0
-  private var lastRealAt: CFTimeInterval = 0
-  private var currentRealTarget: Double = 0
+  @ObservationIgnored private var realQueue: [RealSample] = []
+  @ObservationIgnored private var realSamplesAreDated = false
+  @ObservationIgnored private var queueInterval: Double = 0.05
+  @ObservationIgnored private var nextPopAt: CFTimeInterval = 0
+  @ObservationIgnored private var lastRealAt: CFTimeInterval = 0
+  @ObservationIgnored private var currentRealTarget: Double = 0
 
   // Fast attack so transients pop; slower decay so the orb eases back down.
   private let attack = 0.6

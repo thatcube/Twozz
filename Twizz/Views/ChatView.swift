@@ -53,6 +53,9 @@ struct ChatView: View {
   var scrollTarget: ChatScrollTarget? = nil
   @Environment(\.themePalette) private var palette
   @State private var pendingScrollWork: DispatchWorkItem?
+  /// Newest message id, tracked separately so the throttled auto-scroll always
+  /// targets the true latest message even if more arrived during its window.
+  @State private var latestMessageID: UUID?
   /// Drives the swipe-up hint chevron: it fades + drifts up once, slightly after
   /// the pill animates in. Reset to false on disappear so it replays on reopen.
   @State private var hintShown = false
@@ -130,16 +133,21 @@ struct ChatView: View {
         }
       }
       .onChange(of: messages.count) {
-        guard autoScroll else { return }
-        guard let last = messages.last else { return }
-        pendingScrollWork?.cancel()
+        guard autoScroll, let last = messages.last else { return }
+        // Keep the target current (cheap) so a burst still lands on the newest
+        // message, but only run one *un-animated* scroll per ~100ms. Animating a
+        // scrollTo on every incoming message forces a continuous stream of layout
+        // passes — the dominant chat cost on fast/raided channels. Un-animated
+        // anchoring just keeps the list pinned to the bottom, which is smoother.
+        latestMessageID = last.id
+        guard pendingScrollWork == nil else { return }
         let work = DispatchWorkItem {
-          withAnimation(.easeOut(duration: 0.12)) {
-            proxy.scrollTo(last.id, anchor: .bottom)
-          }
+          pendingScrollWork = nil
+          guard autoScroll, let id = latestMessageID else { return }
+          proxy.scrollTo(id, anchor: .bottom)
         }
         pendingScrollWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
       }
       .onChange(of: autoScroll) { _, isOn in
         // Resuming after a pause: snap back to the newest message.

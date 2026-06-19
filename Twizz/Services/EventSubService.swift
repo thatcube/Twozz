@@ -31,6 +31,12 @@ final class EventSubService {
   private let endpoint = URL(string: "wss://eventsub.wss.twitch.tv/ws")!
 
   private var socket: URLSessionWebSocketTask?
+  /// One reusable session for this socket. Creating a fresh `URLSession` per
+  /// (re)connect leaks the old one; reusing a single session avoids that.
+  private let urlSession = URLSession(configuration: .default)
+  /// Consecutive failed reconnects, for exponential backoff. Reset on a healthy
+  /// receive.
+  private var reconnectAttempts = 0
   private var receiveTask: Task<Void, Never>?
   /// Login of the broadcaster we're currently subscribed to (lowercased).
   private var channelLogin: String?
@@ -62,7 +68,8 @@ final class EventSubService {
     channelLogin = normalized
     credentials = creds
 
-    let task = URLSession(configuration: .default).webSocketTask(with: endpoint)
+    reconnectAttempts = 0
+    let task = urlSession.webSocketTask(with: endpoint)
     socket = task
     task.resume()
 
@@ -109,6 +116,7 @@ final class EventSubService {
       guard let currentSocket = socket else { break }
       do {
         let frame = try await currentSocket.receive()
+        reconnectAttempts = 0
         switch frame {
         case .string(let text): handle(text)
         case .data(let data): handle(String(decoding: data, as: UTF8.self))
@@ -119,11 +127,13 @@ final class EventSubService {
         // Reconnect after a brief pause, preserving the target channel. A fresh
         // session requires recreating the subscription on the next welcome.
         guard let login = channelLogin else { break }
-        try? await Task.sleep(for: .seconds(3))
+        let delay = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
+        reconnectAttempts += 1
+        try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled, channelLogin == login else { break }
 
         socket?.cancel(with: .goingAway, reason: nil)
-        let newTask = URLSession(configuration: .default).webSocketTask(with: endpoint)
+        let newTask = urlSession.webSocketTask(with: endpoint)
         socket = newTask
         sessionID = nil
         subscriptionID = nil
@@ -229,11 +239,10 @@ final class EventSubService {
     sessionID: String,
     credentials: TwitchEventSubCredentials
   ) async throws -> String {
-    var req = URLRequest(url: URL(string: "https://api.twitch.tv/helix/eventsub/subscriptions")!)
-    req.httpMethod = "POST"
-    req.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(credentials.clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    var req = TwitchAPIClient.helixRequest(
+      url: URL(string: "https://api.twitch.tv/helix/eventsub/subscriptions")!,
+      method: "POST", accessToken: credentials.accessToken, clientID: credentials.clientID,
+      contentType: "application/json")
 
     let body: [String: Any] = [
       "type": "channel.raid",
@@ -264,10 +273,9 @@ final class EventSubService {
     components.queryItems = [URLQueryItem(name: "id", value: id)]
     guard let url = components.url else { return }
 
-    var req = URLRequest(url: url)
-    req.httpMethod = "DELETE"
-    req.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(credentials.clientID, forHTTPHeaderField: "Client-Id")
+    let req = TwitchAPIClient.helixRequest(
+      url: url, method: "DELETE", accessToken: credentials.accessToken,
+      clientID: credentials.clientID)
     _ = try? await URLSession.shared.data(for: req)
   }
 }

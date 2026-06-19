@@ -135,11 +135,8 @@ struct PlaybackService {
     /// Best-effort fetch of channel display metadata for overlay UI.
     /// Returns nil if unavailable or if the request fails.
     static func channelMetadata(for channel: String) async -> ChannelMetadata? {
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-        req.httpMethod = "POST"
-        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var req = TwitchAPIClient.graphQLRequest(
+            clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
 
         let query = "query ChannelMetadata($login: String!) { user(login: $login) { displayName profileImageURL(width: 70) stream { title } } }"
         let body: [String: Any] = [
@@ -176,11 +173,8 @@ struct PlaybackService {
     /// a stream ends). Any failure returns `.unknown` so callers never mistake a
     /// transient network hiccup for the channel going offline.
     static func streamLiveStatus(for channel: String) async -> StreamLiveStatus {
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-        req.httpMethod = "POST"
-        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var req = TwitchAPIClient.graphQLRequest(
+            clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
 
         let query = "query StreamStatus($login: String!) { user(login: $login) { stream { id type } } }"
         let body: [String: Any] = [
@@ -225,11 +219,8 @@ struct PlaybackService {
             }
             """
 
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-        req.httpMethod = "POST"
-        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var req = TwitchAPIClient.graphQLRequest(
+            clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
         req.httpBody = try JSONSerialization.data(
             withJSONObject: ["query": query, "variables": ["slug": slug]]
         )
@@ -284,11 +275,8 @@ struct PlaybackService {
     }
 
     private static func fetchVodAccessToken(vodID: String) async throws -> Token {
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-        req.httpMethod = "POST"
-        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var req = TwitchAPIClient.graphQLRequest(
+            clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
 
         let body: [String: Any] = [
             "operationName": "PlaybackAccessToken",
@@ -324,11 +312,8 @@ struct PlaybackService {
     }
 
     private static func fetchAccessToken(channel: String) async throws -> Token {
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-        req.httpMethod = "POST"
-        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var req = TwitchAPIClient.graphQLRequest(
+            clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
 
         let body: [String: Any] = [
             "operationName": "PlaybackAccessToken",

@@ -10,7 +10,7 @@ enum RecommendationPreferences {
 }
 
 /// One channel the viewer has watched, used purely to personalize recommendations.
-struct WatchHistoryEntry: Codable, Identifiable {
+struct WatchHistoryEntry: Codable, Identifiable, Sendable {
   var id: String { login }
   var login: String
   var displayName: String
@@ -129,8 +129,16 @@ final class WatchHistoryService {
     entries = decoded
   }
 
+  /// Serial queue so JSON encoding and the UserDefaults write happen off the
+  /// main thread (record() runs at playback start) while preserving write order.
+  private static let persistQueue = DispatchQueue(
+    label: "com.thatcube.Twizz.watchHistory.persist", qos: .utility)
+
   private func persist() {
-    guard let data = try? JSONEncoder().encode(entries) else { return }
-    UserDefaults.standard.set(data, forKey: Self.storageKey)
+    let snapshot = entries
+    Self.persistQueue.async {
+      guard let data = try? JSONEncoder().encode(snapshot) else { return }
+      UserDefaults.standard.set(data, forKey: Self.storageKey)
+    }
   }
 }

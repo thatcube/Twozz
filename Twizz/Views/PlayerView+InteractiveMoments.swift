@@ -127,20 +127,38 @@ extension PlayerView {
     let tint = Color(red: 0.95, green: 0.45, blue: 0.2)
     momentCard(
       glyph: .flame,
-      kicker: train.isActive ? "Hype Train" : "Hype Train complete",
+      kicker: Self.hypeTrainKicker(train.phase),
       tint: tint,
-      title: "Level \(train.level)",
+      title: Self.hypeTrainTitle(train),
       style: style
     ) {
+      if let expiresAt = train.expiresAt, train.phase != .completed {
+        HypeTrainCountdown(expiresAt: expiresAt, tint: tint, style: style)
+      }
       if train.goal > 0 {
         MomentBar(
-          label: "Progress",
+          label: train.phase == .approaching ? "Contributions to start" : "Progress to next level",
           trailing: Self.percentText(train.fraction),
           fraction: train.fraction,
           tint: tint,
           style: style,
           emphasized: true)
       }
+    }
+  }
+
+  static func hypeTrainKicker(_ phase: LiveHypeTrain.Phase) -> String {
+    switch phase {
+    case .approaching: return "Hype Train incoming"
+    case .active: return "Hype Train"
+    case .completed: return "Hype Train complete"
+    }
+  }
+
+  static func hypeTrainTitle(_ train: LiveHypeTrain) -> String {
+    switch train.phase {
+    case .approaching: return "Starting soon"
+    case .active, .completed: return "Level \(train.level)"
     }
   }
 
@@ -192,6 +210,8 @@ extension PlayerView {
         .foregroundStyle(style.primaryText)
         .lineLimit(2)
         .multilineTextAlignment(.leading)
+        .contentTransition(.numericText())
+        .animation(.snappy, value: title)
       VStack(alignment: .leading, spacing: 8) {
         content()
       }
@@ -269,7 +289,14 @@ extension PlayerView {
         )
       ),
       .hypeTrain(
-        LiveHypeTrain(id: "debug-train", level: 3, progress: 1800, goal: 2500, isActive: true)
+        LiveHypeTrain(
+          id: "debug-train-approaching", level: 1, progress: 2, goal: 3,
+          phase: .approaching, expiresAt: Date().addingTimeInterval(45))
+      ),
+      .hypeTrain(
+        LiveHypeTrain(
+          id: "debug-train", level: 3, progress: 1280, goal: 2500,
+          phase: .active, expiresAt: Date().addingTimeInterval(255))
       ),
       .goal(
         LiveGoal(
@@ -317,6 +344,7 @@ private struct MomentBar: View {
           Capsule()
             .fill(tint.opacity(emphasized ? 1 : 0.75))
             .frame(width: max(6, geo.size.width * fraction))
+            .animation(.spring(response: 0.55, dampingFraction: 0.85), value: fraction)
         }
       }
       .frame(height: 8)
@@ -329,7 +357,35 @@ private struct MomentBar: View {
   }
 }
 
-/// Gives a docked interactive-moment card the natural Liquid Glass treatment for
+/// A live, self-updating countdown to a Hype Train's expiry. Uses SwiftUI's
+/// `Text(timerInterval:)` so the clock ticks without a manual timer, and clamps
+/// to `0:00` once the window has lapsed (an out-of-order range would trap).
+private struct HypeTrainCountdown: View {
+  let expiresAt: Date
+  let tint: Color
+  let style: MomentDockStyle
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Icon(glyph: .clock, size: 15)
+        .foregroundStyle(tint)
+      Group {
+        if expiresAt > .now {
+          Text(timerInterval: Date.now...expiresAt, countsDown: true)
+        } else {
+          Text("0:00")
+        }
+      }
+      .font(.subheadline).bold()
+      .monospacedDigit()
+      .foregroundStyle(style.primaryText.opacity(0.9))
+      Text("left")
+        .font(.caption)
+        .foregroundStyle(style.secondaryText)
+      Spacer(minLength: 0)
+    }
+  }
+}
 /// every chat variant (Glass / Overlay / Side), matching the chat pane and
 /// settings panel: `.glassEffect(.regular)` over a light/dark scrim with a plain
 /// neutral hairline. The scrim and hairline only go light when the chat itself

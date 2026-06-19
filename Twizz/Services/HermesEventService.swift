@@ -70,11 +70,21 @@ struct LiveGoal: Equatable, Identifiable {
 
 /// A live Hype Train on the watched channel.
 struct LiveHypeTrain: Equatable, Identifiable {
+  /// Where the train is in its lifecycle. `approaching` is the pre-start window
+  /// where contributions are building toward kicking the train off; `active` is
+  /// a running train climbing levels; `completed` is the brief post-end state.
+  enum Phase: Equatable { case approaching, active, completed }
+
   let id: String
   let level: Int
+  /// Points toward the *current* level's goal (not the cumulative train total).
   let progress: Int
   let goal: Int
-  let isActive: Bool
+  let phase: Phase
+  /// When the current level (or the approaching window) runs out, if known.
+  let expiresAt: Date?
+
+  var isActive: Bool { phase == .active }
 
   var fraction: Double {
     goal > 0 ? min(1, Double(progress) / Double(goal)) : 0
@@ -127,6 +137,12 @@ final class HermesEventService {
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
   private var socket: URLSessionWebSocketTask?
+  /// One reusable session for this socket. Creating a fresh `URLSession` per
+  /// (re)connect leaks the old one; reusing a single session avoids that.
+  private let urlSession = URLSession(configuration: .default)
+  /// Consecutive failed reconnects, for exponential backoff. Reset on a healthy
+  /// receive.
+  private var reconnectAttempts = 0
   private var receiveTask: Task<Void, Never>?
   private var channelLogin: String?
   private var broadcasterID: String?
@@ -149,7 +165,8 @@ final class HermesEventService {
     let normalized = login.lowercased()
     channelLogin = normalized
 
-    let task = URLSession(configuration: .default).webSocketTask(with: endpoint)
+    reconnectAttempts = 0
+    let task = urlSession.webSocketTask(with: endpoint)
     socket = task
     task.resume()
 
@@ -194,6 +211,7 @@ final class HermesEventService {
       guard let currentSocket = socket else { break }
       do {
         let frame = try await currentSocket.receive()
+        reconnectAttempts = 0
         switch frame {
         case .string(let text): handle(text)
         case .data(let data): handle(String(decoding: data, as: UTF8.self))
@@ -201,11 +219,13 @@ final class HermesEventService {
         }
       } catch {
         guard !Task.isCancelled, let login = channelLogin else { break }
-        try? await Task.sleep(for: .seconds(3))
+        let delay = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
+        reconnectAttempts += 1
+        try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled, channelLogin == login else { break }
 
         socket?.cancel(with: .goingAway, reason: nil)
-        let newTask = URLSession(configuration: .default).webSocketTask(with: endpoint)
+        let newTask = urlSession.webSocketTask(with: endpoint)
         socket = newTask
         hasSubscribed = false
         newTask.resume()
@@ -239,7 +259,7 @@ final class HermesEventService {
   private func reconnect() {
     receiveTask?.cancel()
     socket?.cancel(with: .goingAway, reason: nil)
-    let newTask = URLSession(configuration: .default).webSocketTask(with: endpoint)
+    let newTask = urlSession.webSocketTask(with: endpoint)
     socket = newTask
     hasSubscribed = false
     newTask.resume()
@@ -400,26 +420,60 @@ final class HermesEventService {
     // v2 nests progress under various keys; probe the common ones.
     let progressDict =
       (data["progress"] as? [String: Any]) ?? (data["hype_train"] as? [String: Any]) ?? data
-    let level = Self.intValue(progressDict["level"]) ?? Self.intValue((progressDict["level"] as? [String: Any])?["value"]) ?? 0
-    let total = Self.intValue(progressDict["total"]) ?? Self.intValue(progressDict["progress"]) ?? 0
+    let levelDict = progressDict["level"] as? [String: Any]
+
+    let level = Self.intValue(progressDict["level"]) ?? Self.intValue(levelDict?["value"]) ?? 0
+    // Progress toward the *current level* — `value` (v2 nested) or `progress`
+    // (v1 flat). Deliberately NOT `total`, which is the cumulative train score
+    // and would peg the bar at 100% once past level one.
+    let levelProgress =
+      Self.intValue(progressDict["value"]) ?? Self.intValue(progressDict["progress"]) ?? 0
     let goalValue =
-      Self.intValue(progressDict["goal"]) ?? Self.intValue((progressDict["level"] as? [String: Any])?["goal"]) ?? 0
+      Self.intValue(progressDict["goal"]) ?? Self.intValue(levelDict?["goal"]) ?? 0
     let id = (data["id"] as? String) ?? "hype-train"
+
+    let approaching = type.contains("approach")
     let ended = type.contains("end") || type.contains("complete")
 
-    guard goalValue > 0 || ended else { return }
+    let expiresAt =
+      Self.parseDate(progressDict["expires_at"] ?? data["expires_at"])
+      ?? Self.remainingDate(progressDict["remaining_seconds"] ?? data["remaining_seconds"])
+
+    guard goalValue > 0 || ended || approaching else { return }
+
+    let phase: LiveHypeTrain.Phase = ended ? .completed : (approaching ? .approaching : .active)
     hypeTrain = LiveHypeTrain(
-      id: id, level: max(level, 1), progress: total, goal: max(goalValue, total), isActive: !ended)
+      id: id,
+      level: max(level, 1),
+      progress: levelProgress,
+      goal: max(goalValue, levelProgress),
+      phase: phase,
+      expiresAt: ended ? nil : expiresAt)
 
     hypeTrainClearTask?.cancel()
-    if ended {
+    switch phase {
+    case .completed:
       hypeTrainClearTask = Task { [weak self] in
         try? await Task.sleep(for: Self.endedGrace)
         guard !Task.isCancelled else { return }
         self?.hypeTrain = nil
         self?.recompute()
       }
-    } else {
+    case .approaching:
+      // An approaching train that never starts should dismiss itself once its
+      // window lapses, rather than hang as a permanent "incoming" banner.
+      if let expiresAt {
+        let delay = max(0, expiresAt.timeIntervalSinceNow) + Double(Self.endedGrace.components.seconds)
+        hypeTrainClearTask = Task { [weak self] in
+          try? await Task.sleep(for: .seconds(delay))
+          guard !Task.isCancelled else { return }
+          self?.hypeTrain = nil
+          self?.recompute()
+        }
+      } else {
+        hypeTrainClearTask = nil
+      }
+    case .active:
       hypeTrainClearTask = nil
     }
     recompute()
@@ -457,6 +511,40 @@ final class HermesEventService {
     }
   }
 
+  private static let isoFractional: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+  }()
+  private static let isoPlain: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+  }()
+
+  /// Parse an ISO8601 timestamp. Twitch sends up to nine fractional-second
+  /// digits, which `ISO8601DateFormatter` rejects, so we cap them to three.
+  private static func parseDate(_ any: Any?) -> Date? {
+    guard let raw = any as? String, !raw.isEmpty else { return nil }
+    let s = capFractionalSeconds(raw)
+    return isoFractional.date(from: s) ?? isoPlain.date(from: s)
+  }
+
+  private static func capFractionalSeconds(_ s: String) -> String {
+    guard let dot = s.firstIndex(of: ".") else { return s }
+    let firstFraction = s.index(after: dot)
+    var end = firstFraction
+    while end < s.endIndex, s[end].isNumber { end = s.index(after: end) }
+    let capped = s[firstFraction..<end].prefix(3)
+    return String(s[..<firstFraction]) + capped + String(s[end...])
+  }
+
+  /// Turn a `remaining_seconds` countdown into an absolute expiry instant.
+  private static func remainingDate(_ any: Any?) -> Date? {
+    guard let secs = intValue(any), secs > 0 else { return nil }
+    return Date().addingTimeInterval(TimeInterval(secs))
+  }
+
   private static func randomID(_ length: Int = 20) -> String {
     let chars = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
     return String((0..<length).map { _ in chars.randomElement()! })
@@ -465,17 +553,11 @@ final class HermesEventService {
   /// Resolve a channel login to its numeric id anonymously via Twitch's private
   /// GraphQL (works signed out, same surface as playback).
   private static func resolveBroadcasterID(login: String) async throws -> String {
-    var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-    req.httpMethod = "POST"
-    req.setValue(webClientID, forHTTPHeaderField: "Client-ID")
-    req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-    let body: [String: Any] = [
-      "query": "query($login:String!){user(login:$login){id}}",
-      "variables": ["login": login],
-    ]
-    req.httpBody = try JSONSerialization.data(withJSONObject: body)
+    var req = TwitchAPIClient.graphQLRequest(
+      clientID: webClientID, clientIDField: "Client-ID", userAgent: userAgent)
+    req.httpBody = try JSONSerialization.data(
+      withJSONObject: TwitchAPIClient.graphQLBody(
+        query: "query($login:String!){user(login:$login){id}}", variables: ["login": login]))
 
     let (data, _) = try await URLSession.shared.data(for: req)
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],

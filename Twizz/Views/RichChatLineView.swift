@@ -28,12 +28,6 @@ struct RichChatLineView: View {
     /// Overrides the default white body color (used by the light side-chat).
     var bodyColorOverride: Color? = nil
 
-    private enum Segment: Hashable {
-        case text(String)
-        case emote(name: String, url: URL)
-        case cheer(amount: Int, url: URL, color: Color)
-    }
-
     /// Whether this message should have its tokens scanned for cheermotes.
     private var shouldRenderCheers: Bool {
         guard !cheermotes.isEmpty else { return false }
@@ -50,19 +44,6 @@ struct RichChatLineView: View {
 
     private var resolvedBadgeURLs: [URL] {
         message.badgeKeys.compactMap { badgeURLs[$0] }
-    }
-
-    private var messageScopedEmoteURLs: [String: URL] {
-        message.twitchEmoteURLs.merging(message.youtubeEmoteURLs) { current, _ in current }
-    }
-
-    private var messageScopedEmoteKeysByLength: [String] {
-        messageScopedEmoteURLs.keys.sorted { lhs, rhs in
-            if lhs.count == rhs.count {
-                return lhs < rhs
-            }
-            return lhs.count > rhs.count
-        }
     }
 
     private var shouldShowSourceBadge: Bool {
@@ -159,7 +140,7 @@ struct RichChatLineView: View {
     }
 
     @ViewBuilder
-    private func segmentView(_ segment: Segment) -> some View {
+    private func segmentView(_ segment: ChatLineSegment) -> some View {
         switch segment {
         case .text(let text):
             Text(text)
@@ -168,7 +149,8 @@ struct RichChatLineView: View {
                 .foregroundStyle(bodyColor)
         case .emote(let name, let url):
             EmoteView(name: name, url: url, fallbackColor: bodyColor, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight, animated: animatedEmotes)
-        case .cheer(let amount, let url, let color):
+        case .cheer(let amount, let url, let colorHex):
+            let color = Color(twitchHex: colorHex) ?? .gray
             HStack(spacing: 1) {
                 EmoteView(name: "", url: url, fallbackColor: color, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight, animated: animatedEmotes)
                 Text("\(amount)")
@@ -179,20 +161,28 @@ struct RichChatLineView: View {
         }
     }
 
-    private var segments: [Segment] {
-        // Tokenizing the message (split, punctuation scan, emote matching, and the
-        // length-sorted scoped-emote scan) is pure work that depends only on the
-        // message's immutable text/scoped emotes plus the global emote set. In a
-        // LazyVStack every line that scrolls into view re-evaluates `body`, so
-        // without caching this re-tokenizes on every scroll tick — the dominant
-        // chat scroll cost on the Apple TV's CPU. Cache by message id (+ global
-        // emote count so newly-loaded globals still resolve). body runs on the
-        // main thread, so the static store needs no locking.
+    private var segments: [ChatLineSegment] {
+        // Prefer the segments precomputed at ingest (ChatService) so scrolling
+        // never re-tokenizes a line. The fallback path covers producers that
+        // don't precompute (e.g. VOD chat replay) and any message seen before
+        // its catalog-driven recompute lands: tokenize once and cache by message
+        // id (+ catalog counts so newly-loaded globals/cheers still resolve).
+        // body runs on the main thread, so the static store needs no locking.
+        if let precomputed = message.segments {
+            return precomputed
+        }
         let key = SegmentCacheKey(id: message.id, globalEmoteCount: globalEmoteURLs.count, cheermoteCount: shouldRenderCheers ? cheermotes.count : 0)
         if let cached = Self.segmentCache[key] {
             return cached
         }
-        let computed = computeSegments()
+        let computed = ChatLineTokenizer.segments(
+            text: message.text,
+            twitchEmoteURLs: message.twitchEmoteURLs,
+            youtubeEmoteURLs: message.youtubeEmoteURLs,
+            globalEmoteURLs: globalEmoteURLs,
+            cheermotes: cheermotes,
+            shouldRenderCheers: shouldRenderCheers
+        )
         Self.segmentCache[key] = computed
         Self.segmentCacheOrder.append(key)
         if Self.segmentCacheOrder.count > Self.segmentCacheLimit {
@@ -211,126 +201,9 @@ struct RichChatLineView: View {
         let cheermoteCount: Int
     }
 
-    private static var segmentCache: [SegmentCacheKey: [Segment]] = [:]
+    private static var segmentCache: [SegmentCacheKey: [ChatLineSegment]] = [:]
     private static var segmentCacheOrder: [SegmentCacheKey] = []
     private static let segmentCacheLimit = 3000
-
-    private func computeSegments() -> [Segment] {
-        // Keep ':' out of punctuation so tokens like :eyes: or :_raeKEK:
-        // survive tokenization and can match YouTube emote shortcuts.
-        let punctuation = CharacterSet(charactersIn: "()[]{}<>.,!?;\"'`")
-        let words = message.text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
-        var output: [Segment] = []
-
-        for idx in words.indices {
-            let token = words[idx]
-            if token.isEmpty {
-                if idx < words.count - 1 {
-                    output.append(.text(" "))
-                }
-                continue
-            }
-
-            let leading = token.prefix { char in
-                String(char).rangeOfCharacter(from: punctuation) != nil
-            }
-            let trailing = token.reversed().prefix { char in
-                String(char).rangeOfCharacter(from: punctuation) != nil
-            }
-
-            let coreStart = token.index(token.startIndex, offsetBy: leading.count)
-            let coreEnd = token.index(token.endIndex, offsetBy: -trailing.count)
-            let core = coreStart <= coreEnd ? String(token[coreStart..<coreEnd]) : token
-
-            if !leading.isEmpty {
-                output.append(.text(String(leading)))
-            }
-
-            if shouldRenderCheers, let cheerSegment = cheermoteSegment(for: core) {
-                output.append(cheerSegment)
-            } else if let inlineSegments = inlineMessageScopedEmoteSegments(for: core) {
-                output.append(contentsOf: inlineSegments)
-            } else if let url = messageScopedEmoteURLs[core] ?? globalEmoteURLs[core] {
-                output.append(.emote(name: core, url: url))
-            } else {
-                output.append(.text(core))
-            }
-
-            if !trailing.isEmpty {
-                output.append(.text(String(trailing.reversed())))
-            }
-
-            if idx < words.count - 1 {
-                output.append(.text(" "))
-            }
-        }
-
-        return output
-    }
-
-    /// Match a `<prefix><amount>` cheermote token (e.g. `exemCheer100`) against
-    /// the catalog. The longest matching prefix wins (so `pokiCheer` beats a
-    /// hypothetical `Cheer`), and the tier is chosen by the cheered amount.
-    private func cheermoteSegment(for token: String) -> Segment? {
-        guard !token.isEmpty else { return nil }
-        let lower = token.lowercased()
-
-        var best: (cheer: Cheermote, amount: Int)?
-        for cheer in cheermotes {
-            let prefix = cheer.prefixLower
-            guard !prefix.isEmpty, lower.hasPrefix(prefix) else { continue }
-            let digits = lower.dropFirst(prefix.count)
-            guard !digits.isEmpty, let amount = Int(digits) else { continue }
-            if best == nil || prefix.count > best!.cheer.prefixLower.count {
-                best = (cheer, amount)
-            }
-        }
-
-        guard let match = best, let tier = match.cheer.tier(forBits: match.amount) else { return nil }
-        return .cheer(amount: match.amount, url: tier.imageURL, color: tier.color)
-    }
-
-    private func inlineMessageScopedEmoteSegments(for token: String) -> [Segment]? {
-        guard !token.isEmpty else { return nil }
-        guard !messageScopedEmoteKeysByLength.isEmpty else { return nil }
-
-        var out: [Segment] = []
-        var textBuffer = ""
-        var index = token.startIndex
-        var matchedAny = false
-
-        while index < token.endIndex {
-            var matchedKey: String?
-            var matchedURL: URL?
-
-            for key in messageScopedEmoteKeysByLength {
-                guard token[index...].hasPrefix(key) else { continue }
-                guard let url = messageScopedEmoteURLs[key] else { continue }
-                matchedKey = key
-                matchedURL = url
-                break
-            }
-
-            if let matchedKey, let matchedURL {
-                matchedAny = true
-                if !textBuffer.isEmpty {
-                    out.append(.text(textBuffer))
-                    textBuffer = ""
-                }
-                out.append(.emote(name: matchedKey, url: matchedURL))
-                index = token.index(index, offsetBy: matchedKey.count)
-            } else {
-                textBuffer.append(token[index])
-                token.formIndex(after: &index)
-            }
-        }
-
-        if !textBuffer.isEmpty {
-            out.append(.text(textBuffer))
-        }
-
-        return matchedAny ? out : nil
-    }
 }
 
 private struct EmoteView: View {

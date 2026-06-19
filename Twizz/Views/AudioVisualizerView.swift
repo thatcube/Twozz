@@ -8,6 +8,35 @@ import SwiftUI
 ///
 /// `MeshGradient` is a single Metal-rendered pass, so this is dramatically
 /// cheaper than the previous stack of ~10 overlapping Gaussian blurs.
+/// Bridges the observable `AudioLevelMonitor` to `AudioVisualizerView` from
+/// within its own small view body. The monitor publishes `level` ~60 times a
+/// second; keeping the read here means those updates only invalidate this tiny
+/// container (and the orb that needs the value) instead of re-evaluating the
+/// whole ~3,700-line `PlayerView` body that hosts it. Purely a scoping wrapper —
+/// the visualizer renders identically.
+struct AudioVisualizerContainer: View {
+  let monitor: AudioLevelMonitor
+  let avatarURL: URL?
+  let palette: ThemePalette
+
+  var body: some View {
+    AudioVisualizerView(
+      level: monitor.level,
+      avatarURL: avatarURL,
+      palette: palette,
+      isReactive: monitor.isReceivingRealAudio,
+      debugInfo: String(
+        format: "%@  lvl %.2f  seg %d  q %d  lag %dms",
+        monitor.isReceivingRealAudio ? "REAL" : "AMBIENT",
+        monitor.level,
+        monitor.decodedSegmentCount,
+        monitor.pendingRealSamples,
+        monitor.syncLagMs
+      )
+    )
+  }
+}
+
 struct AudioVisualizerView: View {
   let level: Double
   let avatarURL: URL?
@@ -17,7 +46,6 @@ struct AudioVisualizerView: View {
   /// in a temporary on-screen readout while tuning reactivity.
   var isReactive: Bool = false
   var debugInfo: String? = nil
-
   var body: some View {
     GeometryReader { geo in
       let side = min(geo.size.width, geo.size.height)

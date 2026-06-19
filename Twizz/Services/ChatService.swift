@@ -133,6 +133,13 @@ final class ChatService {
   private let endpoint = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
 
   private var socket: URLSessionWebSocketTask?
+  /// One reusable session for the chat socket. Creating a fresh `URLSession` per
+  /// (re)connect leaks the old one (it is never invalidated); reusing a single
+  /// session avoids that accumulation over long viewing sessions.
+  private let urlSession = URLSession(configuration: .default)
+  /// Consecutive failed reconnects, for exponential backoff. Reset on a healthy
+  /// receive.
+  private var reconnectAttempts = 0
   private var receiveTask: Task<Void, Never>?
   private var channel: String?
   private var hasSentJoin = false
@@ -198,8 +205,9 @@ final class ChatService {
     youtubeSeenMessageOrder.removeAll()
     youtubeStatusMessage = nil
     syncWarmupStart = Date()
+    reconnectAttempts = 0
 
-    let task = URLSession(configuration: .default).webSocketTask(with: endpoint)
+    let task = urlSession.webSocketTask(with: endpoint)
     socket = task
     task.resume()
 
@@ -212,6 +220,7 @@ final class ChatService {
       let catalog = await EmoteCatalogService.shared.catalog(for: normalized)
       guard self.channel == normalized else { return }
       self.emoteURLs = catalog
+      self.retokenizeVisibleBuffer()
     }
 
     Task { [weak self] in
@@ -226,6 +235,7 @@ final class ChatService {
       let catalog = await CheermoteCatalogService.shared.catalog(for: normalized)
       guard self.channel == normalized else { return }
       self.cheermotes = catalog
+      self.retokenizeVisibleBuffer()
     }
 
     receiveTask = Task { [weak self] in await self?.receiveLoop() }
@@ -271,6 +281,7 @@ final class ChatService {
       guard let currentSocket = socket else { break }
       do {
         let frame = try await currentSocket.receive()
+        reconnectAttempts = 0
         switch frame {
         case .string(let text): handle(text)
         case .data(let data): handle(String(decoding: data, as: UTF8.self))
@@ -280,13 +291,16 @@ final class ChatService {
         guard !Task.isCancelled else { break }
         isConnected = false
 
-        // Reconnect after a brief pause, preserving the message buffer.
+        // Reconnect with exponential backoff (3s, 6s, 12s… capped at 30s),
+        // preserving the message buffer.
         guard let channelToRejoin = channel else { break }
-        try? await Task.sleep(for: .seconds(3))
+        let delay = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
+        reconnectAttempts += 1
+        try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled, channel == channelToRejoin else { break }
 
         socket?.cancel(with: .goingAway, reason: nil)
-        let newTask = URLSession(configuration: .default).webSocketTask(with: endpoint)
+        let newTask = urlSession.webSocketTask(with: endpoint)
         socket = newTask
         hasSentJoin = false
         hasCapAck = false
@@ -1104,9 +1118,36 @@ final class ChatService {
 
   private func appendVisible(_ sorted: [ChatMessage]) {
     guard !sorted.isEmpty else { return }
-    messages.append(contentsOf: sorted)
+    var tokenized = sorted
+    for index in tokenized.indices {
+      tokenized[index].segments = computeSegments(for: tokenized[index])
+    }
+    messages.append(contentsOf: tokenized)
     if messages.count > maxBufferedMessages {
       messages.removeFirst(messages.count - maxBufferedMessages)
+    }
+  }
+
+  /// Tokenize a message against the currently-loaded emote/cheermote catalogs.
+  /// Live chat gates cheermote rendering on a real bits count.
+  private func computeSegments(for message: ChatMessage) -> [ChatLineSegment] {
+    let shouldRenderCheers = !cheermotes.isEmpty && message.bits > 0
+    return ChatLineTokenizer.segments(
+      text: message.text,
+      twitchEmoteURLs: message.twitchEmoteURLs,
+      youtubeEmoteURLs: message.youtubeEmoteURLs,
+      globalEmoteURLs: emoteURLs,
+      cheermotes: cheermotes,
+      shouldRenderCheers: shouldRenderCheers
+    )
+  }
+
+  /// Re-tokenize the visible buffer after an emote or cheermote catalog loads,
+  /// so messages that arrived before the catalog resolve their emotes/cheers.
+  private func retokenizeVisibleBuffer() {
+    guard !messages.isEmpty else { return }
+    for index in messages.indices {
+      messages[index].segments = computeSegments(for: messages[index])
     }
   }
 
@@ -1131,7 +1172,7 @@ final class ChatService {
       }
 
       var released: [ChatMessage] = []
-      while let first = syncBuffer.first, first.releaseAt <= Date() {
+      while let first = syncBuffer.first, first.releaseAt <= now {
         released.append(first.message)
         syncBuffer.removeFirst()
       }
@@ -1261,18 +1302,12 @@ actor BadgeCatalogService {
       return id
     }
 
-    var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-    req.httpMethod = "POST"
-    req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-    req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    var req = TwitchAPIClient.graphQLRequest(
+      clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
 
     let query = "query UserID($login: String!) { user(login: $login) { id } }"
-    let body: [String: Any] = [
-      "query": query,
-      "variables": ["login": login],
-    ]
-    req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    req.httpBody = try? JSONSerialization.data(
+      withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: ["login": login]))
 
     guard let json = await fetchJSON(request: req) as? [String: Any] else { return nil }
     guard let data = json["data"] as? [String: Any] else { return nil }

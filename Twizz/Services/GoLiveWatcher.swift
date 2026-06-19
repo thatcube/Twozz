@@ -48,6 +48,16 @@ final class GoLiveWatcher {
     }
   }
 
+  /// Viewer's go-live alert preferences (master switch + per-channel mutes). When
+  /// unset, every go-live alerts (the default). Owned by `HomeView`.
+  weak var notificationSettings: GoLiveNotificationSettings?
+
+  /// Whether a toast for `login` is currently allowed: no settings means allow,
+  /// otherwise defer to the master switch and per-channel mute list.
+  private func isAlerting(login: String) -> Bool {
+    notificationSettings?.isAlerting(login: login) ?? true
+  }
+
   /// Logins known live as of the last successful poll. Seeded on the first poll
   /// so channels already live at launch don't all toast at once.
   private var knownLiveLogins: Set<String> = []
@@ -187,6 +197,7 @@ final class GoLiveWatcher {
     let freshStreams = liveStreams
       .filter { newlyLive.contains($0.userLogin.lowercased()) }
       .filter { $0.userLogin.lowercased() != suppressed }
+      .filter { isAlerting(login: $0.userLogin) }
     guard !freshStreams.isEmpty else { return }
 
     // Resolve avatars for just the channels that went live (best-effort).
@@ -276,6 +287,10 @@ final class GoLiveWatcher {
   // MARK: - Queue / countdown
 
   private func enqueue(_ event: GoLiveEvent) {
+    // Respect the viewer's alert preferences (master switch + per-channel mute).
+    // Centralized here so the debug `simulateGoLive` path honors them too.
+    guard isAlerting(login: event.login) else { return }
+
     // Collapse duplicates: a channel already showing/queued shouldn't stack.
     guard pending?.login != event.login, !queue.contains(where: { $0.login == event.login })
     else { return }

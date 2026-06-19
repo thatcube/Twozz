@@ -11,6 +11,8 @@ import UIKit
 struct SettingsView: View {
   @Bindable var themeManager: ThemeManager
   let auth: TwitchAuthSession
+  var follows: FollowedChannelsService
+  var goLiveSettings: GoLiveNotificationSettings
   var onRequestSignIn: () -> Void = {}
   var onClearWatchHistory: () -> Void = {}
   var onAccountChanged: () -> Void = {}
@@ -27,33 +29,36 @@ struct SettingsView: View {
   @AppStorage("showChatByDefault") private var showChatByDefault = true
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
+  @AppStorage(GoLiveNotificationPreferences.enabledKey) private var goLiveAlertsEnabled = true
 
   private let labelColumnWidth: CGFloat = 420
 
   var body: some View {
-    ZStack {
-      LinearGradient(
-        colors: palette.backgroundColors,
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
+    NavigationStack {
+      ZStack {
+        LinearGradient(
+          colors: palette.backgroundColors,
+          startPoint: .top,
+          endPoint: .bottom
+        )
+        .ignoresSafeArea()
 
-      ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 28) {
-          Text("Settings")
-            .font(.system(size: 38, weight: .bold))
+        ScrollView(.vertical, showsIndicators: false) {
+          VStack(alignment: .leading, spacing: 28) {
+            Text("Settings")
+              .font(.system(size: 38, weight: .bold))
 
-          preferencesGroup
-          accountSection
-          topShelfSection
-          AboutSection()
+            preferencesGroup
+            accountSection
+            topShelfSection
+            AboutSection()
+          }
+          .frame(maxWidth: .infinity, alignment: .topLeading)
+          .padding(.horizontal, AppLayout.horizontalPadding)
+          .padding(.vertical, 32)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.horizontal, AppLayout.horizontalPadding)
-        .padding(.vertical, 32)
+        .scrollClipDisabled()
       }
-      .scrollClipDisabled()
     }
   }
 
@@ -82,6 +87,11 @@ struct SettingsView: View {
       groupDivider
 
       recommendationsRow
+        .padding(.vertical, 16)
+
+      groupDivider
+
+      goLiveAlertsRow
         .padding(.vertical, 16)
     }
     .padding(.horizontal, 28)
@@ -203,6 +213,31 @@ struct SettingsView: View {
 
   /// A single preference row: fixed-width label column on the left, a
   /// horizontal run of selectable pills on the right.
+  private var goLiveAlertsRow: some View {
+    settingRow(
+      title: "Go Live Alerts",
+      subtitle: "In-app pop-up on this Apple TV when a channel you follow goes live. Doesn't change Twitch notifications on your other devices."
+    ) {
+      ForEach([true, false], id: \.self) { on in
+        Button {
+          goLiveAlertsEnabled = on
+        } label: {
+          SettingPill(title: on ? "On" : "Off", isSelected: goLiveAlertsEnabled == on)
+        }
+        .settingPillStyle(isSelected: goLiveAlertsEnabled == on)
+      }
+
+      NavigationLink {
+        GoLiveAlertsSettingsView(follows: follows, settings: goLiveSettings)
+      } label: {
+        SettingPill(title: "Choose Channels", isSelected: false)
+      }
+      .settingPillStyle(isSelected: false)
+      .disabled(!goLiveAlertsEnabled)
+      .opacity(goLiveAlertsEnabled ? 1 : 0.4)
+    }
+  }
+
   private func settingRow<Content: View>(
     title: String,
     subtitle: String?,

@@ -20,6 +20,10 @@ final class FollowedChannelsService {
   /// used to guarantee recommendations never include someone they already follow —
   /// even a live follow beyond the first page of `/streams/followed`.
   private(set) var followedLogins: Set<String> = []
+  /// Every channel the viewer follows (online **and** offline), sorted by display
+  /// name. Drives the go-live alert per-channel picker, which needs the whole
+  /// follow list — not just whoever happens to be live in `channels`.
+  private(set) var followedBroadcasters: [FollowedBroadcasterSummary] = []
   private(set) var isLoading = false
   private(set) var isUsingDemoData = false
   private(set) var errorMessage: String?
@@ -121,6 +125,10 @@ final class FollowedChannelsService {
     } else {
       followedCategories = [:]
       followedLogins = []
+      followedBroadcasters = channels.map {
+        FollowedBroadcasterSummary(id: $0.id, login: $0.login, displayName: $0.displayName)
+      }
+      .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
   }
 
@@ -135,6 +143,7 @@ final class FollowedChannelsService {
       guard !ids.isEmpty else {
         followedCategories = [:]
         followedLogins = []
+        followedBroadcasters = []
         return
       }
       followedLogins = Set(
@@ -142,6 +151,16 @@ final class FollowedChannelsService {
           let login = $0.broadcasterLogin?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
           return (login?.isEmpty == false) ? login : nil
         })
+      followedBroadcasters = follows.compactMap { broadcaster in
+        let login = broadcaster.broadcasterLogin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !login.isEmpty else { return nil }
+        let name = broadcaster.broadcasterName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return FollowedBroadcasterSummary(
+          id: broadcaster.broadcasterID,
+          login: login,
+          displayName: (name?.isEmpty == false) ? name! : login)
+      }
+      .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
       followedCategories = try await fetchChannelCategoryCounts(
         clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
     } catch {
@@ -322,22 +341,37 @@ final class FollowedChannelsService {
   private func fetchFollowedBroadcasters(clientID: String, accessToken: String, userID: String)
     async throws -> [FollowedBroadcaster]
   {
-    var components = URLComponents(string: "https://api.twitch.tv/helix/channels/followed")!
-    components.queryItems = [
-      URLQueryItem(name: "user_id", value: userID),
-      URLQueryItem(name: "first", value: "100"),
-    ]
+    var all: [FollowedBroadcaster] = []
+    var cursor: String?
 
-    let req = TwitchAPIClient.helixRequest(
-      url: components.url!, accessToken: accessToken, clientID: clientID,
-      accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
+    // Page through the whole follow list (Helix caps each page at 100) so the
+    // alert picker and the recommendation profile see every channel, not just
+    // the first page.
+    repeat {
+      var components = URLComponents(string: "https://api.twitch.tv/helix/channels/followed")!
+      components.queryItems = [
+        URLQueryItem(name: "user_id", value: userID),
+        URLQueryItem(name: "first", value: "100"),
+      ]
+      if let cursor, !cursor.isEmpty {
+        components.queryItems?.append(URLQueryItem(name: "after", value: cursor))
+      }
 
-    let (data, status) = try await performHelixRequest(req)
-    guard (200...299).contains(status) else {
-      throw makeHelixError(context: "loading followed channels", status: status, data: data)
-    }
+      let req = TwitchAPIClient.helixRequest(
+        url: components.url!, accessToken: accessToken, clientID: clientID,
+        accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
-    return try JSONDecoder().decode(FollowedChannelsEnvelope.self, from: data).data
+      let (data, status) = try await performHelixRequest(req)
+      guard (200...299).contains(status) else {
+        throw makeHelixError(context: "loading followed channels", status: status, data: data)
+      }
+
+      let envelope = try JSONDecoder().decode(FollowedChannelsEnvelope.self, from: data)
+      all.append(contentsOf: envelope.data)
+      cursor = envelope.pagination?.cursor
+    } while cursor?.isEmpty == false
+
+    return all
   }
 
   private func fetchLiveStreamsByBroadcasterID(
@@ -620,6 +654,11 @@ private struct HelixStream: Decodable {
 
 private struct FollowedChannelsEnvelope: Decodable {
   let data: [FollowedBroadcaster]
+  let pagination: HelixPagination?
+}
+
+private struct HelixPagination: Decodable {
+  let cursor: String?
 }
 
 private struct ChannelInformationEnvelope: Decodable {
@@ -651,11 +690,21 @@ private struct HelixUser: Decodable {
 private struct FollowedBroadcaster: Decodable {
   let broadcasterID: String
   let broadcasterLogin: String?
+  let broadcasterName: String?
 
   private enum CodingKeys: String, CodingKey {
     case broadcasterID = "broadcaster_id"
     case broadcasterLogin = "broadcaster_login"
+    case broadcasterName = "broadcaster_name"
   }
+}
+
+/// Lightweight identity for a followed channel (online or offline), used by the
+/// go-live alert per-channel picker.
+struct FollowedBroadcasterSummary: Identifiable, Hashable {
+  let id: String
+  let login: String
+  let displayName: String
 }
 
 private struct TwitchHelixErrorPayload: Decodable {

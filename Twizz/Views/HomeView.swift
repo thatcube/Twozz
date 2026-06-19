@@ -30,6 +30,7 @@ struct HomeView: View {
   @State private var showSignIn = false
   @State private var refreshToast: RefreshToastState?
   @State private var goLive = GoLiveWatcher()
+  @State private var goLiveSettings = GoLiveNotificationSettings()
   /// "Top streams" recommendations with already-followed and personalized
   /// channels filtered out. Cached here and recomputed only when one of the
   /// source lists changes, so we don't rebuild the lookup sets and refilter on
@@ -131,6 +132,8 @@ struct HomeView: View {
         SettingsView(
           themeManager: themeManager,
           auth: auth,
+          follows: follows,
+          goLiveSettings: goLiveSettings,
           onRequestSignIn: { showSignIn = true },
           onClearWatchHistory: {
             watchHistory.clear()
@@ -175,6 +178,7 @@ struct HomeView: View {
     .animation(.easeOut(duration: 0.25), value: goLive.pending)
     .task {
       auth.restore()
+      goLive.notificationSettings = goLiveSettings
       goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
       await refreshFollowedChannelsIfNeeded(force: true)

@@ -46,37 +46,46 @@ struct AudioVisualizerView: View {
   /// in a temporary on-screen readout while tuning reactivity.
   var isReactive: Bool = false
   var debugInfo: String? = nil
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
     GeometryReader { geo in
       let side = min(geo.size.width, geo.size.height)
 
-      TimelineView(.animation) { timeline in
-        let t = timeline.date.timeIntervalSinceReferenceDate
-        let amp = level
-
-        ZStack {
-          MeshGradient(
-            width: 3,
-            height: 3,
-            points: meshPoints(t: t),
-            colors: meshColors(t: t),
-            smoothsColors: true
-          )
-          .ignoresSafeArea()
-
-          if showAvatar, let avatarURL {
-            avatar(url: avatarURL, side: side, amp: amp, t: t)
-          }
-        }
-        .overlay(alignment: .topLeading) {
-          if let debugInfo {
-            debugBadge(debugInfo)
-          }
+      if reduceMotion {
+        // Reduce Motion: a single static frame — no mesh drift, ring rotation,
+        // or audio-reactive pulsing.
+        scene(side: side, t: 0, amp: 0)
+      } else {
+        TimelineView(.animation) { timeline in
+          let t = timeline.date.timeIntervalSinceReferenceDate
+          scene(side: side, t: t, amp: level)
         }
       }
     }
     .ignoresSafeArea()
     .allowsHitTesting(false)
+  }
+
+  private func scene(side: CGFloat, t: Double, amp: Double) -> some View {
+    ZStack {
+      MeshGradient(
+        width: 3,
+        height: 3,
+        points: meshPoints(t: t),
+        colors: meshColors(t: t),
+        smoothsColors: true
+      )
+      .ignoresSafeArea()
+
+      if showAvatar, let avatarURL {
+        avatar(url: avatarURL, side: side, amp: amp, t: t)
+      }
+    }
+    .overlay(alignment: .topLeading) {
+      if let debugInfo {
+        debugBadge(debugInfo)
+      }
+    }
   }
 
   // MARK: - Mesh geometry

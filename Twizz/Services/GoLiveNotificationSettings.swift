@@ -70,6 +70,18 @@ final class GoLiveNotificationSettings {
     persist()
   }
 
+  /// Turn per-channel alerts on/off for many `logins` at once and persist a
+  /// single time. Backs the "Enable All" / "Disable All" bulk controls; `on ==
+  /// false` adds every login to the muted set, `on == true` removes them.
+  func setAlerting(_ on: Bool, logins: [String]) {
+    let keys = logins.map { $0.lowercased() }.filter { !$0.isEmpty }
+    guard !keys.isEmpty else { return }
+    let updated = on ? mutedLogins.subtracting(keys) : mutedLogins.union(keys)
+    guard updated != mutedLogins else { return }
+    mutedLogins = updated
+    persist()
+  }
+
   private func load() {
     let stored = UserDefaults.standard.stringArray(forKey: GoLiveNotificationPreferences.mutedLoginsKey) ?? []
     mutedLogins = Set(stored.map { $0.lowercased() })

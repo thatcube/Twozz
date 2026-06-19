@@ -49,6 +49,7 @@ struct GoLiveAlertsSettingsView: View {
       .ignoresSafeArea()
 
       List {
+        bulkActionsSection
         channelsSection
       }
     }
@@ -60,6 +61,58 @@ struct GoLiveAlertsSettingsView: View {
       prompt: "Search channels"
     )
     .task { await follows.loadDirectory(using: auth) }
+  }
+
+  /// Whether a search query is currently narrowing the list.
+  private var isSearching: Bool {
+    !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  /// Channels a bulk action affects: the visible (filtered) rows. With no search
+  /// this is every follow; while searching it's just the matches, so the viewer
+  /// can "find a group, toggle them."
+  private var bulkTargets: [FollowedChannel] {
+    filteredBroadcasters
+  }
+
+  /// Top-of-list "Enable All" / "Disable All" controls. Map onto the existing
+  /// opt-out muted set: Disable All mutes every visible channel, Enable All
+  /// unmutes them. Scope follows the search field (see `bulkTargets`).
+  @ViewBuilder
+  private var bulkActionsSection: some View {
+    if !bulkTargets.isEmpty {
+      Section {
+        HStack(spacing: 24) {
+          Button {
+            settings.setAlerting(true, logins: bulkTargets.map(\.login))
+          } label: {
+            Text("Enable All")
+              .frame(maxWidth: .infinity)
+          }
+          Button {
+            settings.setAlerting(false, logins: bulkTargets.map(\.login))
+          } label: {
+            Text("Disable All")
+              .frame(maxWidth: .infinity)
+          }
+        }
+        .frame(maxWidth: .infinity)
+      } footer: {
+        Text(bulkScopeDescription)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  /// Footer copy clarifying what the bulk buttons act on, including the future-
+  /// follow caveat of the opt-out model.
+  private var bulkScopeDescription: String {
+    if isSearching {
+      let count = bulkTargets.count
+      return "Enable All / Disable All apply to the \(count) channel\(count == 1 ? "" : "s") matching your search."
+    }
+    return "Enable All / Disable All apply to every channel you follow now. Channels you follow later start on."
   }
 
   @ViewBuilder

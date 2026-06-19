@@ -135,7 +135,7 @@ struct ChannelPageView: View {
       applyInitialFocusIfNeeded()
     }
     .fullScreenCover(item: $onDemandItem) { item in
-      OnDemandPlayerView(item: item)
+      OnDemandPlayerView(item: item, channelLogin: profile?.login ?? target.login)
         .environment(\.themePalette, palette)
     }
   }

@@ -97,97 +97,134 @@ struct PreviewVideoSurface: UIViewRepresentable {
 /// VOD/scrubbing-oriented and unsuited to a live, side-by-side chat layout.
 /// Controls auto-hide and are revealed by pressing the remote.
 struct PlayerView: View {
+  /// Identifies an on-demand broadcast (VOD) so the same player can replay a past
+  /// stream — full-duration seek + synchronized chat replay — instead of a live
+  /// stream. `nil` (the default) means this is the live channel player.
+  struct VODContext: Equatable {
+    let id: String
+    let title: String
+  }
+
   let channel: String
   var auth: TwitchAuthSession
+  /// When set, the player runs in VOD mode: it plays the recorded broadcast,
+  /// drives `replay` for chat, exposes a full-duration seek bar + playback speed,
+  /// and gates off all live-only machinery (latency, low-latency proxy, EventSub,
+  /// adaptive quality, IRC chat, watchdog).
+  var vod: VODContext? = nil
+
+  /// True while playing a recorded broadcast rather than a live stream.
+  var isVOD: Bool { vod != nil }
+
+  /// VODs always expose the transport bar (seek is essential); live exposes it
+  /// only when the user has Stream Rewind enabled.
+  var rewindAvailable: Bool { isVOD || streamRewindEnabled }
+
+  /// The focus target that "holds" chat while the viewer scrolls it. Live keeps
+  /// focus on the composer (tvOS can't reliably focus a ScrollView); VODs have no
+  /// composer, so a dedicated invisible scroller target stands in.
+  var chatFocusAnchor: Focusable { isVOD ? .chatScroller : .chatInput }
+
+  /// Keep the seek bar and the chat scroller mutually non-neighboring so a
+  /// sideways swipe can never escape from one into the other.
+  var scrubberFocusable: Bool {
+    if isVOD { return focus != .chatScroller }
+    return focus != .chatInput && focus != .chatSend
+  }
 
   /// The currently-active channel, which can change if the user follows a raid.
-  @State private var activeChannel: String = ""
+  @State var activeChannel: String = ""
 
-  @Environment(\.dismiss) private var dismiss
-  @Environment(\.themePalette) private var palette
-  @AppStorage("preferredQuality") private var preferredQuality = "Auto"
-  @AppStorage("chatTextSizeValue") private var chatTextSizeValue = Double(
+  @Environment(\.dismiss) var dismiss
+  @Environment(\.themePalette) var palette
+  @AppStorage("preferredQuality") var preferredQuality = "Auto"
+  @AppStorage("chatTextSizeValue") var chatTextSizeValue = Double(
     ChatAppearance.defaultTextSize)
-  @AppStorage("chatEmoteAuto") private var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
-  @AppStorage("chatEmoteSizeValue") private var chatEmoteSizeValue = Double(
+  @AppStorage("chatEmoteAuto") var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
+  @AppStorage("chatEmoteSizeValue") var chatEmoteSizeValue = Double(
     ChatAppearance.defaultEmoteSize)
-  @AppStorage("chatLineHeightValue") private var chatLineHeightValue = Double(
+  @AppStorage("chatLineHeightValue") var chatLineHeightValue = Double(
     ChatAppearance.defaultLineHeight)
-  @AppStorage("chatLetterSpacingValue") private var chatLetterSpacingValue = Double(
+  @AppStorage("chatLetterSpacingValue") var chatLetterSpacingValue = Double(
     ChatAppearance.defaultLetterSpacing)
-  @AppStorage("chatMessageSpacingValue") private var chatMessageSpacingValue = Double(
+  @AppStorage("chatMessageSpacingValue") var chatMessageSpacingValue = Double(
     ChatAppearance.defaultMessageSpacing)
-  @AppStorage("chatWidthValue") private var chatWidthValue = Double(ChatAppearance.defaultWidth)
-  @AppStorage("chatAnimatedEmotes") private var chatAnimatedEmotes = ChatAppearance
+  @AppStorage("chatWidthValue") var chatWidthValue = Double(ChatAppearance.defaultWidth)
+  @AppStorage("chatAnimatedEmotes") var chatAnimatedEmotes = ChatAppearance
     .defaultAnimatedEmotes
-  @AppStorage("chatFontStyle") private var chatFontStyleRaw = ChatAppearance.defaultFontStyle
+  @AppStorage("chatFontStyle") var chatFontStyleRaw = ChatAppearance.defaultFontStyle
     .rawValue
-  @AppStorage("chatShowBadges") private var chatShowBadges = ChatAppearance.defaultShowBadges
-  @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
-  @AppStorage("chatSyncToStream") private var chatSyncToStream = false
-  @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
+  @AppStorage("chatShowBadges") var chatShowBadges = ChatAppearance.defaultShowBadges
+  @AppStorage("chatLayoutMode") var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
+  @AppStorage("chatSyncToStream") var chatSyncToStream = false
+  @AppStorage("experimentalYouTubeMergeEnabled") var experimentalYouTubeMergeEnabled = false
   /// Optional manual override for the YouTube merge target. Kept per-channel and
   /// non-persistent so a value entered for one streamer never leaks into another
   /// (previously this was global `@AppStorage`, which made every channel merge
   /// with whatever handle was last entered).
-  @State private var experimentalYouTubeMergeChannelOrURL = ""
+  @State var experimentalYouTubeMergeChannelOrURL = ""
   /// Best-effort YouTube target derived from the active Twitch channel (its
   /// social links, then description, then a name-based guess).
-  @State private var youtubeAutoResolvedTarget = ""
-  @AppStorage(LowLatencyHLSProxy.settingsKey) private var lowLatencyProxyEnabled = true
-  @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) private var streamRewindEnabled = true
-  @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
+  @State var youtubeAutoResolvedTarget = ""
+  @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
+  @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
+  @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
 
-  @State private var chat = ChatService()
+  @State var chat = ChatService()
+  /// Drives chat replay when in VOD mode (reveals comments up to the playhead).
+  @State var replay = VODChatReplayService()
+  /// Periodic player time observer used in VOD mode to sync chat replay + the
+  /// seek readout to the playhead.
+  @State var vodTimeObserver: Any?
   /// Detects *outgoing* raids (the watched channel raiding away) via EventSub.
-  @State private var eventSub = EventSubService()
-  @State private var player = AVPlayer()
+  @State var eventSub = EventSubService()
+  @State var player = AVPlayer()
   /// Drives the audio-only visualizer orb. Reacts to real audio when the player
   /// item exposes a tappable audio track (best effort on live HLS), otherwise
   /// runs an ambient animation.
-  @State private var audioLevelMonitor = AudioLevelMonitor()
+  @State var audioLevelMonitor = AudioLevelMonitor()
   /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
   /// loader delegate weakly, so the proxy must be owned here to stay alive.
-  @State private var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
-  @State private var playback: StreamPlayback?
-  @State private var errorMessage: String?
-  @State private var isOffline = false
-  @State private var isLoading = true
-  @State private var showChat: Bool =
+  @State var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
+  @State var playback: StreamPlayback?
+  @State var errorMessage: String?
+  @State var isOffline = false
+  @State var isLoading = true
+  @State var showChat: Bool =
     UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
-  @State private var chatReplayStartMessageID: ChatMessage.ID?
+  @State var chatReplayStartMessageID: ChatMessage.ID?
   /// Live resolution AVPlayer's adaptive (Auto) selection is currently showing,
   /// e.g. "1080p60". Drives the "Auto (1080p60)" label on the quality button.
-  @State private var resolvedQualityName: String?
-  @State private var showSignInSheet = false
-  @State private var showChatSettings = false
-  @State private var chatSettingsPage: ChatSettingsPage = .main
+  @State var resolvedQualityName: String?
+  @State var showSignInSheet = false
+  @State var showChatSettings = false
+  @State var chatSettingsPage: ChatSettingsPage = .main
   /// Natural (content) height of the current settings page, used to size the
   /// floating panel to its content and animate when the page/content changes.
-  @State private var chatSettingsContentHeight: CGFloat = 0
-  @State private var showControls = false
-  @State private var streamTitle: String = ""
-  @State private var channelDisplayName: String = ""
-  @State private var channelAvatarURL: URL?
-  @State private var channelPageTarget: ChannelPageTarget?
+  @State var chatSettingsContentHeight: CGFloat = 0
+  @State var showControls = false
+  @State var streamTitle: String = ""
+  @State var channelDisplayName: String = ""
+  @State var channelAvatarURL: URL?
+  @State var channelPageTarget: ChannelPageTarget?
   /// When the user picks a "More like this" channel from the channel page, we
   /// stash its login and switch to it once the page cover finishes dismissing.
-  @State private var pendingSwitchLogin: String?
-  @State private var chatDraft: String = ""
-  @State private var chatInputActivationToken: Int = 0
-  @State private var youtubeInputActivationToken: Int = 0
-  @State private var isSendingChat = false
-  @State private var chatSendError: String?
+  @State var pendingSwitchLogin: String?
+  @State var chatDraft: String = ""
+  @State var chatInputActivationToken: Int = 0
+  @State var youtubeInputActivationToken: Int = 0
+  @State var isSendingChat = false
+  @State var chatSendError: String?
   /// When chat sync is active, a sent message is held until it appears in the
   /// delayed stream. This is the wall-clock moment it should surface.
-  @State private var chatSyncSendDeadline: Date?
-  @State private var chatSyncSendDelay: Double = 0
-  @State private var chatSyncSendClearTask: Task<Void, Never>?
-  @State private var hideTask: Task<Void, Never>?
-  @State private var focusRecoveryTask: Task<Void, Never>?
-  @State private var isQualityMenuPresented = false
-  @State private var latencyTask: Task<Void, Never>?
-  @State private var playbackWatchdogTask: Task<Void, Never>?
+  @State var chatSyncSendDeadline: Date?
+  @State var chatSyncSendDelay: Double = 0
+  @State var chatSyncSendClearTask: Task<Void, Never>?
+  @State var hideTask: Task<Void, Never>?
+  @State var focusRecoveryTask: Task<Void, Never>?
+  @State var isQualityMenuPresented = false
+  @State var latencyTask: Task<Void, Never>?
+  @State var playbackWatchdogTask: Task<Void, Never>?
   // The live-latency and playback-watchdog tasks rewrite a large set of
   // bookkeeping values once per second. Storing them as `@State` re-executed the
   // entire (very large) PlayerView body every tick, which rebuilt the focused
@@ -198,56 +235,56 @@ struct PlayerView: View {
   // original names so the monitoring code reads unchanged. UI that needs the
   // latency reading goes through `latencyReadout` (an `@Observable` the badge
   // leaf observes), so only the badge — not the whole player — updates.
-  @State private var mon = PlaybackMonitorBox()
-  @State private var latencyReadout = LatencyReadout()
+  @State var mon = PlaybackMonitorBox()
+  @State var latencyReadout = LatencyReadout()
 
   // MARK: Stream Rewind (DVR)
   /// Observed by the rewind transport bar only, so its once-per-second updates
   /// don't churn the whole player (same isolation pattern as `latencyReadout`).
-  @State private var rewindReadout = RewindReadout()
+  @State var rewindReadout = RewindReadout()
   /// True while the viewer has explicitly paused the live stream. Pausing keeps
   /// the playhead in place while the DVR window keeps growing, so resuming/seeking
   /// stays inside the retained window. Also gates the stall watchdog so an
   /// intentional pause is never mistaken for a freeze.
-  @State private var isUserPaused = false
+  @State var isUserPaused = false
   /// True while the viewer is actively scrubbing the rewind bar (analog trackpad
   /// glide). Gates the latency monitor's rate-force and the stall watchdog so
   /// repositioning the playhead is never mistaken for a freeze or fought.
-  @State private var isScrubbing = false
+  @State var isScrubbing = false
   /// Live scrub position (seconds on the player timeline) while a trackpad jog is
   /// in progress. The orb tracks this instantly for buttery feedback; the actual
   /// `AVPlayerItem.seek` is throttled/coalesced against it.
-  @State private var scrubTargetSeconds: Double?
+  @State var scrubTargetSeconds: Double?
   /// Throttle clock for the coalesced scrub seeks issued during a jog.
-  @State private var lastScrubSeekAt = Date.distantPast
+  @State var lastScrubSeekAt = Date.distantPast
   /// Debounced "settle" that commits a final frame-accurate seek and clears the
   /// intended position once rapid stepping/jogging stops.
-  @State private var scrubCommitTask: Task<Void, Never>?
+  @State var scrubCommitTask: Task<Void, Never>?
   /// True while the playhead is following the live edge. The real seekable edge
   /// quantizes in segment-sized steps, so `behindLiveSeconds` wobbles a few
   /// seconds even when "at live"; this flag lets us pin the orb to the right edge
   /// and show LIVE deterministically until the viewer actually rewinds.
-  @State private var pinnedToLive = true
+  @State var pinnedToLive = true
   /// Drives the analog (precision) trackpad scrubbing while the bar is focused.
-  @State private var scrubInput = ScrubInputCoordinator()
+  @State var scrubInput = ScrubInputCoordinator()
 
-  private var wallClockLatencySeconds: Double? {
+  var wallClockLatencySeconds: Double? {
     get { mon.wallClockLatencySeconds }
     nonmutating set { mon.wallClockLatencySeconds = newValue }
   }
-  private var liveEdgeLatencySeconds: Double? {
+  var liveEdgeLatencySeconds: Double? {
     get { mon.liveEdgeLatencySeconds }
     nonmutating set { mon.liveEdgeLatencySeconds = newValue }
   }
-  private var smoothedLatencySeconds: Double? {
+  var smoothedLatencySeconds: Double? {
     get { mon.smoothedLatencySeconds }
     nonmutating set { mon.smoothedLatencySeconds = newValue }
   }
-  private var latencySampleCount: Int {
+  var latencySampleCount: Int {
     get { mon.latencySampleCount }
     nonmutating set { mon.latencySampleCount = newValue }
   }
-  private var latencyStableCount: Int {
+  var latencyStableCount: Int {
     get { mon.latencyStableCount }
     nonmutating set { mon.latencyStableCount = newValue }
   }
@@ -255,266 +292,270 @@ struct PlayerView: View {
   // whether a quality switch actually needs to replace the item. AVURLAsset.url
   // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
   // for this comparison directly.
-  @State private var currentSourceURL: URL?
-  private var isPlaybackActive: Bool {
+  @State var currentSourceURL: URL?
+  var isPlaybackActive: Bool {
     get { mon.isPlaybackActive }
     nonmutating set { mon.isPlaybackActive = newValue }
   }
-  private var didRequestPlayback: Bool {
+  var didRequestPlayback: Bool {
     get { mon.didRequestPlayback }
     nonmutating set { mon.didRequestPlayback = newValue }
   }
-  private var lastHardCatchUpJumpAt: Date {
+  var lastHardCatchUpJumpAt: Date {
     get { mon.lastHardCatchUpJumpAt }
     nonmutating set { mon.lastHardCatchUpJumpAt = newValue }
   }
-  private var lastWallClockCatchUpAt: Date {
+  var lastWallClockCatchUpAt: Date {
     get { mon.lastWallClockCatchUpAt }
     nonmutating set { mon.lastWallClockCatchUpAt = newValue }
   }
-  private var edgeLatencyLowConfidenceStreak: Int {
+  var edgeLatencyLowConfidenceStreak: Int {
     get { mon.edgeLatencyLowConfidenceStreak }
     nonmutating set { mon.edgeLatencyLowConfidenceStreak = newValue }
   }
-  private var wallClockHighLatencyStreak: Int {
+  var wallClockHighLatencyStreak: Int {
     get { mon.wallClockHighLatencyStreak }
     nonmutating set { mon.wallClockHighLatencyStreak = newValue }
   }
-  private var wallClockLowConfidenceStreak: Int {
+  var wallClockLowConfidenceStreak: Int {
     get { mon.wallClockLowConfidenceStreak }
     nonmutating set { mon.wallClockLowConfidenceStreak = newValue }
   }
-  private var lastPlaybackDateSample: Date? {
+  var lastPlaybackDateSample: Date? {
     get { mon.lastPlaybackDateSample }
     nonmutating set { mon.lastPlaybackDateSample = newValue }
   }
-  private var lastPlaybackTimeSampleSeconds: Double? {
+  var lastPlaybackTimeSampleSeconds: Double? {
     get { mon.lastPlaybackTimeSampleSeconds }
     nonmutating set { mon.lastPlaybackTimeSampleSeconds = newValue }
   }
-  private var lastObservedPlaybackTimeSeconds: Double? {
+  var lastObservedPlaybackTimeSeconds: Double? {
     get { mon.lastObservedPlaybackTimeSeconds }
     nonmutating set { mon.lastObservedPlaybackTimeSeconds = newValue }
   }
-  private var stalledPlaybackSamples: Int {
+  var stalledPlaybackSamples: Int {
     get { mon.stalledPlaybackSamples }
     nonmutating set { mon.stalledPlaybackSamples = newValue }
   }
-  private var isRecoveringPlayback: Bool {
+  var isRecoveringPlayback: Bool {
     get { mon.isRecoveringPlayback }
     nonmutating set { mon.isRecoveringPlayback = newValue }
   }
-  private var lastRecoveryAttemptAt: Date {
+  var lastRecoveryAttemptAt: Date {
     get { mon.lastRecoveryAttemptAt }
     nonmutating set { mon.lastRecoveryAttemptAt = newValue }
   }
-  private var liveStallWaitingSince: Date? {
+  var liveStallWaitingSince: Date? {
     get { mon.liveStallWaitingSince }
     nonmutating set { mon.liveStallWaitingSince = newValue }
   }
-  private var offlineProbeInFlight: Bool {
+  var offlineProbeInFlight: Bool {
     get { mon.offlineProbeInFlight }
     nonmutating set { mon.offlineProbeInFlight = newValue }
   }
-  private var lastOfflineProbeAt: Date {
+  var lastOfflineProbeAt: Date {
     get { mon.lastOfflineProbeAt }
     nonmutating set { mon.lastOfflineProbeAt = newValue }
   }
-  @State private var lastStallNotificationAt = Date.distantPast
-  @State private var suppressLowLatencyToggleReload = false
-  @State private var consecutiveLoadFailures = 0
-  @State private var lastControlFocus: Focusable = .quality
+  @State var lastStallNotificationAt = Date.distantPast
+  @State var suppressLowLatencyToggleReload = false
+  @State var consecutiveLoadFailures = 0
+  @State var lastControlFocus: Focusable = .quality
   /// Non-nil while chat is "soft paused" (Twitch-style): the list is frozen so
   /// the viewer can read, with a countdown that auto-resumes. A second Up press
   /// promotes it to manual scroll mode.
-  @State private var chatSoftPauseRemaining: Int?
-  @State private var softPauseTask: Task<Void, Never>?
-  private let softPauseSeconds = 10
+  @State var chatSoftPauseRemaining: Int?
+  @State var softPauseTask: Task<Void, Never>?
+  let softPauseSeconds = 10
   /// True once the viewer has promoted the pause into manual scroll mode. Focus
   /// stays on the composer; up/down swipes drive `chatScrollTarget` directly,
   /// because tvOS will not reliably hand (and keep) focus on the chat ScrollView.
-  @State private var isChatScrolling = false
+  @State var isChatScrolling = false
   /// The message currently pinned near the top of the viewport while scrolling,
   /// tracked by id so incoming messages don't shift our place.
-  @State private var chatScrollAnchorID: ChatMessage.ID?
+  @State var chatScrollAnchorID: ChatMessage.ID?
   /// Latest scroll instruction handed to ChatView. The nonce makes repeated
   /// scrolls to the same id still register as a change.
-  @State private var chatScrollTarget: ChatScrollTarget?
-  @State private var chatScrollNonce = 0
+  @State var chatScrollTarget: ChatScrollTarget?
+  @State var chatScrollNonce = 0
   /// Messages to advance per up/down swipe while scrolling.
-  private let chatScrollStep = 4
+  let chatScrollStep = 4
   /// Swipe-to-scroll (Siri Remote trackpad) state. The monitor reports the
   /// finger's position; a loop maps finger *travel* to scroll position so the
   /// chat follows a swipe and holds still when the finger does. Discrete presses
   /// still step (and press-and-hold repeats).
-  @State private var trackpad = RemoteTrackpadMonitor()
-  @State private var trackpadScrollTask: Task<Void, Never>?
-  @State private var trackpadScrollIndex: Double = 0
-  @State private var lastSentScrollIndex: Int = -1
+  @State var trackpad = RemoteTrackpadMonitor()
+  @State var trackpadScrollTask: Task<Void, Never>?
+  @State var trackpadScrollIndex: Double = 0
+  @State var lastSentScrollIndex: Int = -1
   /// When the swipe loop last moved the scroll, used to suppress the discrete
   /// focus-move events a swipe also emits so a swipe and a press don't double up.
-  @State private var lastGestureScrollAt = Date.distantPast
+  @State var lastGestureScrollAt = Date.distantPast
   /// Finger position magnitude below this reads as "not touching" (lifted).
-  private let chatScrollTouchEpsilon: Double = 0.02
+  let chatScrollTouchEpsilon: Double = 0.02
   /// Per-frame finger movement below this reads as "resting" (no swipe), so a
   /// held/pressing finger's natural jitter doesn't register as a swipe — which
   /// would otherwise keep resetting the gesture timer and block press-and-hold.
-  private let chatScrollMoveEpsilon: Double = 0.012
+  let chatScrollMoveEpsilon: Double = 0.012
   /// Messages scrolled per unit of finger travel across the trackpad.
-  private let chatScrollSwipeSensitivity: Double = 16
+  let chatScrollSwipeSensitivity: Double = 16
   /// Per-frame velocity decay once the finger lifts, giving swipes momentum so
   /// the chat coasts and eases to a stop instead of halting dead.
-  private let chatScrollFriction: Double = 0.94
+  let chatScrollFriction: Double = 0.94
   /// Below this coasting speed (index-units per frame) momentum is considered
   /// spent and stops.
-  private let chatScrollMomentumMin: Double = 0.04
+  let chatScrollMomentumMin: Double = 0.04
   /// Press-and-hold auto-repeat. tvOS won't emit system key-repeat here because
   /// focus is trapped on the composer, so we drive an accelerating repeat
   /// ourselves while the finger stays pressed/down on the pad.
-  @State private var chatHoldTask: Task<Void, Never>?
+  @State var chatHoldTask: Task<Void, Never>?
   /// Delay after click-down before the continuous hold-scroll engages, so a quick
   /// tap stays a single discrete step.
-  private let chatHoldInitialDelay: Double = 0.2
+  let chatHoldInitialDelay: Double = 0.2
   /// Continuous hold-scroll speed (messages per 60Hz frame) at engage time.
-  private let chatHoldStartVelocity: Double = 0.18
+  let chatHoldStartVelocity: Double = 0.18
   /// Top speed the hold accelerates to (messages per frame).
-  private let chatHoldMaxVelocity: Double = 1.4
+  let chatHoldMaxVelocity: Double = 1.4
   /// Per-frame multiplier that ramps the hold speed up (acceleration).
-  private let chatHoldVelocityAccel: Double = 1.035
+  let chatHoldVelocityAccel: Double = 1.035
   /// When the hold last scrolled, used to swallow the single discrete move event
   /// the click also emits on release.
-  @State private var lastHoldRepeatAt = Date.distantPast
+  @State var lastHoldRepeatAt = Date.distantPast
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
-  @State private var chatInputFocusedAt = Date.distantPast
+  @State var chatInputFocusedAt = Date.distantPast
   /// True while chat is held for reading — either the soft pause or full scroll
   /// mode. The composer keeps real focus throughout, but it should *look*
   /// unfocused so the held chat reads as the thing being interacted with.
-  private var chatIsFrozen: Bool {
+  var chatIsFrozen: Bool {
     isChatScrolling || chatSoftPauseRemaining != nil
   }
-  @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
+  @State var lastChatSettingsFocus: Focusable = .chatSettingsButton
   /// A just-activated settings control to briefly defend against tvOS's
   /// transient focus jump when toggling an option resizes the panel.
-  @State private var chatFocusPin: Focusable?
-  @State private var chatFocusPinTask: Task<Void, Never>?
-  @State private var raidBannerDismissTask: Task<Void, Never>?
+  @State var chatFocusPin: Focusable?
+  @State var chatFocusPinTask: Task<Void, Never>?
+  @State var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
-  @State private var outgoingRaid: OutgoingRaidEvent?
-  @State private var outgoingRaidSecondsRemaining = 0
-  @State private var outgoingRaidFollowTask: Task<Void, Never>?
+  @State var outgoingRaid: OutgoingRaidEvent?
+  @State var outgoingRaidSecondsRemaining = 0
+  @State var outgoingRaidFollowTask: Task<Void, Never>?
 
   // MARK: Sleep timer (hidden inside the Quality menu)
   // A single countdown task pauses playback after a chosen duration so the
   // Apple TV can sleep when the viewer dozes off. It lives inside the Quality
   // menu (no dedicated button) and surfaces a small top-right countdown badge.
-  @State private var sleepTimerTask: Task<Void, Never>?
+  @State var sleepTimerTask: Task<Void, Never>?
   /// Wall-clock instant playback should pause at, for the timed durations.
-  @State private var sleepDeadline: Date?
+  @State var sleepDeadline: Date?
   /// "End of stream" mode: sleep when the channel goes offline, not on a clock.
-  @State private var sleepUntilStreamEnds = false
+  @State var sleepUntilStreamEnds = false
   /// Seconds left before sleep, republished each second for the countdown badge.
-  @State private var sleepRemainingSeconds: Int?
+  @State var sleepRemainingSeconds: Int?
   /// Index of the chosen option, so the submenu shows a checkmark.
-  @State private var sleepSelectionIndex = 0
+  @State var sleepSelectionIndex = 0
   /// Shown ~30s before a timed sleep so an awake viewer can keep watching.
-  @State private var showStillWatching = false
+  @State var showStillWatching = false
   /// True once the timer fires: playback is paused under a dim "Sleeping"
   /// overlay until the viewer presses to resume.
-  @State private var isSleeping = false
+  @State var isSleeping = false
 
   // MARK: Diagnostics (experimental troubleshooting overlay)
   // Counters and a rolling event log so freezes/jumps can be observed on-device
   // and reported back, rather than inferred. Only meaningful while the overlay
   // toggle is on; reset on each fresh load.
-  @State private var diagStallCount = 0
-  @State private var diagJumpCount = 0
-  @State private var diagReloadCount = 0
-  @State private var diagEvents: [DiagnosticsEvent] = []
-  @State private var diagLastPlayheadSeconds: Double?
-  @State private var diagLastSampleAt: Date?
-  @State private var diagWasStalled = false
-  @State private var diagIsFrozen = false
-  @State private var diagFrozenSince: Date?
-  @State private var diagSessionStartedAt: Date?
+  @State var diagStallCount = 0
+  @State var diagJumpCount = 0
+  @State var diagReloadCount = 0
+  @State var diagEvents: [DiagnosticsEvent] = []
+  @State var diagLastPlayheadSeconds: Double?
+  @State var diagLastSampleAt: Date?
+  @State var diagWasStalled = false
+  @State var diagIsFrozen = false
+  @State var diagFrozenSince: Date?
+  @State var diagSessionStartedAt: Date?
 
-  private let controlsAutoHideSeconds: Double = 10
+  let controlsAutoHideSeconds: Double = 10
   /// How much live history the Stream Rewind DVR retains (and therefore how far
   /// back you can scrub). Capped because Twitch's segment URLs eventually age off
   /// its CDN; deeper history is offered via the in-progress VOD ("From Start").
-  private let rewindWindowSeconds: Double = 1800
+  let rewindWindowSeconds: Double = 1800
   /// Seconds the rewind step buttons jump per press.
-  private let rewindStepSeconds: Double = 10
+  let rewindStepSeconds: Double = 10
   /// Trackpad swipe sensitivity, expressed as how much finger travel it takes to
   /// scrub across the *entire* current seekable window (the surface spans roughly
   /// -1...1, so one firm edge-to-edge swipe ≈ 1.5 units). Scrubbing is therefore
   /// proportional to the window — like YouTube/Apple's players — so a tiny
   /// just-arrived DVR window and a full 30-min one both feel the same instead of
   /// the small one being hypersensitive.
-  private let scrubFullWindowTravelUnits: Double = 4
+  let scrubFullWindowTravelUnits: Double = 4
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
   // blur on-device. Freeze-free playback is the top priority, then sharpness.
-  private let targetLiveEdgeSeconds: Double = 3.5
-  private let softCatchUpThresholdSeconds: Double = 8
+  let targetLiveEdgeSeconds: Double = 3.5
+  let softCatchUpThresholdSeconds: Double = 8
   // In low-latency mode the proxy adds prefetch segments to the seekable window,
   // which inflates the seekable-edge latency metric. A zero-tolerance hard seek
   // against that inflated edge rebuffers and freezes, so disable hard seeks while
   // low-latency mode is on and rely on gentle rate correction + a healthy buffer.
-  private var hardCatchUpThresholdSeconds: Double {
+  var hardCatchUpThresholdSeconds: Double {
     lowLatencyProxyEnabled ? .greatestFiniteMagnitude : 14
   }
-  private let hardCatchUpCooldownSeconds: Double = 20
-  private let maxCatchUpRate: Float = 1.04
-  private let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
-  private let edgeLatencyUnavailableSamples = 4
-  private let wallClockSoftCatchUpThresholdSeconds: Double = 12
-  private let wallClockHardCatchUpThresholdSeconds: Double = 16
-  private let wallClockHardCatchUpRequiredSamples = 10
-  private let wallClockHardCatchUpCooldownSeconds: Double = 90
-  private let targetWallClockSeconds: Double = 6.5
-  private let wallClockUnavailableSamples = 4
-  private let wallClockStaleDateDeltaEpsilonSeconds: Double = 0.08
-  private let wallClockStalePlaybackAdvanceThresholdSeconds: Double = 0.6
-  private let resolveTimeoutSeconds: Double = 18
-  private let startupPlaybackTimeoutSeconds: Double = 14
-  private let startupPlaybackPollMilliseconds: UInt64 = 500
-  private let stalledPlaybackThresholdSamples = 6
+  let hardCatchUpCooldownSeconds: Double = 20
+  let maxCatchUpRate: Float = 1.04
+  let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
+  let edgeLatencyUnavailableSamples = 4
+  let wallClockSoftCatchUpThresholdSeconds: Double = 12
+  let wallClockHardCatchUpThresholdSeconds: Double = 16
+  let wallClockHardCatchUpRequiredSamples = 10
+  let wallClockHardCatchUpCooldownSeconds: Double = 90
+  let targetWallClockSeconds: Double = 6.5
+  let wallClockUnavailableSamples = 4
+  let wallClockStaleDateDeltaEpsilonSeconds: Double = 0.08
+  let wallClockStalePlaybackAdvanceThresholdSeconds: Double = 0.6
+  let resolveTimeoutSeconds: Double = 18
+  let startupPlaybackTimeoutSeconds: Double = 14
+  let startupPlaybackPollMilliseconds: UInt64 = 500
+  let stalledPlaybackThresholdSamples = 6
   /// Warm-up gating for the latency badge. The live-edge gap reads ~0 right
   /// after playback starts and climbs to the true value over a few seconds, so
   /// we keep showing "Estimating latency…" until the reading settles: a couple
   /// of consecutive stable samples above a plausible floor. The max cap means a
   /// genuinely low-latency stream still resolves instead of estimating forever.
-  private let latencyWarmUpMinSamples = 3
-  private let latencyWarmUpMaxSamples = 10
-  private let latencyStableSamplesRequired = 2
-  private let latencyPlausibleFloorSeconds: Double = 2
-  private let latencyStableDeltaSeconds: Double = 2
-  private let playbackWatchdogIntervalSeconds: Double = 2
-  private let hardStallRecoverySeconds: Double = 10
-  private let recoveryCooldownSeconds: Double = 15
-  private let stallNotificationDebounceSeconds: Double = 2.5
+  let latencyWarmUpMinSamples = 3
+  let latencyWarmUpMaxSamples = 10
+  let latencyStableSamplesRequired = 2
+  let latencyPlausibleFloorSeconds: Double = 2
+  let latencyStableDeltaSeconds: Double = 2
+  let playbackWatchdogIntervalSeconds: Double = 2
+  let hardStallRecoverySeconds: Double = 10
+  let recoveryCooldownSeconds: Double = 15
+  let stallNotificationDebounceSeconds: Double = 2.5
   /// How long the player may sit unable to play (waiting on a starved buffer)
   /// before we authoritatively ask Twitch whether the channel is still live.
   /// Short enough to surface an ended broadcast promptly, long enough that a
   /// brief transient buffer dip won't trigger a needless GraphQL probe.
-  private let offlineProbeStallSeconds: Double = 6
+  let offlineProbeStallSeconds: Double = 6
   /// Minimum spacing between authoritative offline probes while still stuck.
-  private let offlineProbeCooldownSeconds: Double = 8
+  let offlineProbeCooldownSeconds: Double = 8
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
-  private let diagJumpForwardThresholdSeconds: Double = 2.0
-  private let diagJumpBackwardThresholdSeconds: Double = 1.0
-  private let chatReplayMessageCount = 30
-  private let chatComposerRowHeight: CGFloat = 62
+  let diagJumpForwardThresholdSeconds: Double = 2.0
+  let diagJumpBackwardThresholdSeconds: Double = 1.0
+  let chatReplayMessageCount = 30
+  let chatComposerRowHeight: CGFloat = 62
 
-  @FocusState private var focus: Focusable?
+  @FocusState var focus: Focusable?
   enum Focusable: Hashable {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case offlineViewChannel, offlineTryAgain
     case chatSend
+    /// VOD-only: invisible target inside the chat pane that holds focus while the
+    /// viewer pauses/scrolls chat replay (reached by pressing right off the
+    /// collapse-chat button).
+    case chatScroller
     case raidFollowCancel
     case sleepKeepWatching, sleepResume
     case simulateRaidButton
@@ -565,32 +606,32 @@ struct PlayerView: View {
     case width
   }
 
-  private var chatTextSize: CGFloat {
+  var chatTextSize: CGFloat {
     CGFloat(chatTextSizeValue)
   }
 
-  private var chatLineHeight: CGFloat {
+  var chatLineHeight: CGFloat {
     CGFloat(chatLineHeightValue)
   }
 
-  private var chatLetterSpacing: CGFloat {
+  var chatLetterSpacing: CGFloat {
     CGFloat(chatLetterSpacingValue)
   }
 
-  private var chatMessageSpacing: CGFloat {
+  var chatMessageSpacing: CGFloat {
     CGFloat(chatMessageSpacingValue)
   }
 
   /// Resolved emote height: derived from the text size in Auto mode, otherwise
   /// the explicit stored value.
-  private var chatEmoteSize: CGFloat {
+  var chatEmoteSize: CGFloat {
     chatEmoteAuto
       ? ChatAppearance.autoEmoteHeight(forTextSize: chatTextSize)
       : CGFloat(chatEmoteSizeValue)
   }
 
   /// The active readability preset, or `nil` when the values are "Custom".
-  private var activeChatPreset: ChatAppearancePreset? {
+  var activeChatPreset: ChatAppearancePreset? {
     ChatAppearancePreset.resolve(
       textSize: chatTextSize,
       lineHeight: chatLineHeight,
@@ -599,19 +640,20 @@ struct PlayerView: View {
     )
   }
 
-  private var chatLayoutMode: ChatLayoutMode {
+  var chatLayoutMode: ChatLayoutMode {
     ChatLayoutMode(rawValue: chatLayoutModeRaw) ?? .side
   }
 
-  private var chatWidth: CGFloat {
+  var chatWidth: CGFloat {
     CGFloat(chatWidthValue)
   }
 
-  private var chatFontStyle: ChatFontStyle {
+  var chatFontStyle: ChatFontStyle {
     ChatFontStyle(rawValue: chatFontStyleRaw) ?? .standard
   }
 
-  private var visibleChatMessages: [ChatMessage] {
+  var visibleChatMessages: [ChatMessage] {
+    if isVOD { return replay.messages }
     guard let startID = chatReplayStartMessageID else { return chat.messages }
     guard let startIndex = chat.messages.firstIndex(where: { $0.id == startID }) else {
       return chat.messages
@@ -623,7 +665,7 @@ struct PlayerView: View {
   /// stay clear of (to the left of) the chat panel when chat floats over the
   /// full-width video in overlay/glass mode. In side mode the controls live in
   /// the shrunken video column, so the default edge padding is enough.
-  private var controlsTrailingInset: CGFloat {
+  var controlsTrailingInset: CGFloat {
     guard showChat, chatLayoutMode.isOverlay else { return 48 }
     let gap: CGFloat = 24
     switch chatLayoutMode {
@@ -752,14 +794,18 @@ struct PlayerView: View {
     }
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
-      configurePlayerForLive()
-      resetDiagnostics()
-      applyExperimentalYouTubeSettings()
-      chat.connect(to: activeChannel)
-      eventSub.start(forChannel: activeChannel, auth: auth)
-      async let metadataTask: Void = refreshChannelMetadata()
-      await load()
-      _ = await metadataTask
+      if isVOD {
+        await startVOD()
+      } else {
+        configurePlayerForLive()
+        resetDiagnostics()
+        applyExperimentalYouTubeSettings()
+        chat.connect(to: activeChannel)
+        eventSub.start(forChannel: activeChannel, auth: auth)
+        async let metadataTask: Void = refreshChannelMetadata()
+        await load()
+        _ = await metadataTask
+      }
       focus = .video
     }
     .onAppear {
@@ -803,6 +849,8 @@ struct PlayerView: View {
       stopLatencyMonitor()
       stopScrubInput()
       audioLevelMonitor.stop()
+      removeVODTimeObserver()
+      replay.stop()
       player.pause()
       chat.disconnect()
       eventSub.stop()
@@ -846,7 +894,7 @@ struct PlayerView: View {
         // the chrome is hidden (scrolling doesn't depend on focus).
         switch direction {
         case .right where showChat:
-          revealControls(preferredFocus: .chatInput)
+          revealControls(preferredFocus: chatFocusAnchor)
         case .up where showChat:
           handleChatUpPress()
         case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
@@ -872,6 +920,17 @@ struct PlayerView: View {
       if newFocus == .chatInput, oldFocus != .chatInput {
         chatInputFocusedAt = Date()
       }
+      // VOD: moving focus into the chat scroller (right off the collapse button)
+      // immediately surfaces the paused indicator, and leaving it resumes the
+      // replay's auto-scroll — so chat pause/scroll is driven purely by focus.
+      if isVOD {
+        if newFocus == .chatScroller, oldFocus != .chatScroller {
+          chatInputFocusedAt = Date()
+          if !isChatScrolling, chatSoftPauseRemaining == nil { startSoftPause() }
+        } else if oldFocus == .chatScroller, newFocus != .chatScroller {
+          if isChatScrolling || chatSoftPauseRemaining != nil { resumeChatLive() }
+        }
+      }
       // Keep the swipe target stable while chat is held.
       if isChatScrolling {
         // Active scroll traps focus on the composer so a stray diagonal swipe
@@ -879,13 +938,13 @@ struct PlayerView: View {
         // exception is `.video`, which is the page-level handler that drives
         // scrolling while the chrome is hidden. Exit is via Back or scrolling
         // back to the bottom.
-        if let newFocus, newFocus != .chatInput, newFocus != .video {
-          focus = .chatInput
+        if let newFocus, newFocus != chatFocusAnchor, newFocus != .video {
+          focus = chatFocusAnchor
         }
       } else if chatSoftPauseRemaining != nil {
         // Lightweight read pause: navigating away to a real control resumes live
         // so the frozen state can't get stranded.
-        if let newFocus, newFocus != .chatInput, isControlFocus(newFocus) {
+        if let newFocus, newFocus != chatFocusAnchor, isControlFocus(newFocus) {
           resumeChatLive()
         }
       }
@@ -963,6 +1022,7 @@ struct PlayerView: View {
       await refreshYouTubeAutoTarget()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
+      guard !isVOD else { return }
       if suppressLowLatencyToggleReload {
         suppressLowLatencyToggleReload = false
         return
@@ -972,6 +1032,7 @@ struct PlayerView: View {
       Task { await load(reason: "lowLatencyToggle", resetMetadata: false) }
     }
     .onChange(of: streamRewindEnabled) { _, _ in
+      guard !isVOD else { return }
       // Toggling Stream Rewind changes whether the proxy retains history (and,
       // when low-latency is off, whether the proxy is attached at all), so
       // rebuild the pipeline from a clean DVR state.
@@ -988,7 +1049,7 @@ struct PlayerView: View {
 
   /// True when the user has explicitly pinned the audio-only rendition, so the
   /// player surface is black and the visualizer should take over.
-  private var isAudioOnlyActive: Bool {
+  var isAudioOnlyActive: Bool {
     guard let playback else { return false }
     guard let audioName = playback.qualities.first(where: { $0.isAudioOnly })?.name else {
       return false
@@ -998,11 +1059,11 @@ struct PlayerView: View {
 
   /// Direct media-playlist URL for the audio-only rendition, used by the
   /// visualizer's level decoder.
-  private var audioOnlyPlaylistURL: URL? {
+  var audioOnlyPlaylistURL: URL? {
     playback?.qualities.first(where: { $0.isAudioOnly })?.url
   }
 
-  private var videoColumn: some View {
+  var videoColumn: some View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
         .ignoresSafeArea()
@@ -1038,7 +1099,9 @@ struct PlayerView: View {
       {
         VStack {
           HStack {
-            LatencyBadge(readout: latencyReadout)
+            if !isVOD {
+              LatencyBadge(readout: latencyReadout)
+            }
             Spacer()
             if let remaining = sleepRemainingSeconds {
               SleepCountdownBadge(text: SleepCountdownBadge.format(seconds: remaining))
@@ -1073,7 +1136,7 @@ struct PlayerView: View {
       }
 
       if isLoading {
-        ProgressView("Loading \(activeChannel)…")
+        ProgressView(isVOD ? "Loading broadcast…" : "Loading \(activeChannel)…")
           .font(.title3)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       }
@@ -1096,14 +1159,14 @@ struct PlayerView: View {
       }
     }
     .onPlayPauseCommand {
-      guard streamRewindEnabled, errorMessage == nil, !isOffline, !isLoading else { return }
+      guard rewindAvailable, errorMessage == nil, !isOffline, !isLoading else { return }
       toggleRewindPlayPause()
     }
   }
 
   // MARK: - Offline empty state
 
-  private var offlineDisplayName: String {
+  var offlineDisplayName: String {
     channelDisplayName.isEmpty ? activeChannel : channelDisplayName
   }
 
@@ -1113,7 +1176,7 @@ struct PlayerView: View {
   /// floats over the right edge, so without this the content reads as
   /// off-center. Shift left by half the width the chat occupies. The chat width
   /// is user-customizable, so this tracks `chatWidth`.
-  private var offlineContentHorizontalOffset: CGFloat {
+  var offlineContentHorizontalOffset: CGFloat {
     guard showChat, chatLayoutMode.isOverlay else { return 0 }
     switch chatLayoutMode {
     case .glass:
@@ -1125,7 +1188,7 @@ struct PlayerView: View {
     }
   }
 
-  private var offlineState: some View {
+  var offlineState: some View {
     ZStack {
       // Opaque backdrop so the frozen last frame never bleeds through.
       palette.playerBackdrop.ignoresSafeArea()
@@ -1189,7 +1252,7 @@ struct PlayerView: View {
   }
 
   @ViewBuilder
-  private var offlineAvatar: some View {
+  var offlineAvatar: some View {
     Group {
       if let channelAvatarURL {
         AsyncImage(url: channelAvatarURL) { image in
@@ -1208,7 +1271,7 @@ struct PlayerView: View {
     .opacity(0.9)
   }
 
-  private var offlineAvatarPlaceholder: some View {
+  var offlineAvatarPlaceholder: some View {
     ZStack {
       Circle().fill(.white.opacity(0.10))
       Icon(glyph: .userCircle, size: 64)
@@ -1216,7 +1279,7 @@ struct PlayerView: View {
     }
   }
 
-  private var bottomOverlay: some View {
+  var bottomOverlay: some View {
     VStack(spacing: 18) {
       HStack(alignment: .center, spacing: 24) {
       HStack(alignment: .center, spacing: 12) {
@@ -1252,11 +1315,11 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .right:
-            focus = .quality
+            focus = isVOD ? .chatSettingsButton : .quality
           case .left:
             focus = .streamInfo
           case .down:
-            if streamRewindEnabled { focus = .rewindScrubber }
+            if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
@@ -1288,6 +1351,8 @@ struct PlayerView: View {
         // focus system had no live binding to restore to and focus only snapped
         // back on the next unrelated re-render (~1-2s later). Keeping `.focused`
         // here keeps the binding live so focus returns to the button instantly.
+        // Quality / adaptive bitrate is live-only; VODs play a fixed recording.
+        if !isVOD {
         QualityMenu(
           options: qualityOptions,
           selectedOption: preferredQuality,
@@ -1341,10 +1406,11 @@ struct PlayerView: View {
           case .right:
             focus = .chatSettingsButton
           case .down:
-            if streamRewindEnabled { focus = .rewindScrubber }
+            if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
+        }
         }
 
         Button {
@@ -1357,11 +1423,11 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .quality
+            focus = isVOD ? .streamInfo : .quality
           case .right:
             focus = .chatToggle
           case .down:
-            if streamRewindEnabled { focus = .rewindScrubber }
+            if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
@@ -1384,10 +1450,10 @@ struct PlayerView: View {
             focus = .chatSettingsButton
           case .right:
             if showChat {
-              focus = .chatInput
+              focus = chatFocusAnchor
             }
           case .down:
-            if streamRewindEnabled { focus = .rewindScrubber }
+            if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
@@ -1416,7 +1482,7 @@ struct PlayerView: View {
     // the row or drop it entirely — which never happens with chat closed.
     .focusSection()
 
-      if streamRewindEnabled {
+      if rewindAvailable {
         Button {
           toggleRewindPlayPause()
         } label: {
@@ -1429,7 +1495,7 @@ struct PlayerView: View {
         // button instead). Combined with the composer doing the reverse, the
         // engine never treats the two as neighbors — no sideways escape, no
         // focus flash, no after-the-fact reverts.
-        .focusable(focus != .chatInput && focus != .chatSend)
+        .focusable(scrubberFocusable)
         .focused($focus, equals: .rewindScrubber)
         .onMoveCommand { direction in
           // Left/right step the timeline. Up is intentionally left to the focus
@@ -1475,7 +1541,7 @@ struct PlayerView: View {
   // MARK: - Diagnostics overlay
 
   /// The fixed metric rows, each computed live from the current item.
-  private var diagnosticsLines: [String] {
+  var diagnosticsLines: [String] {
     var lines: [String] = []
 
     let mode = lowLatencyProxyEnabled ? "LL proxy ON" : "LL proxy off"
@@ -1529,128 +1595,9 @@ struct PlayerView: View {
     return lines
   }
 
-  private func diagFormat(_ value: Double, decimals: Int) -> String {
-    String(format: "%.\(decimals)f", value)
-  }
-
-  private func diagBitrate(_ bitsPerSecond: Double) -> String {
-    guard bitsPerSecond.isFinite, bitsPerSecond > 0 else { return "—" }
-    return "\(diagFormat(bitsPerSecond / 1_000_000, decimals: 1)) Mbps"
-  }
-
-  private func diagBufferAheadDescription(_ item: AVPlayerItem) -> String {
-    let current = CMTimeGetSeconds(item.currentTime())
-    guard current.isFinite else { return "—" }
-    for value in item.loadedTimeRanges {
-      let range = value.timeRangeValue
-      let start = CMTimeGetSeconds(range.start)
-      let end = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
-      if start.isFinite, end.isFinite, current >= start - 0.5, current <= end + 0.5 {
-        return "\(diagFormat(max(0, end - current), decimals: 1))s"
-      }
-    }
-    return "—"
-  }
-
-  private func diagWaitingReasonDescription() -> String {
-    if player.timeControlStatus == .playing { return "none" }
-    if let reason = player.reasonForWaitingToPlay {
-      if reason == .toMinimizeStalls { return "toMinimizeStalls" }
-      if reason == .evaluatingBufferingRate { return "evaluatingBufferingRate" }
-      if reason == .noItemToPlay { return "noItemToPlay" }
-      return String(describing: reason)
-    }
-    if player.currentItem?.isPlaybackBufferEmpty == true { return "bufferEmpty" }
-    if player.currentItem?.isPlaybackLikelyToKeepUp == false { return "notLikelyToKeepUp" }
-    return "unknown"
-  }
-
-  /// Records a diagnostics event, keeping only the most recent few (newest first).
-  private func logDiagnosticsEvent(_ text: String) {
-    diagEvents.insert(DiagnosticsEvent(at: Date(), text: text), at: 0)
-    if diagEvents.count > 6 {
-      diagEvents.removeLast(diagEvents.count - 6)
-    }
-  }
-
-  private func markDiagnosticsStall(reason: String) {
-    if !diagIsFrozen {
-      diagIsFrozen = true
-      diagFrozenSince = Date()
-    }
-    if !diagWasStalled {
-      diagWasStalled = true
-      diagStallCount += 1
-      if showLatencyDiagnostics {
-        logDiagnosticsEvent("stall (\(reason))")
-      }
-    }
-  }
-
-  /// Detects forward/backward playhead jumps by comparing actual playhead
-  /// advance against wall-clock × rate between 1s samples. A genuine AVPlayer
-  /// skip-to-live shows up as several seconds of unexplained forward advance.
-  private func sampleDiagnostics() {
-    guard showLatencyDiagnostics else {
-      // Diagnostics is off by default; only write when there's something to
-      // clear so this per-second call doesn't invalidate the player each tick.
-      if diagLastPlayheadSeconds != nil { diagLastPlayheadSeconds = nil }
-      if diagLastSampleAt != nil { diagLastSampleAt = nil }
-      return
-    }
-    guard isPlaybackActive, let item = player.currentItem else {
-      if diagLastPlayheadSeconds != nil { diagLastPlayheadSeconds = nil }
-      if diagLastSampleAt != nil { diagLastSampleAt = nil }
-      return
-    }
-
-    let now = Date()
-    let playhead = CMTimeGetSeconds(item.currentTime())
-    guard playhead.isFinite else { return }
-
-    if let lastPlayhead = diagLastPlayheadSeconds, let lastAt = diagLastSampleAt {
-      let wall = now.timeIntervalSince(lastAt)
-      let advanced = playhead - lastPlayhead
-      let expected = wall * Double(max(player.rate, 0))
-      let forwardDrift = advanced - expected
-
-      if forwardDrift >= diagJumpForwardThresholdSeconds {
-        diagJumpCount += 1
-        logDiagnosticsEvent("jump +\(diagFormat(forwardDrift, decimals: 1))s forward")
-      } else if advanced <= -diagJumpBackwardThresholdSeconds {
-        diagJumpCount += 1
-        logDiagnosticsEvent("jump \(diagFormat(advanced, decimals: 1))s back")
-      }
-
-      if advanced >= 0.05 {
-        diagIsFrozen = false
-        diagFrozenSince = nil
-        diagWasStalled = false
-      }
-    }
-
-    diagLastPlayheadSeconds = playhead
-    diagLastSampleAt = now
-  }
-
-  private func resetDiagnostics() {
-    diagStallCount = 0
-    diagJumpCount = 0
-    diagReloadCount = 0
-    diagEvents = []
-    diagLastPlayheadSeconds = nil
-    diagLastSampleAt = nil
-    diagWasStalled = false
-    diagIsFrozen = false
-    diagFrozenSince = nil
-    diagSessionStartedAt = Date()
-    lastRecoveryAttemptAt = Date.distantPast
-    lastStallNotificationAt = Date.distantPast
-  }
-
   // MARK: - Controls visibility
 
-  private func revealControls(preferredFocus: Focusable) {
+  func revealControls(preferredFocus: Focusable) {
     focusRecoveryTask?.cancel()
     if !showControls {
       showControls = true
@@ -1662,14 +1609,14 @@ struct PlayerView: View {
     scheduleHide()
   }
 
-  private func hideControls() {
+  func hideControls() {
     hideTask?.cancel()
     focusRecoveryTask?.cancel()
     showControls = false
     focus = .video
   }
 
-  private func scheduleHide() {
+  func scheduleHide() {
     hideTask?.cancel()
     hideTask = Task {
       try? await Task.sleep(for: .seconds(controlsAutoHideSeconds))
@@ -1712,11 +1659,13 @@ struct PlayerView: View {
   /// Opens the full-screen channel page for the active channel. The live stream
   /// is paused while the page is up, and its latency monitor + watchdog are
   /// suspended so the non-advancing playhead isn't mistaken for a stall.
-  private func presentChannelPage() {
+  func presentChannelPage() {
     hideTask?.cancel()
     focusRecoveryTask?.cancel()
-    stopPlaybackWatchdog()
-    stopLatencyMonitor()
+    if !isVOD {
+      stopPlaybackWatchdog()
+      stopLatencyMonitor()
+    }
     player.pause()
     channelPageTarget = ChannelPageTarget(
       login: activeChannel,
@@ -1727,7 +1676,7 @@ struct PlayerView: View {
 
   /// Resumes live playback once the channel page is dismissed — or switches to a
   /// different channel if the user picked one from the page's "More like this".
-  private func resumeAfterChannelPage() {
+  func resumeAfterChannelPage() {
     if let login = pendingSwitchLogin {
       pendingSwitchLogin = nil
       followRaid(login)
@@ -1739,9 +1688,13 @@ struct PlayerView: View {
       focus = .offlineViewChannel
       return
     }
-    startPlayback()
-    startLatencyMonitor()
-    startPlaybackWatchdog()
+    if isVOD {
+      player.play()
+    } else {
+      startPlayback()
+      startLatencyMonitor()
+      startPlaybackWatchdog()
+    }
     if showControls {
       focus = .streamInfo
       scheduleHide()
@@ -1750,7 +1703,7 @@ struct PlayerView: View {
     }
   }
 
-  private func toggleChatVisibility() {
+  func toggleChatVisibility() {
     showChat.toggle()
     if showChat {
       chatReplayStartMessageID = chat.messages.suffix(chatReplayMessageCount).first?.id
@@ -1765,7 +1718,7 @@ struct PlayerView: View {
   /// countdown). A press while paused promotes to scroll mode and steps up;
   /// press-and-hold repeats. A trackpad swipe scrolls continuously via the
   /// gesture loop, which suppresses these discrete events while it's driving.
-  private func handleChatUpPress() {
+  func handleChatUpPress() {
     if isChatScrolling {
       // A swipe also emits these discrete move events; ignore them while the
       // gesture loop is actively scrolling so a swipe doesn't double-step. A
@@ -1793,7 +1746,7 @@ struct PlayerView: View {
 
   /// Down press while chat is open. Scrolls toward newer messages, resuming live
   /// once it reaches the bottom; from a plain soft pause it resumes immediately.
-  private func handleChatDownPress() {
+  func handleChatDownPress() {
     if isChatScrolling {
       if trackpad.hasController, Date().timeIntervalSince(lastGestureScrollAt) < 0.12 {
         return
@@ -1809,7 +1762,7 @@ struct PlayerView: View {
 
   /// Freeze chat for `softPauseSeconds`, counting down then auto-resuming.
   /// Focus is left untouched — this is a lightweight "let me read" pause.
-  private func startSoftPause() {
+  func startSoftPause() {
     softPauseTask?.cancel()
     chatSoftPauseRemaining = softPauseSeconds
     softPauseTask = Task {
@@ -1825,14 +1778,14 @@ struct PlayerView: View {
     }
   }
 
-  private func cancelSoftPause() {
+  func cancelSoftPause() {
     softPauseTask?.cancel()
     softPauseTask = nil
     chatSoftPauseRemaining = nil
   }
 
   /// Promote a soft pause into manual scroll mode, anchored at the newest message.
-  private func beginChatScrolling() {
+  func beginChatScrolling() {
     guard !isChatScrolling else { return }
     cancelSoftPause()
     isChatScrolling = true
@@ -1849,7 +1802,7 @@ struct PlayerView: View {
   /// scrolling and moves the chat by the finger's *per-frame travel*, so the
   /// chat follows a swipe and a resting/pressing finger (no travel) is left
   /// completely alone — that way it never fights the discrete press handler.
-  private func startTrackpadScrollLoop() {
+  func startTrackpadScrollLoop() {
     guard trackpad.hasController, trackpadScrollTask == nil else { return }
     trackpadScrollTask = Task { @MainActor in
       var primed = false
@@ -1909,7 +1862,7 @@ struct PlayerView: View {
   /// the move reached the live bottom and resumed the feed, signalling the loop
   /// to stop.
   @discardableResult
-  private func applyScrollDelta(_ delta: Double) -> Bool {
+  func applyScrollDelta(_ delta: Double) -> Bool {
     let msgs = visibleChatMessages
     guard !msgs.isEmpty else { return false }
     let lastIndex = Double(msgs.count - 1)
@@ -1934,7 +1887,7 @@ struct PlayerView: View {
   /// unreliable once clicked, so we key off the reliable click button plus the
   /// direction latched at click-down. Scrolls via the same continuous index model
   /// as a swipe (un-animated, accelerating) so a hold feels fluid, not steppy.
-  private func startChatHoldWatcher() {
+  func startChatHoldWatcher() {
     guard trackpad.hasController, chatHoldTask == nil else { return }
     chatHoldTask = Task { @MainActor in
       var pressStart: Date?
@@ -1996,12 +1949,12 @@ struct PlayerView: View {
     }
   }
 
-  private func stopChatHold() {
+  func stopChatHold() {
     chatHoldTask?.cancel()
     chatHoldTask = nil
   }
 
-  private func stopTrackpadScrollLoop() {
+  func stopTrackpadScrollLoop() {
     trackpadScrollTask?.cancel()
     trackpadScrollTask = nil
     stopChatHold()
@@ -2010,7 +1963,7 @@ struct PlayerView: View {
 
   /// Advance the scroll anchor by `chatScrollStep` messages and tell ChatView to
   /// scroll there. Scrolling past the newest message resumes the live feed.
-  private func stepChatScroll(up: Bool) {
+  func stepChatScroll(up: Bool) {
     let msgs = visibleChatMessages
     guard !msgs.isEmpty else { return }
     let lastIndex = msgs.count - 1
@@ -2043,7 +1996,7 @@ struct PlayerView: View {
     scheduleHide()
   }
 
-  private func sendChatScroll(to id: ChatMessage.ID, animated: Bool = true) {
+  func sendChatScroll(to id: ChatMessage.ID, animated: Bool = true) {
     chatScrollNonce += 1
     // Anchor the target at the bottom of the viewport. A `.top` anchor clamps
     // hard near the live bottom (where every scroll starts), so the first swipes
@@ -2053,7 +2006,7 @@ struct PlayerView: View {
   }
 
   /// Leave any frozen state and let chat snap back to the live, newest message.
-  private func resumeChatLive() {
+  func resumeChatLive() {
     cancelSoftPause()
     isChatScrolling = false
     chatScrollAnchorID = nil
@@ -2061,7 +2014,7 @@ struct PlayerView: View {
     scheduleHide()
   }
 
-  private func isControlFocus(_ focus: Focusable) -> Bool {
+  func isControlFocus(_ focus: Focusable) -> Bool {
     switch focus {
     case .streamInfo, .quality, .chatToggle, .chatInput, .rewindScrubber:
       return true
@@ -2070,7 +2023,7 @@ struct PlayerView: View {
     }
   }
 
-  private func isChatSettingsFocus(_ focus: Focusable) -> Bool {
+  func isChatSettingsFocus(_ focus: Focusable) -> Bool {
     switch focus {
     case .chatSettingsButton,
       .chatPresetOption,
@@ -2100,7 +2053,7 @@ struct PlayerView: View {
     }
   }
 
-  private var chatPane: some View {
+  var chatPane: some View {
     let isGlass = chatLayoutMode == .glass
     let useLighterOverlayBackground = chatLayoutMode == .overlay
     return VStack(spacing: 0) {
@@ -2109,7 +2062,8 @@ struct PlayerView: View {
       // (several per second on busy channels) re-executes the whole PlayerView
       // body and flashes the focused Quality menu while it's open.
       ChatMessagesColumn(
-        chat: chat,
+        chat: isVOD ? nil : chat,
+        replay: isVOD ? replay : nil,
         channel: channel,
         replayStartMessageID: chatReplayStartMessageID,
         textSize: chatTextSize,
@@ -2128,8 +2082,32 @@ struct PlayerView: View {
         scrollTarget: chatScrollTarget
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .overlay {
+        // VOD chat is read-only: there's no composer to send from. Instead an
+        // invisible focusable sits over the message list. Pressing right off the
+        // collapse-chat button lands here (surfacing the paused indicator); from
+        // here up/down scroll the replay and left returns to the controls.
+        if isVOD {
+          Color.clear
+            .contentShape(Rectangle())
+            .focusable(showChat && focus != .rewindScrubber)
+            .focused($focus, equals: .chatScroller)
+            .onMoveCommand { direction in
+              switch direction {
+              case .up: handleChatUpPress()
+              case .down: handleChatDownPress()
+              case .left:
+                resumeChatLive()
+                revealControls(preferredFocus: .chatToggle)
+              default: break
+              }
+            }
+        }
+      }
 
-      chatComposerBar
+      if !isVOD {
+        chatComposerBar
+      }
     }
     .frame(width: chatWidth)
     .modifier(GlassChatPaneStyle(enabled: isGlass))
@@ -2161,35 +2139,35 @@ struct PlayerView: View {
     .animation(.easeOut(duration: 0.18), value: showChatSettings)
   }
 
-  private let chatSettingsPanelWidth: CGFloat = 560
-  private let chatSettingsPanelGap: CGFloat = 16
+  let chatSettingsPanelWidth: CGFloat = 560
+  let chatSettingsPanelGap: CGFloat = 16
   /// Distance the bottom control row sits above the screen's bottom edge. Kept
   /// generous so the row (and the chat composer it aligns with) clears typical TV
   /// overscan instead of hugging the very bottom.
-  private let controlsBottomPadding: CGFloat = 8
+  let controlsBottomPadding: CGFloat = 8
   /// Measured height of the right-side control buttons row. The stream title is
   /// capped to this so a long (2-line) title can't grow the row and shove the
   /// buttons up off their fixed position — instead the title stays vertically
   /// centered against the buttons.
-  @State private var controlButtonsHeight: CGFloat = 0
+  @State var controlButtonsHeight: CGFloat = 0
   /// How far above the screen bottom the floating settings panel must start so it
   /// floats *above* the control row rather than behind/under it. Control row
   /// bottom inset plus its approximate height plus a small gap. When the rewind
   /// scrub bar is present it sits *below* the control row in the same VStack, so
   /// the panel has to clear that extra element too (bar height + the VStack's
   /// 18pt spacing) or it overlaps the seek bar and the buttons beneath it.
-  private var chatSettingsBottomClearance: CGFloat {
+  var chatSettingsBottomClearance: CGFloat {
     let base = controlsBottomPadding + 104
-    return streamRewindEnabled ? base + scrubBarClusterHeight : base
+    return rewindAvailable ? base + scrubBarClusterHeight : base
   }
   /// Approximate on-screen height the rewind scrub bar adds beneath the control
   /// row: the bar's own height (~68pt) plus the control VStack's 18pt spacing.
-  private let scrubBarClusterHeight: CGFloat = 86
+  let scrubBarClusterHeight: CGFloat = 86
 
   // MARK: - Floating chat settings
 
   /// The focus target for the first control on whichever settings page is shown.
-  private var firstChatSettingsFocus: Focusable {
+  var firstChatSettingsFocus: Focusable {
     switch chatSettingsPage {
     case .appearance, .playback:
       return .chatAdvancedBack
@@ -2200,7 +2178,7 @@ struct PlayerView: View {
     }
   }
 
-  private func chatSettingsPanel(maxHeight: CGFloat) -> some View {
+  func chatSettingsPanel(maxHeight: CGFloat) -> some View {
     // Measured content height, capped to the space available beside the chat.
     // When the content is shorter than the cap the panel shrinks to fit; only
     // when it would overflow does the inner ScrollView start scrolling.
@@ -2253,7 +2231,7 @@ struct PlayerView: View {
 
   // MARK: Main settings page
 
-  private var mainSettingsContent: some View {
+  var mainSettingsContent: some View {
     VStack(alignment: .leading, spacing: 30) {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Appearance")
@@ -2325,7 +2303,7 @@ struct PlayerView: View {
 
   // MARK: Playback & diagnostics sub-page
 
-  private var playbackSettingsContent: some View {
+  var playbackSettingsContent: some View {
     VStack(alignment: .leading, spacing: 30) {
       subpageHeader("Playback & Diagnostics")
 
@@ -2489,7 +2467,7 @@ struct PlayerView: View {
 
   // MARK: Appearance (Advanced) sub-page
 
-  private var appearanceSettingsContent: some View {
+  var appearanceSettingsContent: some View {
     VStack(alignment: .leading, spacing: 30) {
       subpageHeader("Advanced")
 
@@ -2590,7 +2568,7 @@ struct PlayerView: View {
     }
   }
 
-  private func settingsSectionHeader(_ title: String) -> some View {
+  func settingsSectionHeader(_ title: String) -> some View {
     Text(title)
       .font(.caption.weight(.semibold))
       .foregroundStyle(.white.opacity(0.84))
@@ -2599,7 +2577,7 @@ struct PlayerView: View {
 
   // MARK: Settings controls
 
-  private func settingsPill(
+  func settingsPill(
     title: String,
     isSelected: Bool,
     icon: Glyph? = nil,
@@ -2637,7 +2615,7 @@ struct PlayerView: View {
 
   /// Full-width disclosure row (Apple-style): title on the left, optional detail
   /// plus a right-facing chevron on the right, used to drill into a sub-page.
-  private func settingsDisclosureRow(
+  func settingsDisclosureRow(
     title: String,
     detail: String? = nil,
     focusTag: Focusable,
@@ -2671,7 +2649,7 @@ struct PlayerView: View {
   }
 
   /// The Back button + title shown at the top of a settings sub-page.
-  private func subpageHeader(_ title: String) -> some View {
+  func subpageHeader(_ title: String) -> some View {
     HStack(spacing: 12) {
       Button {
         closeSubpage()
@@ -2695,7 +2673,7 @@ struct PlayerView: View {
     .focusSection()
   }
 
-  private func settingsStepperRow(_ field: ChatStepperField) -> some View {
+  func settingsStepperRow(_ field: ChatStepperField) -> some View {
     let config = chatStepperConfig(field)
     let canDecrement = config.value > config.range.lowerBound
     let canIncrement = config.value < config.range.upperBound
@@ -2747,7 +2725,7 @@ struct PlayerView: View {
     .focusSection()
   }
 
-  private func stepperButton(
+  func stepperButton(
     glyph: Glyph,
     enabled: Bool,
     focusTag: Focusable,
@@ -2771,7 +2749,7 @@ struct PlayerView: View {
   /// handler reverts any such unsolicited jump back to the control the user
   /// actually used; the timer is only a safety net since the pin is consumed on
   /// the first reverted move.
-  private func pinChatFocus(_ tag: Focusable) {
+  func pinChatFocus(_ tag: Focusable) {
     chatFocusPin = tag
     chatFocusPinTask?.cancel()
     chatFocusPinTask = Task { @MainActor in
@@ -2781,7 +2759,7 @@ struct PlayerView: View {
     }
   }
 
-  private func chatStepperConfig(
+  func chatStepperConfig(
     _ field: ChatStepperField
   ) -> (title: String, range: ClosedRange<CGFloat>, step: CGFloat, value: CGFloat) {
     switch field {
@@ -2811,7 +2789,7 @@ struct PlayerView: View {
     }
   }
 
-  private func adjustChatStepper(_ field: ChatStepperField, by direction: CGFloat) {
+  func adjustChatStepper(_ field: ChatStepperField, by direction: CGFloat) {
     let config = chatStepperConfig(field)
     let next = ChatAppearance.snap(
       config.value + direction * config.step,
@@ -2835,7 +2813,7 @@ struct PlayerView: View {
     }
   }
 
-  private func applyChatPreset(_ preset: ChatAppearancePreset) {
+  func applyChatPreset(_ preset: ChatAppearancePreset) {
     let values = preset.values
     chatTextSizeValue = Double(values.textSize)
     chatLineHeightValue = Double(values.lineHeight)
@@ -2843,14 +2821,14 @@ struct PlayerView: View {
     chatEmoteAuto = true
   }
 
-  private func resetChatAppearance() {
+  func resetChatAppearance() {
     applyChatPreset(.normal)
     chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
     chatLetterSpacingValue = Double(ChatAppearance.defaultLetterSpacing)
     chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
   }
 
-  private func openSubpage(_ page: ChatSettingsPage) {
+  func openSubpage(_ page: ChatSettingsPage) {
     chatSettingsPage = page
     let target: Focusable = .chatAdvancedBack
     lastChatSettingsFocus = target
@@ -2859,7 +2837,7 @@ struct PlayerView: View {
     }
   }
 
-  private func closeSubpage() {
+  func closeSubpage() {
     let returnFocus: Focusable =
       chatSettingsPage == .playback ? .chatMoreButton : .chatAdvancedButton
     chatSettingsPage = .main
@@ -2871,14 +2849,14 @@ struct PlayerView: View {
 
   /// Settings button lives in the control bar, so it must work even when chat is
   /// hidden: open chat first, then reveal the panel.
-  private func openChatSettingsFromControlBar() {
+  func openChatSettingsFromControlBar() {
     if !showChat {
       toggleChatVisibility()
     }
     toggleChatSettings()
   }
 
-  private func toggleChatSettings() {
+  func toggleChatSettings() {
     showChatSettings.toggle()
     if showChatSettings {
       let target = firstChatSettingsFocus
@@ -2891,11 +2869,11 @@ struct PlayerView: View {
     }
   }
 
-  private var hasChatDraft: Bool {
+  var hasChatDraft: Bool {
     !chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
-  private var chatComposerBar: some View {
+  var chatComposerBar: some View {
     VStack(alignment: .leading, spacing: 8) {
       if let chatSendError {
         Text(chatSendError)
@@ -3061,7 +3039,7 @@ struct PlayerView: View {
     )
   }
 
-  private func submitChatMessage() {
+  func submitChatMessage() {
     let text = chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty, !isSendingChat else { return }
     // Dismiss the tvOS keyboard overlay before sending.
@@ -3084,7 +3062,7 @@ struct PlayerView: View {
   /// When stream-sync is holding chat, a sent message won't appear until it
   /// reaches the delayed video. Show a short progress countdown so the user
   /// knows it was sent and roughly when it will surface.
-  private func beginChatSyncSendIndicatorIfNeeded() {
+  func beginChatSyncSendIndicatorIfNeeded() {
     guard chatSyncToStream, let delay = chatSyncDelaySeconds, delay >= 0.75 else {
       return
     }
@@ -3100,448 +3078,9 @@ struct PlayerView: View {
     }
   }
 
-  // MARK: - Raid banner
-
-  /// A passive, non-interactive banner announcing an *incoming* raid (someone
-  /// raiding the channel you're watching). It deliberately has no buttons and
-  /// cannot take focus — you're already on the channel being raided, so there's
-  /// nothing to follow.
-  @ViewBuilder
-  private func raidBanner(_ raid: RaidEvent) -> some View {
-    VStack {
-      Spacer()
-      VStack(spacing: 4) {
-        Text("\(raid.displayName) is raiding this channel")
-          .font(.headline).bold()
-          .foregroundStyle(.white)
-        Text("\(raid.viewerCount) viewers incoming")
-          .font(.subheadline)
-          .foregroundStyle(.white.opacity(0.85))
-      }
-      .multilineTextAlignment(.center)
-      .padding(.horizontal, 32)
-      .padding(.vertical, 18)
-      .background(.purple.opacity(0.85), in: Capsule())
-      .padding(.bottom, 60)
-    }
-    .allowsHitTesting(false)
-    .ignoresSafeArea()
-  }
-
-  private func followRaid(_ login: String) {
-    raidBannerDismissTask?.cancel()
-    chat.pendingRaid = nil
-    clearOutgoingRaidState()
-    activeChannel = login
-    stopPlaybackWatchdog()
-    stopLatencyMonitor()
-    player.pause()
-    player.replaceCurrentItem(with: nil)
-    currentSourceURL = nil
-    chat.disconnect()
-    // Restart the outgoing-raid listener for the new channel so a stale
-    // subscription from the previous channel never lingers.
-    eventSub.stop()
-    eventSub.start(forChannel: login, auth: auth)
-    resetDiagnostics()
-    isLoading = true
-    errorMessage = nil
-    isOffline = false
-    streamTitle = ""
-    channelDisplayName = ""
-    channelAvatarURL = nil
-    chat.connect(to: login)
-    Task {
-      async let metadataTask: Void = refreshChannelMetadata()
-      await load(reason: "raid follow", resetMetadata: false)
-      _ = await metadataTask
-      focus = .video
-    }
-  }
-
-  // MARK: - Outgoing raid (auto-follow)
-
-  /// Banner shown when the watched channel is raiding away. Defaults to
-  /// following after a short countdown; the focusable Cancel button opts out.
-  @ViewBuilder
-  private func outgoingRaidBanner(_ raid: OutgoingRaidEvent) -> some View {
-    VStack {
-      Spacer()
-      HStack(spacing: 20) {
-        Icon(glyph: .userPlus, size: 34)
-          .foregroundStyle(.white)
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Raiding to \(raid.toDisplayName)")
-            .font(.headline).bold()
-            .foregroundStyle(.white)
-          Text("Auto-following in \(outgoingRaidSecondsRemaining)s · Cancel to stay here")
-            .font(.subheadline)
-            .foregroundStyle(.white.opacity(0.85))
-        }
-        Button("Cancel") {
-          cancelOutgoingRaid()
-        }
-        .focused($focus, equals: .raidFollowCancel)
-      }
-      .padding(.horizontal, 36)
-      .padding(.vertical, 20)
-      .background(Color(red: 0.40, green: 0.25, blue: 0.78).opacity(0.95), in: Capsule())
-      .padding(.bottom, 60)
-    }
-    .ignoresSafeArea()
-  }
-
-  /// Start the cancelable countdown that ends in following the raid target.
-  private func beginOutgoingRaidFollow(_ raid: OutgoingRaidEvent) {
-    // Don't redirect onto the channel we're already watching.
-    guard raid.toLogin.lowercased() != activeChannel.lowercased() else {
-      eventSub.pendingOutgoingRaid = nil
-      return
-    }
-
-    outgoingRaidFollowTask?.cancel()
-    // A channel ends its stream the instant it raids, so the offline empty state
-    // can flash in during the brief window before this event arrives (the source
-    // HLS hits #EXT-X-ENDLIST). Clear it so the raid banner — not "OFFLINE" — is
-    // what the viewer sees.
-    isOffline = false
-    withAnimation {
-      outgoingRaid = raid
-      outgoingRaidSecondsRemaining = 10
-    }
-    focus = .raidFollowCancel
-
-    let target = raid.toLogin
-    outgoingRaidFollowTask = Task {
-      while outgoingRaidSecondsRemaining > 0 {
-        try? await Task.sleep(for: .seconds(1))
-        guard !Task.isCancelled else { return }
-        outgoingRaidSecondsRemaining -= 1
-      }
-      guard !Task.isCancelled else { return }
-      // followRaid clears outgoing state and restarts the listener.
-      followRaid(target)
-    }
-  }
-
-  private func cancelOutgoingRaid() {
-    clearOutgoingRaidState()
-    focus = .video
-    // Choosing to stay put after a raid usually means the source has already
-    // ended its stream. Re-check immediately (bypassing the probe cooldown) so
-    // the offline empty state surfaces instead of a frozen last frame.
-    lastOfflineProbeAt = .distantPast
-    probeOfflineIfStreamEnded()
-  }
-
-  /// Debug-only: inject a simulated outgoing raid so the auto-follow flow can be
-  /// tested without waiting for a real raid. Targets AlveusSanctuary.
-  private func simulateOutgoingRaid() {
-    showChatSettings = false
-    eventSub.pendingOutgoingRaid = OutgoingRaidEvent(
-      toLogin: "alveussanctuary",
-      toDisplayName: "AlveusSanctuary",
-      toBroadcasterID: "",
-      viewerCount: 0
-    )
-  }
-
-  private func clearOutgoingRaidState() {
-    outgoingRaidFollowTask?.cancel()
-    outgoingRaidFollowTask = nil
-    eventSub.pendingOutgoingRaid = nil
-    withAnimation { outgoingRaid = nil }
-    outgoingRaidSecondsRemaining = 0
-  }
-
-  // MARK: - Sleep timer
-
-  /// One selectable sleep-timer duration. `seconds == nil && !isEndOfStream` is
-  /// the "Off" row; `isEndOfStream` sleeps when the channel goes offline.
-  private struct SleepTimerOption: Hashable {
-    let label: String
-    let seconds: Int?
-    let isEndOfStream: Bool
-  }
-
-  private static let sleepTimerOptions: [SleepTimerOption] = [
-    .init(label: "Off", seconds: nil, isEndOfStream: false),
-    .init(label: "15 minutes", seconds: 15 * 60, isEndOfStream: false),
-    .init(label: "30 minutes", seconds: 30 * 60, isEndOfStream: false),
-    .init(label: "1 hour", seconds: 60 * 60, isEndOfStream: false),
-    .init(label: "1.5 hours", seconds: 90 * 60, isEndOfStream: false),
-    .init(label: "End of stream", seconds: nil, isEndOfStream: true),
-  ]
-
-  private var sleepTimerOptionLabels: [String] {
-    Self.sleepTimerOptions.map(\.label)
-  }
-
-  private var sleepTimerIsArmed: Bool {
-    sleepDeadline != nil || sleepUntilStreamEnds
-  }
-
-  /// Applies a sleep-timer choice from the menu.
-  private func selectSleepTimer(at index: Int) {
-    guard Self.sleepTimerOptions.indices.contains(index) else { return }
-    let option = Self.sleepTimerOptions[index]
-    sleepTimerTask?.cancel()
-    sleepTimerTask = nil
-    withAnimation { showStillWatching = false }
-    sleepSelectionIndex = index
-
-    if option.isEndOfStream {
-      sleepUntilStreamEnds = true
-      sleepDeadline = nil
-      sleepRemainingSeconds = nil
-      return
-    }
-
-    guard let seconds = option.seconds else {
-      disarmSleepTimer()
-      return
-    }
-
-    sleepUntilStreamEnds = false
-    sleepDeadline = Date().addingTimeInterval(Double(seconds))
-    sleepRemainingSeconds = seconds
-    startSleepCountdown()
-  }
-
-  private func disarmSleepTimer() {
-    sleepTimerTask?.cancel()
-    sleepTimerTask = nil
-    sleepDeadline = nil
-    sleepUntilStreamEnds = false
-    sleepRemainingSeconds = nil
-    sleepSelectionIndex = 0
-    withAnimation { showStillWatching = false }
-  }
-
-  private func startSleepCountdown() {
-    sleepTimerTask?.cancel()
-    sleepTimerTask = Task {
-      while !Task.isCancelled {
-        await MainActor.run { tickSleepTimer() }
-        try? await Task.sleep(for: .seconds(1))
-      }
-    }
-  }
-
-  private func tickSleepTimer() {
-    guard let deadline = sleepDeadline else { return }
-    let remaining = Int(deadline.timeIntervalSinceNow.rounded())
-    if remaining <= 0 {
-      enterSleepState()
-      return
-    }
-    sleepRemainingSeconds = remaining
-    if remaining <= 30, !showStillWatching {
-      withAnimation { showStillWatching = true }
-    }
-  }
-
-  /// "Still watching?" → keep playing and cancel the pending sleep.
-  private func keepWatching() {
-    disarmSleepTimer()
-    focus = showControls ? .quality : .video
-  }
-
-  /// Timer fired: stop playback (and the monitors that would otherwise try to
-  /// "recover" the deliberate pause), show the dim sleeping overlay, and release
-  /// the idle timer so tvOS can actually put the device to sleep.
-  private func enterSleepState() {
-    sleepTimerTask?.cancel()
-    sleepTimerTask = nil
-    sleepDeadline = nil
-    sleepUntilStreamEnds = false
-    sleepRemainingSeconds = nil
-    sleepSelectionIndex = 0
-    showStillWatching = false
-    // Tear down the watchdog/latency loops first so neither one sees the pause
-    // as a stall and resumes playback behind the overlay.
-    stopPlaybackWatchdog()
-    stopLatencyMonitor()
-    didRequestPlayback = false
-    player.pause()
-    setIdleTimer(disabled: false)
-    withAnimation { isSleeping = true }
-    focus = .sleepResume
-  }
-
-  private func wakeFromSleep() {
-    guard isSleeping else { return }
-    withAnimation { isSleeping = false }
-    // Resume keeping the screen awake now that the viewer is back.
-    setIdleTimer(disabled: true)
-    focus = showControls ? .quality : .video
-    // After a timed pause the live edge has moved on (often a couple of minutes)
-    // and the cached playlist may be stale, so resuming in place leaves us stuck
-    // far "behind live" or stalled. Reload from scratch to snap back to the live
-    // edge and guarantee playback actually restarts.
-    Task { await load(maxAttempts: 2, reason: "wake from sleep", resetMetadata: false) }
-  }
-
-  /// Dim full-screen "Sleeping" scene shown after a sleep timer fires. Pressing
-  /// any select/tap resumes playback. Deliberately night-friendly: a dark,
-  /// warm-red starry sky that stays easy on the eyes in a dark room and ignores
-  /// the app's light/dark setting.
-  private var sleepingOverlay: some View {
-    SleepingScreen()
-      .contentShape(Rectangle())
-      .focusable()
-      .focused($focus, equals: .sleepResume)
-      .onTapGesture { wakeFromSleep() }
-      .zIndex(50)
-  }
-
-  /// "Still watching?" heads-up shown ~30s before a timed sleep, with a
-  /// focusable button to stay awake. Mirrors the outgoing-raid banner.
-  private func stillWatchingBanner() -> some View {
-    VStack {
-      Spacer()
-      HStack(spacing: 20) {
-        Image(systemName: "moon.zzz.fill")
-          .font(.system(size: 30))
-          .foregroundStyle(.white)
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Still watching?")
-            .font(.headline).bold()
-            .foregroundStyle(.white)
-          Text("Pausing in \(sleepRemainingSeconds ?? 0)s to let your Apple TV sleep")
-            .font(.subheadline)
-            .foregroundStyle(.white.opacity(0.85))
-        }
-        Button("Keep watching") {
-          keepWatching()
-        }
-        .focused($focus, equals: .sleepKeepWatching)
-      }
-      .padding(.horizontal, 36)
-      .padding(.vertical, 20)
-      .background(Color(red: 0.13, green: 0.16, blue: 0.40).opacity(0.95), in: Capsule())
-      .padding(.bottom, 60)
-    }
-    .ignoresSafeArea()
-  }
-
-  // MARK: - Quality picker
-
-  private var qualityOptions: [String] {
-    ["Auto"] + (playback?.qualities.map(\.name) ?? [])
-  }
-
-  /// Text shown on the player's quality button: the selected variant (e.g.
-  /// "1080p60"), or "Auto (1080p60)" reflecting the live adaptive resolution.
-  private var qualityButtonLabel: String {
-    if preferredQuality == "Auto" {
-      if let resolvedQualityName {
-        return "Auto (\(resolvedQualityName))"
-      }
-      return "Auto"
-    }
-    return Self.shortQualityName(preferredQuality)
-  }
-
-  /// Every label the quality button could ever display for the current stream.
-  /// The button reserves the width of the widest of these so the in-player
-  /// title's available space stays constant as the live label changes (e.g.
-  /// "Auto" -> "Auto (1080p60)"), preventing distracting title font reflow.
-  private var qualityButtonLabelCandidates: [String] {
-    var labels: Set<String> = ["Auto"]
-    let videoVariants = (playback?.qualities ?? []).filter { !$0.isAudioOnly }
-    for quality in videoVariants {
-      let short = Self.shortQualityName(quality.name)
-      labels.insert(short)
-      labels.insert("Auto (\(short))")
-    }
-    return labels.sorted()
-  }
-
-  /// Drops the "(Source)" suffix so the button reads "1080p60", not
-  /// "1080p60 (Source)".
-  private static func shortQualityName(_ name: String) -> String {
-    name.replacingOccurrences(of: " (Source)", with: "")
-      .replacingOccurrences(of: " (source)", with: "")
-      .trimmingCharacters(in: .whitespaces)
-  }
-
-  /// Parses the vertical resolution from a variant name, e.g. "1080p60" -> 1080.
-  private static func verticalResolution(from name: String) -> Int? {
-    let lower = name.lowercased()
-    guard let pIndex = lower.firstIndex(of: "p") else { return nil }
-    let digits = lower[lower.startIndex..<pIndex].filter(\.isNumber)
-    return Int(digits)
-  }
-
-  /// Maps AVPlayer's current presentation size to the closest known variant
-  /// name while on the adaptive ("Auto") master playlist.
-  private func updateResolvedQuality() {
-    let resolved = computeResolvedQualityName()
-    // Assign only on change: this runs every second, and rewriting the same
-    // `@State` value still re-executes the player body (flashing focus).
-    if resolvedQualityName != resolved {
-      resolvedQualityName = resolved
-    }
-  }
-
-  private func computeResolvedQualityName() -> String? {
-    guard preferredQuality == "Auto" else {
-      return nil
-    }
-    guard let playback else { return resolvedQualityName }
-
-    let videoVariants = playback.qualities.filter { !$0.isAudioOnly }
-    // Named variants that advertise a parseable resolution, e.g. "720p60".
-    let namedCandidates: [(Int, String)] = videoVariants.compactMap { quality in
-      guard let resolution = Self.verticalResolution(from: quality.name) else { return nil }
-      return (resolution, Self.shortQualityName(quality.name))
-    }
-
-    // Preferred path: match the live adaptive resolution to the nearest named
-    // variant so we keep its exact label (including frame rate).
-    if let size = player.currentItem?.presentationSize, size.height > 0 {
-      let height = Int(size.height.rounded())
-      if let best = namedCandidates.min(by: { abs($0.0 - height) < abs($1.0 - height) }) {
-        return best.1
-      }
-      // Variants don't expose a parseable resolution (e.g. transcoding
-      // disabled, source named "chunked"): derive the label from the decoded
-      // frame height directly so it still shows something accurate.
-      return "\(height)p"
-    }
-
-    // Presentation size not yet known. If the stream offers a single video
-    // rendition, Auto is effectively that rendition — show it rather than
-    // leaving the label stuck on a bare "Auto".
-    if videoVariants.count == 1 {
-      return Self.shortQualityName(videoVariants[0].name)
-    }
-    return resolvedQualityName
-  }
-
-  /// Display label for a quality option. "Auto" is the adaptive-bitrate choice;
-  /// when the low-latency proxy is on it's also the low-latency choice (and,
-  /// because ABR can step down instead of stalling, the smoothest one), so we
-  /// surface that in the picker. The stored/compared value stays plain "Auto".
-  private func qualityDisplayLabel(_ option: String) -> String {
-    guard option == "Auto" else { return option }
-    return lowLatencyProxyEnabled ? "Auto (Low Latency)" : "Auto"
-  }
-
-  private func selectQuality(at index: Int) {
-    guard qualityOptions.indices.contains(index) else { return }
-    let option = qualityOptions[index]
-    preferredQuality = option
-    applyQualityPreference(option)
-    updateResolvedQuality()
-    focus = .quality
-    scheduleHide()
-  }
-
   /// The effective YouTube merge target shown in the settings input: the manual
   /// entry when present, otherwise the resolved default handle for the channel.
-  private var youtubeMergeDisplayText: String {
+  var youtubeMergeDisplayText: String {
     let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(
       in: .whitespacesAndNewlines)
     if !manual.isEmpty { return manual }
@@ -3552,14 +3091,14 @@ struct PlayerView: View {
   /// The handle the merge falls back to when no manual value is entered. Prefers
   /// the YouTube channel discovered from the Twitch channel's social links /
   /// description, and only guesses `@<twitch-login>` when nothing better exists.
-  private var youtubeMergeDefaultTarget: String {
+  var youtubeMergeDefaultTarget: String {
     let auto = youtubeAutoResolvedTarget.trimmingCharacters(in: .whitespacesAndNewlines)
     if !auto.isEmpty { return auto }
     let base = activeChannel.isEmpty ? channel : activeChannel
     return base.isEmpty ? "" : "@\(base)"
   }
 
-  private func applyExperimentalYouTubeSettings() {
+  func applyExperimentalYouTubeSettings() {
     let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(
       in: .whitespacesAndNewlines)
     let resolvedTarget = manual.isEmpty ? youtubeMergeDefaultTarget : manual
@@ -3572,7 +3111,7 @@ struct PlayerView: View {
 
   /// Resolves the best YouTube target for the active channel and pushes it to the
   /// chat service. Runs whenever the active channel changes.
-  private func refreshYouTubeAutoTarget() async {
+  func refreshYouTubeAutoTarget() async {
     let login = activeChannel
     guard !login.isEmpty else { return }
     let resolved = await Self.resolveYouTubeTarget(forTwitchLogin: login)
@@ -3586,7 +3125,7 @@ struct PlayerView: View {
   /// channel, a podcast, …), so we score each one against the streamer's Twitch
   /// identity instead of blindly taking the first. Falls back to a YouTube link
   /// in the bio, then a `@<twitch-login>` guess.
-  private static func resolveYouTubeTarget(forTwitchLogin login: String) async -> String {
+  static func resolveYouTubeTarget(forTwitchLogin login: String) async -> String {
     let fallback = "@\(login)"
     guard let profile = await ChannelProfileService.fetch(login: login) else {
       return fallback
@@ -3609,7 +3148,7 @@ struct PlayerView: View {
   /// live channel. Returns nil when no candidate looks confident enough, so the
   /// caller can fall back rather than merge with the wrong channel (e.g. a
   /// podcast or clips channel the streamer also links).
-  private static func bestYouTubeChannelURL(
+  static func bestYouTubeChannelURL(
     among links: [ChannelSocialLink],
     twitchLogin: String,
     displayName: String
@@ -3663,7 +3202,7 @@ struct PlayerView: View {
 
   /// True for URLs that point at a YouTube *channel* (rather than a single video),
   /// e.g. `/@handle`, `/channel/UC…`, `/c/Name`, or `/user/Name`.
-  private static func isYouTubeChannelURL(_ string: String) -> Bool {
+  static func isYouTubeChannelURL(_ string: String) -> Bool {
     let lower = string.lowercased()
     guard lower.contains("youtube.com") else { return false }
     return lower.contains("/@")
@@ -3673,7 +3212,7 @@ struct PlayerView: View {
   }
 
   /// Extracts the channel handle / id segment from a YouTube channel URL.
-  private static func youtubeHandle(from urlString: String) -> String? {
+  static func youtubeHandle(from urlString: String) -> String? {
     let normalized = urlString.contains("://") ? urlString : "https://\(urlString)"
     guard let comps = URLComponents(string: normalized) else { return nil }
     let parts = comps.path.split(separator: "/").map(String.init)
@@ -3687,7 +3226,7 @@ struct PlayerView: View {
   }
 
   /// Lowercases and strips everything but letters/digits for loose comparison.
-  private static func normalizeIdentity(_ raw: String) -> String {
+  static func normalizeIdentity(_ raw: String) -> String {
     String(
       String.UnicodeScalarView(
         raw.lowercased().unicodeScalars.filter {
@@ -3695,7 +3234,7 @@ struct PlayerView: View {
         }))
   }
 
-  private static func firstYouTubeChannelURL(in text: String) -> String? {
+  static func firstYouTubeChannelURL(in text: String) -> String? {
     let separators = CharacterSet(charactersIn: " \n\t\r,;|()<>[]\"'")
     for raw in text.components(separatedBy: separators) {
       let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3712,13 +3251,13 @@ struct PlayerView: View {
   /// (`now − EXT-X-PROGRAM-DATE-TIME`) measures. The live-edge value is only the
   /// small in-buffer gap to the playlist edge (a few seconds) and would leave
   /// chat running far ahead, so it's not used for syncing.
-  private var chatSyncDelaySeconds: Double? {
+  var chatSyncDelaySeconds: Double? {
     wallClockLatencySeconds
   }
 
   /// Push the current sync preference + measured latency into the chat service.
   /// Called when the toggle changes and on each latency sample.
-  private func applyChatSyncSettings() {
+  func applyChatSyncSettings() {
     chat.configureChatSync(
       enabled: chatSyncToStream,
       delaySeconds: chatSyncDelaySeconds ?? 0
@@ -3726,7 +3265,7 @@ struct PlayerView: View {
   }
 
   /// Human-readable explanation shown under the Stream Sync toggle.
-  private var chatSyncStatusDescription: String {
+  var chatSyncStatusDescription: String {
     guard chatSyncToStream else {
       return "Chat shows in real time, so it runs ahead of the delayed video."
     }
@@ -3738,7 +3277,7 @@ struct PlayerView: View {
 
   // MARK: - Loading
 
-  private enum LoadTimeoutError: LocalizedError {
+  enum LoadTimeoutError: LocalizedError {
     case timedOut
     case noPlaybackProgress
 
@@ -3752,7 +3291,7 @@ struct PlayerView: View {
     }
   }
 
-  private func load(maxAttempts: Int = 3, reason: String = "initial", resetMetadata: Bool = true)
+  func load(maxAttempts: Int = 3, reason: String = "initial", resetMetadata: Bool = true)
     async
   {
     isLoading = true
@@ -3815,7 +3354,7 @@ struct PlayerView: View {
     isLoading = false
   }
 
-  private func resolvePlaybackWithTimeout() async throws -> StreamPlayback {
+  func resolvePlaybackWithTimeout() async throws -> StreamPlayback {
     try await withThrowingTaskGroup(of: StreamPlayback.self) { group in
       group.addTask {
         try await PlaybackService.resolve(for: activeChannel)
@@ -3833,7 +3372,7 @@ struct PlayerView: View {
     }
   }
 
-  private func waitForPlaybackStart() async -> Bool {
+  func waitForPlaybackStart() async -> Bool {
     let deadline = Date().addingTimeInterval(startupPlaybackTimeoutSeconds)
 
     while Date() < deadline {
@@ -3870,7 +3409,7 @@ struct PlayerView: View {
   /// pin. The trade-off: a pinned rendition has no ABR fallback, so a stream
   /// whose bitrate exceeds the connection will rebuffer rather than drop down —
   /// "Auto" remains the safe choice for that case.
-  private func applyQualityPreference(_ option: String) {
+  func applyQualityPreference(_ option: String) {
     guard let playback else { return }
 
     if option == "Auto" {
@@ -3891,13 +3430,13 @@ struct PlayerView: View {
 
   /// Replaces the current item only when the underlying source actually changes,
   /// comparing against the real (pre-proxy) source URL.
-  private func switchToSourceIfNeeded(_ url: URL) {
+  func switchToSourceIfNeeded(_ url: URL) {
     guard currentSourceURL != url else { return }
     player.replaceCurrentItem(with: makeItem(url: url))
     startPlayback()
   }
 
-  private func makeItem(url: URL) -> AVPlayerItem {
+  func makeItem(url: URL) -> AVPlayerItem {
     currentSourceURL = url
     // The proxy is attached when EITHER low-latency promotion OR Stream Rewind
     // (DVR retention) is on. Each behavior is independent: promotion pulls the
@@ -3938,12 +3477,12 @@ struct PlayerView: View {
   /// while you're visually in sync with your phone, which is just confusing.
   /// The edge gap is the number that tracks "am I near the freshest content."
   /// Wall-clock is kept only as a fallback when the edge gap is unavailable.
-  private var rawLatencySeconds: Double? {
+  var rawLatencySeconds: Double? {
     liveEdgeLatencySeconds ?? wallClockLatencySeconds
   }
 
   /// Smoothed value actually shown in the UI, to stop the number jumping around.
-  private var measuredLatencySeconds: Double? {
+  var measuredLatencySeconds: Double? {
     smoothedLatencySeconds ?? rawLatencySeconds
   }
 
@@ -3951,7 +3490,7 @@ struct PlayerView: View {
   /// The live-edge gap reads ~0 right after playback starts and then climbs to
   /// the real value, so we wait for the number to stabilise (and clear a
   /// plausible floor) before trusting it, with a hard sample cap as a backstop.
-  private var isLatencyWarmingUp: Bool {
+  var isLatencyWarmingUp: Bool {
     guard isPlaybackActive else { return false }
     guard let seconds = measuredLatencySeconds else { return true }
     if latencySampleCount >= latencyWarmUpMaxSamples { return false }
@@ -3960,14 +3499,14 @@ struct PlayerView: View {
     return latencyStableCount < latencyStableSamplesRequired
   }
 
-  private var latencyColor: Color {
+  var latencyColor: Color {
     guard let seconds = measuredLatencySeconds, !isLatencyWarmingUp else { return .gray }
     if seconds <= 8 { return .green }
     if seconds <= 15 { return .yellow }
     return .orange
   }
 
-  private var latencyLabel: String {
+  var latencyLabel: String {
     guard isPlaybackActive else {
       return "Waiting for playback"
     }
@@ -3980,7 +3519,7 @@ struct PlayerView: View {
     return "~\(formatLatencySeconds(seconds)) behind live"
   }
 
-  private func formatLatencySeconds(_ seconds: Double) -> String {
+  func formatLatencySeconds(_ seconds: Double) -> String {
     let clamped = max(0, seconds)
     if clamped < 10 {
       let tenths = (clamped * 10).rounded() / 10
@@ -3989,18 +3528,18 @@ struct PlayerView: View {
     return "\(Int(clamped.rounded()))s"
   }
 
-  private func configurePlayerForLive() {
+  func configurePlayerForLive() {
     // Always minimize stalling. Disabling this starves the buffer and caused
     // hard freezes on-device; the latency win comes from the proxy instead.
     player.automaticallyWaitsToMinimizeStalling = true
   }
 
-  private func startPlayback() {
+  func startPlayback() {
     didRequestPlayback = true
     player.playImmediately(atRate: 1.0)
   }
 
-  private func startLatencyMonitor() {
+  func startLatencyMonitor() {
     stopLatencyMonitor()
     latencyTask = Task {
       while !Task.isCancelled {
@@ -4020,7 +3559,7 @@ struct PlayerView: View {
     }
   }
 
-  private func stopLatencyMonitor() {
+  func stopLatencyMonitor() {
     latencyTask?.cancel()
     latencyTask = nil
     latencyReadout.update(color: .gray, label: "Waiting for playback")
@@ -4040,7 +3579,7 @@ struct PlayerView: View {
     diagFrozenSince = nil
   }
 
-  private func startPlaybackWatchdog() {
+  func startPlaybackWatchdog() {
     stopPlaybackWatchdog()
     playbackWatchdogTask = Task {
       while !Task.isCancelled {
@@ -4052,7 +3591,7 @@ struct PlayerView: View {
     }
   }
 
-  private func stopPlaybackWatchdog() {
+  func stopPlaybackWatchdog() {
     playbackWatchdogTask?.cancel()
     playbackWatchdogTask = nil
     lastObservedPlaybackTimeSeconds = nil
@@ -4065,7 +3604,7 @@ struct PlayerView: View {
     lastOfflineProbeAt = Date.distantPast
   }
 
-  private func triggerRecoveryIfAllowed(reason: String) {
+  func triggerRecoveryIfAllowed(reason: String) {
     guard !isRecoveringPlayback else { return }
     let now = Date()
     guard now.timeIntervalSince(lastRecoveryAttemptAt) >= recoveryCooldownSeconds else {
@@ -4075,7 +3614,7 @@ struct PlayerView: View {
     Task { await recoverFromPlaybackStall(reason: reason) }
   }
 
-  private func samplePlaybackHealth() {
+  func samplePlaybackHealth() {
     guard !isLoading, errorMessage == nil, !isOffline
     else {
       stalledPlaybackSamples = 0
@@ -4168,7 +3707,7 @@ struct PlayerView: View {
   /// single-flight so the 2s watchdog (or a play-to-end notification) can call
   /// it freely. Only a definitive `.offline` acts; `.live`/`.unknown` are
   /// ignored so transient network hiccups never surface a false offline screen.
-  private func probeOfflineIfStreamEnded() {
+  func probeOfflineIfStreamEnded() {
     let now = Date()
     guard !offlineProbeInFlight,
       now.timeIntervalSince(lastOfflineProbeAt) >= offlineProbeCooldownSeconds
@@ -4191,7 +3730,7 @@ struct PlayerView: View {
     }
   }
 
-  private func recoverFromPlaybackStall(reason: String) async {
+  func recoverFromPlaybackStall(reason: String) async {
     guard !isRecoveringPlayback else { return }
     guard !isOffline else { return }
     isRecoveringPlayback = true
@@ -4226,204 +3765,6 @@ struct PlayerView: View {
     await load(maxAttempts: 2, reason: reason, resetMetadata: false)
   }
 
-  // MARK: - Stream Rewind (DVR)
-
-  /// The live `seekableTimeRanges` window the proxy keeps growing as history is
-  /// retained. Returns the start/end (seconds, player timeline) of the last
-  /// seekable range plus the current playhead, or `nil` when no window exists.
-  private func currentSeekWindow() -> (start: Double, end: Double, now: Double)? {
-    guard let item = player.currentItem,
-      let range = item.seekableTimeRanges.last?.timeRangeValue
-    else { return nil }
-    let start = CMTimeGetSeconds(range.start)
-    let duration = CMTimeGetSeconds(range.duration)
-    guard start.isFinite, duration.isFinite, duration > 0 else { return nil }
-    let end = start + duration
-    let now = CMTimeGetSeconds(item.currentTime())
-    guard now.isFinite else { return nil }
-    return (start, end, min(max(now, start), end))
-  }
-
-  /// Mirrors the player's real seekable window into the observed `rewindReadout`
-  /// so only the transport bar leaf re-renders (not the whole player) per tick.
-  private func updateRewindReadout() {
-    guard streamRewindEnabled, let window = currentSeekWindow() else {
-      rewindReadout.update(
-        positionFraction: 1, behindLiveSeconds: 0, windowSeconds: 0,
-        isPaused: isUserPaused, isAtLiveEdge: true)
-      return
-    }
-    let span = max(window.end - window.start, 0.001)
-    // While following live, pin the orb to the right edge and show LIVE rather than
-    // tracking the real (segment-quantized) playhead. The furthest-forward point
-    // the viewer can reach is `liveCap` (a few seconds behind the true edge), so
-    // even mid-swipe, once they're back at that cap we show LIVE — it is as live as
-    // playback can get — instead of a residual "-0:04".
-    if pinnedToLive, !isUserPaused {
-      rewindReadout.update(
-        positionFraction: 1, behindLiveSeconds: 0, windowSeconds: span,
-        isPaused: false, isAtLiveEdge: true)
-      return
-    }
-    // While scrubbing/stepping the orb tracks the intended position instantly so
-    // it feels buttery even though the real seek lags slightly behind.
-    let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
-    let fraction = (position - window.start) / span
-    let behind = max(window.end - position, 0)
-    rewindReadout.update(
-      positionFraction: fraction,
-      behindLiveSeconds: behind,
-      windowSeconds: span,
-      isPaused: isUserPaused,
-      isAtLiveEdge: false)
-  }
-
-  /// True when the playhead/target sits close enough to the live edge to be
-  /// treated as "following live".
-  private func isNearLiveEdge(_ position: Double, in window: (start: Double, end: Double, now: Double)) -> Bool {
-    (window.end - position) <= targetLiveEdgeSeconds + 4
-  }
-
-  /// Steps the playhead by `delta` seconds with instant orb feedback and a
-  /// coalesced, tolerant seek so the viewer can spam left/right fluidly without
-  /// each press triggering a full rebuffer hiccup.
-  private func rewindStep(_ delta: Double) {
-    guard let window = currentSeekWindow() else { return }
-    let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
-    let base = scrubTargetSeconds ?? window.now
-    let target = min(max(base + delta, window.start), liveCap)
-    pinnedToLive = target >= liveCap - 0.5
-    scrubTargetSeconds = target
-    updateRewindReadout()
-    throttledScrubSeek(to: target)
-    scheduleScrubCommit()
-    scheduleHide()
-  }
-
-  /// Toggles between pausing in place (DVR window keeps growing) and resuming.
-  private func toggleRewindPlayPause() {
-    if isUserPaused {
-      isUserPaused = false
-      if let window = currentSeekWindow() {
-        pinnedToLive = isNearLiveEdge(window.now, in: window)
-      }
-      player.play()
-    } else {
-      pinnedToLive = false
-      isUserPaused = true
-      player.pause()
-    }
-    updateRewindReadout()
-    scheduleHide()
-  }
-
-  // MARK: - Precision (analog) scrubbing
-
-  /// Begins reading the Siri Remote trackpad as a relative swipe surface while the
-  /// rewind bar is focused. The coordinator integrates how far/fast the finger
-  /// actually moves (not where it rests) and reports per-frame displacement plus a
-  /// momentum tail on release, which we translate into a smooth scrub.
-  private func startScrubInput() {
-    guard streamRewindEnabled else { return }
-    scrubInput.onScrubBegan = { [self] in
-      beginScrub()
-    }
-    scrubInput.onScrubMoved = { [self] deltaUnits in
-      handleScrubTick(deltaUnits)
-    }
-    scrubInput.onScrubEnded = { [self] in
-      endScrub()
-    }
-    scrubInput.start()
-  }
-
-  private func stopScrubInput() {
-    scrubInput.stop()
-    scrubInput.onScrubBegan = nil
-    scrubInput.onScrubMoved = nil
-    scrubInput.onScrubEnded = nil
-    if isScrubbing { endScrub() }
-  }
-
-  /// A real swipe has started (finger moved past the tap threshold). Pause the
-  /// live video entirely so scrubbing never fights playback, and anchor the orb.
-  private func beginScrub() {
-    guard let window = currentSeekWindow() else { return }
-    isScrubbing = true
-    scrubCommitTask?.cancel()
-    hideTask?.cancel()
-    if scrubTargetSeconds == nil { scrubTargetSeconds = window.now }
-    if !isUserPaused { player.pause() }
-  }
-
-  /// The swipe (and any momentum tail) has finished: commit a frame-accurate seek
-  /// and resume playback unless the viewer is intentionally paused.
-  private func endScrub() {
-    isScrubbing = false
-    if let target = scrubTargetSeconds {
-      commitScrubSeek(to: target)
-    } else if !isUserPaused {
-      player.play()
-    }
-    scheduleHide()
-  }
-
-  /// Applies one frame of swipe/momentum displacement: convert the raw finger
-  /// travel (in trackpad units) into timeline seconds *proportional to the current
-  /// window*, advance the intended position, move the orb instantly, and issue a
-  /// throttled tolerant seek.
-  private func handleScrubTick(_ deltaUnits: Double) {
-    guard let window = currentSeekWindow() else { return }
-    let span = max(window.end - window.start, 0.001)
-    let deltaSeconds = deltaUnits * (span / scrubFullWindowTravelUnits)
-    let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
-    let base = scrubTargetSeconds ?? window.now
-    let target = min(max(base + deltaSeconds, window.start), liveCap)
-    pinnedToLive = target >= liveCap - 0.5
-    scrubTargetSeconds = target
-    updateRewindReadout()
-    throttledScrubSeek(to: target)
-  }
-
-  /// Coalesced, tolerant seek used during continuous scrubbing/stepping. Cheap and
-  /// responsive (loose tolerance) so it can fire many times a second without the
-  /// rebuffer hiccup a frame-accurate seek would cause.
-  private func throttledScrubSeek(to seconds: Double) {
-    guard let item = player.currentItem else { return }
-    let now = Date()
-    guard now.timeIntervalSince(lastScrubSeekAt) >= 0.07 else { return }
-    lastScrubSeekAt = now
-    let time = CMTime(seconds: seconds, preferredTimescale: 600)
-    let tolerance = CMTime(seconds: 0.4, preferredTimescale: 600)
-    item.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
-  }
-
-  /// Debounced final settle for rapid left/right stepping: once the presses stop,
-  /// land a frame-accurate seek and release the intended-position override.
-  private func scheduleScrubCommit() {
-    scrubCommitTask?.cancel()
-    scrubCommitTask = Task { [self] in
-      try? await Task.sleep(for: .milliseconds(280))
-      guard !Task.isCancelled else { return }
-      await MainActor.run {
-        guard !isScrubbing, let target = scrubTargetSeconds else { return }
-        commitScrubSeek(to: target)
-      }
-    }
-  }
-
-  /// Lands a frame-accurate seek at `seconds`, clears the intended-position
-  /// override, and resumes playback (unless the viewer is intentionally paused).
-  private func commitScrubSeek(to seconds: Double) {
-    scrubCommitTask?.cancel()
-    let time = CMTime(seconds: seconds, preferredTimescale: 600)
-    player.currentItem?.seek(to: time, completionHandler: { [self] _ in
-      scrubTargetSeconds = nil
-      if !isUserPaused { player.play() }
-      updateRewindReadout()
-    })
-  }
-
   // MARK: - Offline empty state
 
   /// Switches the player into the clean "offline / stream ended" empty state.
@@ -4432,11 +3773,11 @@ struct PlayerView: View {
   /// True while an outgoing raid is pending or its auto-follow countdown is
   /// running. A channel ends its stream the moment it raids, so the offline
   /// empty state must never pre-empt the raid banner during this window.
-  private var isFollowingOutgoingRaid: Bool {
+  var isFollowingOutgoingRaid: Bool {
     outgoingRaid != nil || eventSub.pendingOutgoingRaid != nil
   }
 
-  private func presentOfflineState() {
+  func presentOfflineState() {
     // Never flash "OFFLINE" while a raid is in flight — the raid banner and its
     // auto-follow take precedence over the offline empty state.
     guard !isFollowingOutgoingRaid else { return }
@@ -4458,7 +3799,7 @@ struct PlayerView: View {
 
   /// Re-attempts playback from the offline empty state (e.g. the streamer just
   /// came back). `load()` clears `isOffline` and re-confirms offline on failure.
-  private func retryFromOffline() {
+  func retryFromOffline() {
     guard !isLoading else { return }
     isOffline = false
     Task {
@@ -4474,7 +3815,7 @@ struct PlayerView: View {
   /// Exponential moving average of the raw latency estimate so the on-screen
   /// number is stable instead of flickering between samples. Snaps directly on
   /// large jumps (e.g. after a re-snap) rather than crawling toward the new value.
-  private func updateSmoothedLatency() {
+  func updateSmoothedLatency() {
     guard isPlaybackActive, let raw = rawLatencySeconds else {
       smoothedLatencySeconds = nil
       latencySampleCount = 0
@@ -4502,7 +3843,7 @@ struct PlayerView: View {
     }
   }
 
-  private func updateLatencyMetrics() {
+  func updateLatencyMetrics() {
     guard let item = player.currentItem else {
       wallClockLatencySeconds = nil
       liveEdgeLatencySeconds = nil
@@ -4615,7 +3956,7 @@ struct PlayerView: View {
   }
 
   /// Keeps playback close to the live edge without constant hard seeks.
-  private func applyLiveLatencyCorrection(
+  func applyLiveLatencyCorrection(
     item: AVPlayerItem,
     range: CMTimeRange?,
     wallClockLatency: Double?,
@@ -4638,7 +3979,7 @@ struct PlayerView: View {
     }
   }
 
-  private func refreshChannelMetadata() async {
+  func refreshChannelMetadata() async {
     guard let metadata = await PlaybackService.channelMetadata(for: activeChannel) else {
       channelDisplayName = activeChannel
       channelAvatarURL = nil
@@ -4646,10 +3987,12 @@ struct PlayerView: View {
     }
     channelDisplayName = metadata.displayName
     channelAvatarURL = metadata.profileImageURL
-    streamTitle = metadata.title
+    // VOD mode keeps the broadcast's own title; only the live player adopts the
+    // channel's current stream title here.
+    if !isVOD { streamTitle = metadata.title }
   }
 
-  private func setIdleTimer(disabled: Bool) {
+  func setIdleTimer(disabled: Bool) {
     UIApplication.shared.isIdleTimerDisabled = disabled
   }
 }
@@ -4763,7 +4106,10 @@ private struct ChatGlassFieldStyle: ViewModifier {
 /// message re-executed the whole body and flashed the open Quality menu's focus
 /// many times a second on busy channels.
 private struct ChatMessagesColumn: View {
-  let chat: ChatService
+  /// Live IRC source (live player). Mutually exclusive with `replay`.
+  var chat: ChatService? = nil
+  /// VOD chat-replay source. Mutually exclusive with `chat`.
+  var replay: VODChatReplayService? = nil
   let channel: String
   let replayStartMessageID: ChatMessage.ID?
   let textSize: CGFloat
@@ -4782,12 +4128,18 @@ private struct ChatMessagesColumn: View {
   let scrollTarget: ChatScrollTarget?
 
   private var visibleMessages: [ChatMessage] {
+    if let replay { return replay.messages }
+    guard let chat else { return [] }
     guard let startID = replayStartMessageID else { return chat.messages }
     guard let startIndex = chat.messages.firstIndex(where: { $0.id == startID }) else {
       return chat.messages
     }
     return Array(chat.messages[startIndex...])
   }
+
+  private var isConnected: Bool { replay?.isReady ?? chat?.isConnected ?? false }
+  private var emoteURLs: [String: URL] { replay?.emoteURLs ?? chat?.emoteURLs ?? [:] }
+  private var badgeURLs: [String: URL] { replay?.badgeURLs ?? chat?.badgeURLs ?? [:] }
 
   var body: some View {
     ChatView(
@@ -4801,9 +4153,9 @@ private struct ChatMessagesColumn: View {
       animatedEmotes: animatedEmotes,
       fontStyle: fontStyle,
       showBadges: showBadges,
-      isConnected: chat.isConnected,
-      emoteURLs: chat.emoteURLs,
-      badgeURLs: chat.badgeURLs,
+      isConnected: isConnected,
+      emoteURLs: emoteURLs,
+      badgeURLs: badgeURLs,
       useGlassBackground: useGlassBackground,
       useLighterOverlayBackground: useLighterOverlayBackground,
       autoScroll: autoScroll,
@@ -5155,7 +4507,7 @@ private struct ChatSettingsPanelGlassStyle: ViewModifier {
 
 /// A single timestamped diagnostics event (stall, jump, or reload) shown in the
 /// experimental latency overlay so playback hiccups can be observed directly.
-private struct DiagnosticsEvent: Identifiable {
+struct DiagnosticsEvent: Identifiable {
   let id = UUID()
   let at: Date
   let text: String
@@ -5171,7 +4523,7 @@ private struct DiagnosticsEvent: Identifiable {
 /// PlayerView body and made the focused quality button's highlight flash. None
 /// of these values drive the UI directly — the only on-screen latency reading is
 /// pushed (de-duplicated) into `LatencyReadout`, which the badge observes.
-private final class PlaybackMonitorBox {
+final class PlaybackMonitorBox {
   var wallClockLatencySeconds: Double?
   var liveEdgeLatencySeconds: Double?
   var smoothedLatencySeconds: Double?
@@ -5205,7 +4557,7 @@ private final class PlaybackMonitorBox {
 /// per second (and only when the rendered value actually changes), so the badge
 /// leaf re-renders in isolation instead of churning the whole player.
 @Observable
-private final class LatencyReadout {
+final class LatencyReadout {
   var color: Color = .gray
   var label: String = "Waiting for playback"
 
@@ -5246,7 +4598,7 @@ private struct LatencyBadge: View {
 /// Assigns only on change so an unchanged tick produces no SwiftUI update and the
 /// bar re-renders in isolation instead of churning the whole player.
 @Observable
-private final class RewindReadout {
+final class RewindReadout {
   /// 0 = oldest retained moment, 1 = live edge.
   var positionFraction: Double = 1
   /// How far the playhead sits behind the live edge, in seconds.
@@ -5255,6 +4607,11 @@ private final class RewindReadout {
   var windowSeconds: Double = 0
   var isPaused: Bool = false
   var isAtLiveEdge: Bool = true
+  /// VOD mode: show elapsed/total time and a neutral (non-live) track instead of
+  /// the LIVE edge + "behind live" readout.
+  var isVOD: Bool = false
+  var elapsedSeconds: Double = 0
+  var totalSeconds: Double = 0
 
   func update(
     positionFraction pf: Double,
@@ -5284,6 +4641,9 @@ private struct RewindScrubBar: View {
   let isFocused: Bool
 
   private func behindLabel() -> String {
+    if readout.isVOD {
+      return "\(Self.clock(readout.elapsedSeconds)) / \(Self.clock(readout.totalSeconds))"
+    }
     if readout.isAtLiveEdge { return "LIVE" }
     let total = Int(readout.behindLiveSeconds.rounded())
     let m = total / 60
@@ -5291,11 +4651,21 @@ private struct RewindScrubBar: View {
     return String(format: "-%d:%02d", m, s)
   }
 
+  /// Formats a number of seconds as M:SS, or H:MM:SS for hour-plus durations.
+  private static func clock(_ seconds: Double) -> String {
+    let total = Int(max(seconds, 0).rounded())
+    let h = total / 3600
+    let m = (total % 3600) / 60
+    let s = total % 60
+    if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+    return String(format: "%d:%02d", m, s)
+  }
+
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
     let trackHeight: CGFloat = 6
     let orbSize: CGFloat = isFocused ? 30 : 16
-    let fillColor = readout.isAtLiveEdge ? Color.red : Color.white
+    let fillColor = (readout.isAtLiveEdge && !readout.isVOD) ? Color.red : Color.white
 
     return HStack(spacing: 18) {
       GeometryReader { geo in
@@ -5594,7 +4964,7 @@ private struct SleepShootingStar {
 /// Warm reds + near-black keep it gentle on the eyes in a dark room, and the
 /// palette is hard-coded (plus a forced dark color scheme) so it looks the same
 /// whether the app is in light or dark mode.
-private struct SleepingScreen: View {
+struct SleepingScreen: View {
   private let stars: [SleepStar]
   private let shootingStars: [SleepShootingStar]
 

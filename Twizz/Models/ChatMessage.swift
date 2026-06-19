@@ -119,6 +119,33 @@ extension ChatMessage {
         self.timestamp = timestamp
     }
 
+    /// Memberwise initializer used to synthesize a line from an already-parsed
+    /// source (e.g. the VOD chat replay's GraphQL comments), where badges, color,
+    /// and per-message emote URLs are known up front.
+    init(
+        username: String,
+        colorHex: String?,
+        badgeKeys: [String],
+        text: String,
+        twitchEmoteURLs: [String: URL],
+        youtubeEmoteURLs: [String: URL] = [:],
+        isAction: Bool = false,
+        source: ChatSource = .twitch,
+        timestamp: Date = Date()
+    ) {
+        self.username = username
+        self.colorHex = colorHex
+        self.badgeKeys = badgeKeys
+        self.text = text
+        self.twitchEmoteURLs = twitchEmoteURLs
+        self.youtubeEmoteURLs = youtubeEmoteURLs
+        self.isAction = isAction
+        self.isFirstMessage = false
+        self.source = source
+        self.systemMessage = nil
+        self.timestamp = timestamp
+    }
+
     /// Twitch USERNOTICE `msg-id` values we surface as a highlighted
     /// subscription line in chat. The IRC `system-msg` tag already carries the
     /// human-readable text (e.g. "X subscribed at Tier 1…") for each of these.

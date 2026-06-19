@@ -25,14 +25,52 @@ enum OnDemandItem: Identifiable, Hashable {
     case .vod: return "broadcast"
     }
   }
+
+  /// The VOD id for broadcasts (used to fetch chat replay); nil for clips.
+  var vodID: String? {
+    if case .vod(let id, _) = self { return id }
+    return nil
+  }
 }
 
-/// Full-screen player for clips and VODs. Unlike the live `PlayerView` (which
-/// suppresses native transport for its side-by-side chat layout), this uses
-/// SwiftUI's `VideoPlayer` so the Siri Remote gets Apple's native scrub / skip /
-/// play-pause controls for free — exactly what on-demand content wants.
+/// Entry point for on-demand content opened from the channel page.
+///
+/// VODs reuse the full live `PlayerView` in VOD mode, so a recorded broadcast
+/// gets the exact same chat, transport controls, layout modes, and chat settings
+/// as the live channel — plus full-duration seek and a synchronized chat replay,
+/// minus the ability to send messages. Clips are short and chat-less, so they get
+/// a lightweight native player with Apple's standard transport UI.
 struct OnDemandPlayerView: View {
   let item: OnDemandItem
+  /// Login of the channel that owns this content, used to resolve the right
+  /// emote/badge catalogs (and avatar) for VOD chat replay.
+  var channelLogin: String? = nil
+
+  /// VOD chat is read-only, so the player never needs real credentials; a local
+  /// throwaway session satisfies `PlayerView`'s (sign-in / send) plumbing, which
+  /// is gated off in VOD mode anyway.
+  @State private var auth = TwitchAuthSession()
+
+  var body: some View {
+    switch item {
+    case .vod(let id, let title):
+      PlayerView(
+        channel: channelLogin ?? "",
+        auth: auth,
+        vod: PlayerView.VODContext(id: id, title: title)
+      )
+    case .clip(let slug, let title):
+      ClipPlayerView(slug: slug, title: title)
+    }
+  }
+}
+
+/// Minimal full-screen clip player: a native `AVPlayerViewController` (via
+/// SwiftUI's `VideoPlayer`) gives scrub/seek/play-pause for free, which is all a
+/// short clip needs.
+private struct ClipPlayerView: View {
+  let slug: String
+  let title: String
 
   @Environment(\.dismiss) private var dismiss
   @State private var player = AVPlayer()
@@ -49,14 +87,14 @@ struct OnDemandPlayerView: View {
       case .loading:
         VStack(spacing: 18) {
           ProgressView()
-          Text("Loading \(item.title)…")
+          Text("Loading \(title)…")
             .font(.title3)
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
       case .failed:
         VStack(spacing: 20) {
-          Text("Couldn't play this \(item.kindNoun) right now.")
+          Text("Couldn't play this clip right now.")
             .font(.title2)
           Button("Back") { dismiss() }
             .focused($backFocused)
@@ -68,7 +106,7 @@ struct OnDemandPlayerView: View {
       }
     }
     .onExitCommand { dismiss() }
-    .task(id: item.id) { await start() }
+    .task(id: slug) { await start() }
     .onChange(of: phase) { _, newPhase in
       if newPhase == .failed { backFocused = true }
     }
@@ -81,22 +119,8 @@ struct OnDemandPlayerView: View {
   private func start() async {
     phase = .loading
     do {
-      let url: URL
-      let headers: [String: String]
-      switch item {
-      case .clip(let slug, _):
-        url = try await PlaybackService.clipSourceURL(slug: slug)
-        headers = [:]
-      case .vod(let id, _):
-        url = try await PlaybackService.vodMasterURL(id: id)
-        headers = PlaybackService.streamHeaders
-      }
-
-      let asset = headers.isEmpty
-        ? AVURLAsset(url: url)
-        : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-      let playerItem = AVPlayerItem(asset: asset)
-      player.replaceCurrentItem(with: playerItem)
+      let url = try await PlaybackService.clipSourceURL(slug: slug)
+      player.replaceCurrentItem(with: AVPlayerItem(url: url))
       player.play()
       phase = .playing
     } catch {

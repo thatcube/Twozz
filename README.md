@@ -122,6 +122,36 @@ Twizz won't auto-claim channel points (the way the 7TV/FFZ browser extensions do
 
 Twizz can show who you follow, but Twitch now blocks follow/unfollow mutations from this app context with integrity checks. Because of that Twitch-side restriction, Twizz does not expose follow/unfollow controls — use the official Twitch app or website to change follows.
 
+## Ideas & Improvements
+
+A running list of features we're considering, roughly ordered by effort.
+
+### Quick wins (low effort, high delight)
+
+| Feature | Why people want it | Why it's quick here |
+|---|---|---|
+| **Sleep timer** | Top "fall asleep to a stream" request; almost no TV app has it | Pure UI + a timer that pauses/quits playback. Hours, not days. |
+| **"Go Live" button + latency indicator** | Web/mobile have it; viewers hate drifting behind | We already have `LowLatencyHLSProxy`; just expose seek-to-live edge + a delay badge in the overlay. |
+| **"Just went live" toast for follows** | Discovery — catch a stream the moment it starts | We already run `EventSubService` (`stream.online`). Surface it as a banner like the raid banner. |
+| **Chat keyword highlights + mention ping** | Chatterino's most-loved feature; makes big chats usable | Client-side string match in `RichChatLineView` + a settings list. |
+| **Freeze-chat-on-focus** | Power users want to read without autoscroll fighting them | Pause the rolling buffer's autoscroll while the chat pane is focused. |
+| **Audio-only / "screen off" mode** | Background-listening (music / just-chatting / podcasts), saves bandwidth | We already have `AudioOnlyLevelDecoder` + `AudioVisualizerView` — wrap it as a deliberate mode. |
+
+### Bigger bets (features that make Twizz exceptional)
+
+Researched against what Twitch power-users (the Chatterino / Frosty / Streamlink crowds) and Apple TV viewers consistently ask for — and what the official tvOS app does poorly:
+
+- **Multi-view & Picture-in-Picture** — watch two streams at once, or shrink the player to a corner while you browse for the next channel. tvOS supports PiP via `AVPlayer`; the official app can't. Great for events, IRL, and GDQ-style marathons.
+- **VOD & clip playback with synced chat replay** — build on `OnDemandPlayerView` to scrub VODs with the original chat replayed in time. Even Twitch's own TV experience handles this badly.
+- **SharePlay watch-together** — sync playback (and a shared reaction layer) over FaceTime. A social differentiator unique to the Apple ecosystem.
+- **Live polls / predictions / hype-train overlay** — passively surface active polls, predictions, and goals via `EventSubService` so couch viewers don't miss interactive moments (display-only — no channel-point redemption, see the section above).
+- **Moderator mode** — timeout / ban / delete and a mod-action log from the couch for users who mod. Niche but beloved by the power-user crowd.
+- **Chat ambience layer** — messages-per-minute, top-emotes-right-now, and raid / hype-train celebrations rendered as lightweight native moments. Leans into Twizz's chat-first identity.
+- **Smarter discovery** — lean on `SimilarChannelsEngine` + `PersonalizedRecommendationsService` for "Because you watched" rails, a "live now from channels you watch" row, and richer category browsing.
+- **Siri & universal search deep-linking** — "Play _channel_ on Twizz" and system-Search results that jump straight into playback, building on `DeepLinkRouter` and the existing Top Shelf.
+- **Per-channel memory** — remember preferred quality, chat width, and audio-only state per channel.
+- **Accessibility & readability** — VoiceOver labels for chat lines and cards, Dynamic Type chat scaling (via `ChatAppearance`), high-contrast / colorblind-friendly username and emote rendering, and a captions toggle where available.
+
 ## Roadmap
 
 See [Twizz-plan.md](Twizz-plan.md) for detailed phased planning.

@@ -189,6 +189,12 @@ struct PlayerView: View {
   @State var vodTimeObserver: Any?
   /// Detects *outgoing* raids (the watched channel raiding away) via EventSub.
   @State var eventSub = EventSubService()
+
+  /// Surfaces live polls / predictions / hype trains / goals for the watched
+  /// channel via Twitch's private Hermes WebSocket (read-only).
+  @State var hermes = HermesEventService()
+  /// Debug-only cursor for the "Simulate Interactive Moment" cycle button.
+  @State var debugMomentIndex = 0
   @State var player = AVPlayer()
   /// Drives the audio-only visualizer orb. Reacts to real audio when the player
   /// item exposes a tappable audio track (best effort on live HLS), otherwise
@@ -574,6 +580,7 @@ struct PlayerView: View {
     case sleepKeepWatching, sleepResume
     case simulateRaidButton
     case simulateOfflineButton
+    case simulateMomentButton
     case simulateGoLiveButton
     case chatSettingsButton
     // Stream Rewind transport bar
@@ -761,6 +768,11 @@ struct PlayerView: View {
           .zIndex(12)
       }
 
+      // Live polls / predictions / hype trains / goals are surfaced docked above
+      // the chat list (see `chatPane`) so they share the chat's width and glass
+      // treatment and only appear when chat is open — matching how Twitch shows
+      // them beside the stream. Read-only.
+
       if let goLive, let event = goLive.pending {
         goLiveToast(goLive, event: event)
           .transition(.move(edge: .top).combined(with: .opacity))
@@ -772,6 +784,7 @@ struct PlayerView: View {
           .transition(.opacity)
       }
     }
+    .animation(.easeInOut(duration: 0.35), value: hermes.currentMoment)
     .animation(.easeOut(duration: 0.25), value: goLive?.pending)
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
@@ -826,6 +839,7 @@ struct PlayerView: View {
         applyExperimentalYouTubeSettings()
         chat.connect(to: activeChannel)
         eventSub.start(forChannel: activeChannel, auth: auth)
+        hermes.start(forChannel: activeChannel)
         async let metadataTask: Void = refreshChannelMetadata()
         await load()
         _ = await metadataTask
@@ -878,6 +892,7 @@ struct PlayerView: View {
       player.pause()
       chat.disconnect()
       eventSub.stop()
+      hermes.stop()
       // Hand go-live suppression back to Home now that no channel is on screen.
       goLive?.suppressedLogin = nil
       setIdleTimer(disabled: false)
@@ -1258,6 +1273,9 @@ struct PlayerView: View {
           .buttonStyle(.borderedProminent)
           .tint(ThemePalette.brandPurple)
           .focused($focus, equals: .offlineViewChannel)
+          .onMoveCommand { direction in
+            if direction == .right { focus = .offlineTryAgain }
+          }
 
           Button {
             retryFromOffline()
@@ -1268,8 +1286,26 @@ struct PlayerView: View {
           }
           .TwizzControlButtonStyle()
           .focused($focus, equals: .offlineTryAgain)
+          .onMoveCommand { direction in
+            switch direction {
+            case .left:
+              focus = .offlineViewChannel
+            case .right:
+              // Deliberate exit out of the focus section into chat, mirroring
+              // the control row's chat-toggle button.
+              if showChat { focus = chatFocusAnchor }
+            default:
+              break
+            }
+          }
         }
         .padding(.top, 8)
+        // Group the two buttons as one focus section so the full-height chat
+        // pane (a strong geometric focus magnet) can't out-pull the adjacent
+        // Try Again button. Within the section the explicit move handlers above
+        // step View Channel -> Try Again, and only a right-press from Try Again
+        // exits into chat. Mirrors the bottom control row's focus corralling.
+        .focusSection()
       }
       .frame(maxWidth: 760)
       .padding(48)
@@ -1657,6 +1693,20 @@ struct PlayerView: View {
   }
 
   // MARK: - Controls visibility
+
+  /// Left-press target when leaving the chat composer. While the channel is
+  /// offline the bottom controls (and `.chatToggle`) aren't rendered — the
+  /// offline empty state is shown instead — so revealing controls would focus a
+  /// target that doesn't exist and trap focus on the composer. Return to the
+  /// offline state's "Try Again" button, which is the control adjacent to the
+  /// chat pane, so a subsequent right-press hops straight back into chat.
+  func exitChatComposerLeft() {
+    if isOffline {
+      focus = .offlineTryAgain
+    } else {
+      revealControls(preferredFocus: .chatToggle)
+    }
+  }
 
   func revealControls(preferredFocus: Focusable) {
     focusRecoveryTask?.cancel()
@@ -2098,6 +2148,7 @@ struct PlayerView: View {
       .chatDiagnosticsToggle,
       .simulateRaidButton,
       .simulateOfflineButton,
+      .simulateMomentButton,
       .simulateGoLiveButton,
       .youtubeMergeToggle,
       .youtubeMergeURL,
@@ -2112,6 +2163,23 @@ struct PlayerView: View {
       return true
     default:
       return false
+    }
+  }
+
+  /// Surface style for the docked interactive-moment card, mirroring the chat
+  /// list it sits above so it only reads *light* when the chat itself is light
+  /// (Side layout under the light theme). Glass/Overlay chat stay dark.
+  func momentDockStyle(isGlass: Bool) -> MomentDockStyle {
+    switch chatLayoutMode {
+    case .glass:
+      return MomentDockStyle(surface: .glass)
+    case .overlay:
+      return MomentDockStyle(surface: .darkOverlay)
+    case .side:
+      return MomentDockStyle(
+        surface: .side(
+          surface: palette.chatSideSurface,
+          primaryText: palette.chatSidePrimaryText))
     }
   }
 
@@ -2164,6 +2232,17 @@ struct PlayerView: View {
               default: break
               }
             }
+        }
+      }
+      // Live interactive moments (polls / predictions / hype trains / goals)
+      // float over the TOP of the chat list rather than pushing it down, so the
+      // messages scroll behind the card (matching Twitch on the web). Only
+      // visible while chat is open (this whole pane is). Passive +
+      // non-interactive: never takes focus, so chat keeps scrolling underneath.
+      .overlay(alignment: .top) {
+        if let moment = hermes.currentMoment, !isSleeping {
+          dockedInteractiveMoment(moment, style: momentDockStyle(isGlass: isGlass))
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
       }
 
@@ -2444,6 +2523,20 @@ struct PlayerView: View {
           ) {
             showChatSettings = false
             presentOfflineState()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          // Debug-only: real polls/predictions/hype-trains only fire when a
+          // broadcaster runs one, so this cycles a sample moment through all
+          // four banner types (poll → prediction → hype train → goal → clear)
+          // to exercise the overlay on-device. Visible only while the
+          // Diagnostics overlay is enabled.
+          settingsPill(
+            title: "Simulate Interactive Moment",
+            isSelected: false,
+            focusTag: .simulateMomentButton
+          ) {
+            simulateInteractiveMoment()
           }
           .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -3018,7 +3111,7 @@ struct PlayerView: View {
           .onMoveCommand { direction in
             switch direction {
             case .left:
-              revealControls(preferredFocus: .chatToggle)
+              exitChatComposerLeft()
             case .up:
               handleChatUpPress()
             case .down:
@@ -3092,7 +3185,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            revealControls(preferredFocus: .chatToggle)
+            exitChatComposerLeft()
           case .up:
             handleChatUpPress()
           case .down:

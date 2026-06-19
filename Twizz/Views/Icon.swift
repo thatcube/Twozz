@@ -31,6 +31,11 @@ enum Glyph: String {
   case sidebarRightCollapse = "layout-sidebar-right-collapse"
   case circleCheckFilled = "circle-check-filled"
   case playerPlayFilled = "player-play-filled"
+  // Interactive-moment overlay glyphs (polls, predictions, hype train, goals).
+  case chartBar = "chart-bar"
+  case chartLine = "chart-line"
+  case flame
+  case targetArrow = "target-arrow"
   case broadcast
   // Brand glyphs for channel social links.
   case brandYoutube = "brand-youtube"

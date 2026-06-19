@@ -44,6 +44,7 @@ extension PlayerView {
     // subscription from the previous channel never lingers.
     eventSub.stop()
     eventSub.start(forChannel: login, auth: auth)
+    hermes.start(forChannel: login)
     resetDiagnostics()
     isLoading = true
     errorMessage = nil

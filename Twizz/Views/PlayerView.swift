@@ -611,6 +611,15 @@ struct PlayerView: View {
   @State var diagIsFrozen = false
   @State var diagFrozenSince: Date?
   @State var diagSessionStartedAt: Date?
+  /// Taps decoded frames off the current item so the decode-freeze watchdog can
+  /// tell "no new picture" apart from "playhead not advancing". Rebuilt with each
+  /// item in `makeItem`; nil while no video item is loaded.
+  @State var playerItemVideoOutput: AVPlayerItemVideoOutput?
+  /// Non-nil once the playback clock is advancing but the video output has stopped
+  /// producing fresh frames — the "frozen picture while captions/chat keep
+  /// scrolling" decode wedge that every playhead/buffer-based watchdog misses.
+  /// Cleared the moment a new frame arrives.
+  @State var videoDecodeFrozenSince: Date?
 
   let controlsAutoHideSeconds: Double = 10
   /// How much live history the Stream Rewind DVR retains (and therefore how far
@@ -760,6 +769,16 @@ struct PlayerView: View {
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
   let diagJumpForwardThresholdSeconds: Double = 2.0
   let diagJumpBackwardThresholdSeconds: Double = 1.0
+  /// Decode-freeze watchdog. AVPlayer can keep its playback clock running — so
+  /// `currentTime()` advances, the buffer stays healthy and `timeControlStatus`
+  /// reads `.playing` — while the video decoder is wedged and no new frames reach
+  /// the screen (the picture freezes but PROGRAM-DATE-TIME-synced captions and
+  /// chat keep scrolling). None of the playhead/buffer/edge watchdogs can see
+  /// this; only the video output can. Once the clock has advanced this long with
+  /// zero fresh frames, reload through the same cooldown-gated failsafe path as a
+  /// hard stall. Kept well above ordinary decode jitter so a brief hiccup during a
+  /// quality switch never reloads.
+  let videoDecodeFreezeRecoverySeconds: Double = 6
   let chatReplayMessageCount = 30
   let chatComposerRowHeight: CGFloat = 62
 
@@ -1985,10 +2004,12 @@ struct PlayerView: View {
       chatSyncToStream
       ? (chatSyncDelaySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "measuring")
       : "off"
-    if diagIsFrozen {
+    if diagIsFrozen || videoDecodeFrozenSince != nil {
+      let since = [diagFrozenSince, videoDecodeFrozenSince].compactMap { $0 }.min()
       let frozenFor =
-        diagFrozenSince.map { max(0, Int(Date().timeIntervalSince($0).rounded())) } ?? 0
-      lines.append("State: FROZEN (\(frozenFor)s) · Waiting: \(diagWaitingReasonDescription())")
+        since.map { max(0, Int(Date().timeIntervalSince($0).rounded())) } ?? 0
+      let kind = videoDecodeFrozenSince != nil ? "FROZEN video" : "FROZEN"
+      lines.append("State: \(kind) (\(frozenFor)s) · Waiting: \(diagWaitingReasonDescription())")
     } else {
       lines.append("State: Playing/waiting · Waiting: \(diagWaitingReasonDescription())")
     }

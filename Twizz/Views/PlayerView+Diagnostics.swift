@@ -191,14 +191,73 @@ extension PlayerView {
       }
 
       if advanced >= 0.05 {
-        diagIsFrozen = false
-        diagFrozenSince = nil
+        // The clock advanced — but don't clear a decode freeze the video-output
+        // watchdog is actively tracking (that freeze runs *with* an advancing
+        // clock, so an advance here is not evidence the picture is moving).
+        if videoDecodeFrozenSince == nil {
+          diagIsFrozen = false
+          diagFrozenSince = nil
+        }
         diagWasStalled = false
       }
     }
 
     diagLastPlayheadSeconds = playhead
     diagLastSampleAt = now
+  }
+
+  /// Detects the "frozen picture while the clock keeps running" decode wedge.
+  ///
+  /// When AVPlayer's playback clock advances but its video decoder is stuck, the
+  /// playhead-, buffer- and `timeControlStatus`-based watchdogs all stay green —
+  /// `currentTime()` climbs, the forward buffer holds, the state reads `.playing` —
+  /// yet no new frame is drawn. (PROGRAM-DATE-TIME-synced captions and chat keep
+  /// scrolling off the same advancing clock, which is the giveaway viewers report.)
+  /// The video output is the only component that can see it: poll it for a fresh
+  /// pixel buffer and, when several seconds of forward clock produce none, reload
+  /// through the same cooldown-gated failsafe a hard stall uses.
+  ///
+  /// Only meaningful while the clock is genuinely advancing — a non-advancing clock
+  /// is a classic stall the other paths already own, so we defer to them there and
+  /// reset our timer. Audio-only renditions have no video output and are skipped.
+  func checkVideoDecodeFreeze(item: AVPlayerItem, clockAdvanced: Double) {
+    guard !isVOD, pinnedToLive, !isAudioOnlyActive,
+      player.timeControlStatus == .playing, clockAdvanced >= 0.05,
+      let output = playerItemVideoOutput
+    else {
+      videoDecodeFrozenSince = nil
+      return
+    }
+    let size = item.presentationSize
+    guard size.width > 0, size.height > 0 else {
+      videoDecodeFrozenSince = nil
+      return
+    }
+
+    let itemTime = item.currentTime()
+    if output.hasNewPixelBuffer(forItemTime: itemTime) {
+      // Consume the frame so the next poll's freshness check is meaningful, then
+      // clear the freeze timer — the picture is genuinely advancing.
+      _ = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil)
+      videoDecodeFrozenSince = nil
+      return
+    }
+
+    // The clock advanced this sample but no new frame was produced.
+    let now = Date()
+    if videoDecodeFrozenSince == nil { videoDecodeFrozenSince = now }
+    let frozenFor = now.timeIntervalSince(videoDecodeFrozenSince ?? now)
+    if !diagIsFrozen {
+      diagIsFrozen = true
+      diagFrozenSince = videoDecodeFrozenSince
+    }
+    if frozenFor >= videoDecodeFreezeRecoverySeconds {
+      if showLatencyDiagnostics {
+        logDiagnosticsEvent("video frozen (clock running) -> reload")
+      }
+      videoDecodeFrozenSince = nil
+      triggerRecoveryIfAllowed(reason: "video decode freeze")
+    }
   }
 
   func resetDiagnostics() {
@@ -211,6 +270,7 @@ extension PlayerView {
     diagWasStalled = false
     diagIsFrozen = false
     diagFrozenSince = nil
+    videoDecodeFrozenSince = nil
     diagSessionStartedAt = Date()
     lastRecoveryAttemptAt = Date.distantPast
     lastStallNotificationAt = Date.distantPast

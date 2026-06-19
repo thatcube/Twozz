@@ -205,6 +205,14 @@ extension PlayerView {
     // Keep refreshing the live playlist while paused so the seekable (rewind)
     // window keeps growing and pause-then-resume stays inside the DVR window.
     item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+    // Tap decoded frames for the decode-freeze watchdog. Native pixel format
+    // (empty attributes) so attaching/consuming a frame every couple of seconds
+    // adds no colour-conversion cost; this output is independent of the display
+    // layer and doesn't affect normal playback.
+    let videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: [:])
+    item.add(videoOutput)
+    playerItemVideoOutput = videoOutput
+    videoDecodeFrozenSince = nil
     return item
   }
 
@@ -472,6 +480,7 @@ extension PlayerView {
       lastObservedPlaybackTimeSeconds = nil
       liveStallWaitingSince = nil
       softStallSince = nil
+      videoDecodeFrozenSince = nil
       return
     }
     // An intentional viewer pause (DVR rewind) holds the playhead in place; that
@@ -485,6 +494,7 @@ extension PlayerView {
       diagWasStalled = false
       diagIsFrozen = false
       diagFrozenSince = nil
+      videoDecodeFrozenSince = nil
       return
     }
 
@@ -538,6 +548,11 @@ extension PlayerView {
       if !isVOD, pinnedToLive, advanced <= -diagJumpBackwardThresholdSeconds {
         recordBackwardJumpForStability()
       }
+
+      // Decode-freeze watchdog: the clock just advanced, yet the picture may be
+      // frozen (wedged decoder). The playhead/buffer checks above all read green
+      // in that state, so consult the video output directly.
+      checkVideoDecodeFreeze(item: item, clockAdvanced: advanced)
     }
 
     lastObservedPlaybackTimeSeconds = currentSeconds

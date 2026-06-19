@@ -569,6 +569,10 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     // │ • PDT / prefetch-age were rejected up front: they false-trip on healthy  │
     // │   5–15s low-latency streams whose device clock is skewed from the        │
     // │   broadcaster. Keep signals manifest-STRUCTURE-only.                     │
+    // │ • A frozen *picture* while the clock still runs (captions/chat keep      │
+    // │   scrolling) shows NO manifest irregularity at all — segments keep being │
+    // │   appended. That decode wedge is caught player-side by the video-output  │
+    // │   freeze watchdog (PlayerView), not here.                                │
     // │ • Lesson: predict conservatively. Punishing many good streams to catch   │
     // │   one bad one a couple seconds earlier is a bad trade.                   │
     // └─────────────────────────────────────────────────────────────────────────┘

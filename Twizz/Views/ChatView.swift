@@ -148,8 +148,7 @@ struct ChatView: View {
     .foregroundStyle(.white)
     .padding(.horizontal, 22)
     .padding(.vertical, 10)
-    .background(.black.opacity(0.65), in: Capsule())
-    .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+    .modifier(PausedPillGlassStyle())
     .padding(.bottom, 12)
     .transition(.move(edge: .bottom).combined(with: .opacity))
   }
@@ -215,5 +214,20 @@ extension String {
     guard count > 0 else { return 0 }
     let sum = unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
     return sum % count
+  }
+}
+
+/// Liquid Glass surface for the paused/scroll indicator pill. Falls back to a
+/// translucent material on tvOS versions before Liquid Glass is available.
+private struct PausedPillGlassStyle: ViewModifier {
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(tvOS 26.0, *) {
+      content.glassEffect(.regular, in: Capsule())
+    } else {
+      content
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+    }
   }
 }

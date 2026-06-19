@@ -228,6 +228,12 @@ struct PlayerView: View {
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
   @State private var chatInputFocusedAt = Date.distantPast
+  /// True while chat is held for reading — either the soft pause or full scroll
+  /// mode. The composer keeps real focus throughout, but it should *look*
+  /// unfocused so the held chat reads as the thing being interacted with.
+  private var chatIsFrozen: Bool {
+    isChatScrolling || chatSoftPauseRemaining != nil
+  }
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
@@ -1525,9 +1531,11 @@ struct PlayerView: View {
     // elements inside (e.g. the chat input) receive focus.
     .focusEffectDisabled()
     // The settings panel floats to the LEFT of the chat so the whole chat stays
-    // visible while you adjust it. It is attached *outside* GlassChatPaneStyle so
-    // the glass pane's rounded clip never hides it in glass layout mode.
-    .overlay(alignment: .topLeading) {
+    // visible while you adjust it, anchored toward the BOTTOM so it sits near the
+    // settings button (now in the bottom control row) instead of way up top. It
+    // is attached *outside* GlassChatPaneStyle so the glass pane's rounded clip
+    // never hides it in glass layout mode.
+    .overlay(alignment: .bottomLeading) {
       if showChatSettings {
         let inset: CGFloat = isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16
         GeometryReader { geo in
@@ -1535,9 +1543,10 @@ struct PlayerView: View {
             .frame(width: chatSettingsPanelWidth)
             .padding(.vertical, inset)
             .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
         .frame(width: chatSettingsPanelWidth)
-        .transition(.move(edge: .trailing).combined(with: .opacity))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
       }
     }
     .animation(.easeOut(duration: 0.18), value: showChatSettings)
@@ -2219,7 +2228,7 @@ struct PlayerView: View {
           } label: {
             Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
               .font(.subheadline)
-              .foregroundStyle(focus == .chatInput
+              .foregroundStyle(focus == .chatInput && !chatIsFrozen
                 ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
                 : .white.opacity(chatDraft.isEmpty ? 0.5 : 1.0))
               .lineLimit(1)
@@ -2228,7 +2237,7 @@ struct PlayerView: View {
               .padding(.horizontal, 28)
               .frame(maxWidth: .infinity)
               .frame(height: chatComposerRowHeight)
-              .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
+              .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput && !chatIsFrozen))
               // The keyboard host sits *behind* the glass capsule as a full-size,
               // visually clear field. Keeping it out of the styled content (and at
               // full size) avoids a second nested background blob and stops tvOS
@@ -2246,7 +2255,7 @@ struct PlayerView: View {
           .buttonStyle(ChatInputButtonStyle())
           .focusEffectDisabled()
           .focused($focus, equals: .chatInput)
-          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+          .animation(.easeOut(duration: 0.18), value: focus == .chatInput && !chatIsFrozen)
           .onMoveCommand { direction in
             switch direction {
             case .left:
@@ -2300,15 +2309,15 @@ struct PlayerView: View {
         } label: {
           Text("Sign in to send messages")
             .font(.subheadline)
-            .foregroundStyle(focus == .chatInput
+            .foregroundStyle(focus == .chatInput && !chatIsFrozen
               ? .black.opacity(0.7)
               : .white.opacity(0.45))
             .lineLimit(1)
             .padding(.horizontal, 28)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: chatComposerRowHeight)
-            .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
-            .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+            .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput && !chatIsFrozen))
+            .animation(.easeOut(duration: 0.18), value: focus == .chatInput && !chatIsFrozen)
         }
         .buttonStyle(ChatInputButtonStyle())
         .focusEffectDisabled()

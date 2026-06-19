@@ -162,6 +162,41 @@ struct RichChatLineView: View {
     }
 
     private var segments: [Segment] {
+        // Tokenizing the message (split, punctuation scan, emote matching, and the
+        // length-sorted scoped-emote scan) is pure work that depends only on the
+        // message's immutable text/scoped emotes plus the global emote set. In a
+        // LazyVStack every line that scrolls into view re-evaluates `body`, so
+        // without caching this re-tokenizes on every scroll tick — the dominant
+        // chat scroll cost on the Apple TV's CPU. Cache by message id (+ global
+        // emote count so newly-loaded globals still resolve). body runs on the
+        // main thread, so the static store needs no locking.
+        let key = SegmentCacheKey(id: message.id, globalEmoteCount: globalEmoteURLs.count)
+        if let cached = Self.segmentCache[key] {
+            return cached
+        }
+        let computed = computeSegments()
+        Self.segmentCache[key] = computed
+        Self.segmentCacheOrder.append(key)
+        if Self.segmentCacheOrder.count > Self.segmentCacheLimit {
+            let overflow = Self.segmentCacheOrder.count - Self.segmentCacheLimit
+            for evicted in Self.segmentCacheOrder.prefix(overflow) {
+                Self.segmentCache.removeValue(forKey: evicted)
+            }
+            Self.segmentCacheOrder.removeFirst(overflow)
+        }
+        return computed
+    }
+
+    private struct SegmentCacheKey: Hashable {
+        let id: UUID
+        let globalEmoteCount: Int
+    }
+
+    private static var segmentCache: [SegmentCacheKey: [Segment]] = [:]
+    private static var segmentCacheOrder: [SegmentCacheKey] = []
+    private static let segmentCacheLimit = 3000
+
+    private func computeSegments() -> [Segment] {
         // Keep ':' out of punctuation so tokens like :eyes: or :_raeKEK:
         // survive tokenization and can match YouTube emote shortcuts.
         let punctuation = CharacterSet(charactersIn: "()[]{}<>.,!?;\"'`")

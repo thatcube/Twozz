@@ -23,12 +23,9 @@ struct HomeView: View {
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
   @State private var pendingWatchChannel: FollowedChannel?
-  @State private var pendingBrowseCategory: TwitchCategory?
-  @State private var browsePath: [TwitchCategory] = []
-  /// When a category is opened from a tab other than Browse (Home or Search),
-  /// this remembers where to return to so popping the category restores the
-  /// originating tab instead of stranding the viewer on the Browse grid.
-  @State private var categoryReturnTab: SidebarTab?
+  /// Categories opened from the Home tab are pushed one level deep here, so the
+  /// category view is genuinely L2 of Home rather than a tab switch into Browse.
+  @State private var homePath: [TwitchCategory] = []
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
   @State private var refreshToast: RefreshToastState?
@@ -84,7 +81,18 @@ struct HomeView: View {
 
   var body: some View {
     TabView(selection: $selectedSidebarTab) {
-      tabContainer { homeTab }
+      tabContainer {
+        NavigationStack(path: $homePath) {
+          homeTab
+            .navigationDestination(for: TwitchCategory.self) { category in
+              CategoryStreamsView(
+                category: category,
+                selectedChannel: $selectedChannel,
+                channelPageTarget: $channelPageTarget
+              )
+            }
+        }
+      }
         .tag(SidebarTab.home)
         .tabItem {
           Label(SidebarTab.home.rawValue, image: SidebarTab.home.tablerImageName)
@@ -92,11 +100,8 @@ struct HomeView: View {
 
       tabContainer {
         BrowseView(
-          auth: auth,
           selectedChannel: $selectedChannel,
-          channelPageTarget: $channelPageTarget,
-          pendingCategory: $pendingBrowseCategory,
-          path: $browsePath
+          channelPageTarget: $channelPageTarget
         )
       }
       .tag(SidebarTab.browse)
@@ -108,10 +113,7 @@ struct HomeView: View {
         SearchView(
           auth: auth,
           selectedChannel: $selectedChannel,
-          channelPageTarget: $channelPageTarget,
-          onSelectCategory: { category in
-            openCategoryInBrowse(category)
-          }
+          channelPageTarget: $channelPageTarget
         )
       }
       .tag(SidebarTab.search)
@@ -172,29 +174,12 @@ struct HomeView: View {
       }
     }
     .onChange(of: selectedSidebarTab) { _, tab in
-      // tvOS SwiftUI bug: while the Browse tab's NavigationStack has a pushed
-      // detail, the sidebar won't switch tabs. Popping Browse to root as the
-      // selection leaves Browse lets the tab change take effect.
-      if tab != .browse && !browsePath.isEmpty {
-        browsePath.removeAll()
-      }
       guard tab == .home else { return }
       Task {
         await refreshFollowedChannelsIfNeeded(force: false)
         await refreshRecommendationsIfNeeded(force: false)
         await refreshPersonalizedIfNeeded(force: false)
       }
-    }
-    .onChange(of: browsePath) { _, path in
-      // When a category opened from Home/Search is popped back to root, return
-      // to the tab it was opened from rather than leaving the viewer on Browse.
-      // Only honor this while still on the Browse tab so a manual tab switch
-      // (which also clears the path) isn't overridden.
-      guard path.isEmpty, let returnTab = categoryReturnTab else { return }
-      if selectedSidebarTab == .browse {
-        selectedSidebarTab = returnTab
-      }
-      categoryReturnTab = nil
     }
     .onChange(of: deepLinkRouter.pendingChannelLogin) { _, login in
       openDeepLinkedChannelIfNeeded(login)
@@ -238,15 +223,6 @@ struct HomeView: View {
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
-  }
-
-  /// Opens a category in the Browse tab's NavigationStack while remembering the
-  /// tab the viewer came from, so popping the category later returns them there
-  /// (Home or Search) instead of stranding them on the Browse grid.
-  private func openCategoryInBrowse(_ category: TwitchCategory) {
-    categoryReturnTab = selectedSidebarTab == .browse ? nil : selectedSidebarTab
-    pendingBrowseCategory = category
-    selectedSidebarTab = .browse
   }
 
   @ViewBuilder
@@ -506,7 +482,7 @@ struct HomeView: View {
               .focused($focusedItemID, equals: itemID)
               .focusEffectDisabled()
               .onTapGesture {
-                openCategoryInBrowse(category)
+                homePath.append(category)
               }
               .accessibilityAddTraits(.isButton)
               .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)

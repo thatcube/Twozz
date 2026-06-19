@@ -3,29 +3,17 @@ import SwiftUI
 // MARK: - BrowseView
 
 struct BrowseView: View {
-  let auth: TwitchAuthSession
   @Binding var selectedChannel: FollowedChannel?
   @Binding var channelPageTarget: ChannelPageTarget?
-  @Binding var pendingCategory: TwitchCategory?
-  @Binding var path: [TwitchCategory]
 
   @State private var service = BrowseService()
-
-  private func open(_ category: TwitchCategory) {
-    if path.last != category {
-      withAnimation(.easeInOut(duration: 0.35)) {
-        path.append(category)
-      }
-    }
-  }
+  @State private var path: [TwitchCategory] = []
 
   var body: some View {
     NavigationStack(path: $path) {
       BrowseCategoriesView(
         service: service,
-        onSelectCategory: { category in
-          open(category)
-        }
+        onSelectCategory: { path.append($0) }
       )
       .task {
         if service.categories.isEmpty {
@@ -33,25 +21,13 @@ struct BrowseView: View {
         }
       }
       .navigationDestination(for: TwitchCategory.self) { category in
-        BrowseStreamsView(
+        CategoryStreamsView(
           category: category,
-          service: service,
           selectedChannel: $selectedChannel,
           channelPageTarget: $channelPageTarget
         )
-        .task(id: category.id) {
-          await service.loadStreams(for: category)
-        }
       }
     }
-    .onAppear { consumePendingCategoryIfNeeded() }
-    .onChange(of: pendingCategory) { _, _ in consumePendingCategoryIfNeeded() }
-  }
-
-  private func consumePendingCategoryIfNeeded() {
-    guard let category = pendingCategory else { return }
-    pendingCategory = nil
-    open(category)
   }
 }
 
@@ -125,14 +101,17 @@ private struct BrowseCategoriesView: View {
   }
 }
 
-// MARK: - Streams for a Category
+// MARK: - Category Streams
 
-private struct BrowseStreamsView: View {
+/// A category's live streams, pushed one level deep from any tab (Home, Search,
+/// or Browse). It owns its own `BrowseService` so it is fully self-contained as
+/// a `navigationDestination`, and relies on the native tvOS Menu button to pop.
+struct CategoryStreamsView: View {
   let category: TwitchCategory
-  let service: BrowseService
   @Binding var selectedChannel: FollowedChannel?
   @Binding var channelPageTarget: ChannelPageTarget?
 
+  @State private var service = BrowseService()
   @FocusState private var focusedStreamID: String?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
@@ -227,6 +206,9 @@ private struct BrowseStreamsView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .navigationBarHidden(true)
     .toolbar(.hidden, for: .tabBar)
+    .task(id: category.id) {
+      await service.loadStreams(for: category)
+    }
     .onChange(of: service.categoryStreams) { _, streams in
       if focusedStreamID == nil, let first = streams.first {
         Task {

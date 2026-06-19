@@ -14,7 +14,6 @@ struct SearchView: View {
   var body: some View {
     NavigationStack(path: $path) {
       SearchResultsView(
-        query: $query,
         service: service,
         onSelectChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
         onWatchChannel: { selectedChannel = $0 },
@@ -28,6 +27,11 @@ struct SearchView: View {
         )
       }
     }
+    .searchable(
+      text: $query,
+      placement: .automatic,
+      prompt: "Search channels and categories"
+    )
     .task(id: query) {
       // Debounce keystrokes from the on-screen keyboard before hitting the API.
       let pending = query
@@ -41,14 +45,12 @@ struct SearchView: View {
 // MARK: - Results
 
 private struct SearchResultsView: View {
-  @Binding var query: String
   let service: SearchService
   let onSelectChannel: (FollowedChannel) -> Void
   let onWatchChannel: (FollowedChannel) -> Void
   let onSelectCategory: (TwitchCategory) -> Void
 
   @FocusState private var focusedID: String?
-  @Namespace private var searchFocusNamespace
 
   private let channelColumns = [
     GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 24)
@@ -60,10 +62,6 @@ private struct SearchResultsView: View {
   var body: some View {
     ScrollView(.vertical, showsIndicators: false) {
       VStack(alignment: .leading, spacing: 32) {
-        // Search field scrolls with the results instead of staying pinned.
-        SearchField(text: $query)
-          .prefersDefaultFocus(in: searchFocusNamespace)
-
         if service.isSearching && !service.hasResults {
           HStack(spacing: 12) {
             ProgressView()
@@ -92,7 +90,6 @@ private struct SearchResultsView: View {
       .padding(.top, 16)
       .padding(.bottom, 24)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .focusScope(searchFocusNamespace)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
@@ -149,43 +146,5 @@ private struct SearchResultsView: View {
       }
       .focusSection()
     }
-  }
-}
-
-// MARK: - Search field
-
-/// A native tvOS text field styled to match the app, placed inline at the top
-/// of the results scroll view so it scrolls away with the content instead of
-/// staying pinned. Selecting it presents the system keyboard.
-private struct SearchField: View {
-  @Binding var text: String
-
-  @FocusState private var isFocused: Bool
-  @Environment(\.themePalette) private var palette
-
-  var body: some View {
-    HStack(spacing: 18) {
-      Icon(glyph: .search, size: 34)
-        .foregroundStyle(isFocused ? palette.liftSecondaryText : .secondary)
-
-      TextField("Search channels and categories", text: $text)
-        .textFieldStyle(.plain)
-        .font(.title3)
-        .foregroundStyle(isFocused ? palette.liftPrimaryText : .primary)
-        .focused($isFocused)
-        .autocorrectionDisabled()
-        .textInputAutocapitalization(.never)
-    }
-    .padding(.horizontal, 28)
-    .padding(.vertical, 18)
-    .background(
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .fill(isFocused ? AnyShapeStyle(palette.liftSurface) : AnyShapeStyle(.ultraThinMaterial))
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .strokeBorder(ThemePalette.brandPurple, lineWidth: isFocused ? 4 : 0)
-    )
-    .animation(AppLayout.focusScaleAnimation, value: isFocused)
   }
 }

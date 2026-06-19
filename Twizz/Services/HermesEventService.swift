@@ -127,6 +127,12 @@ final class HermesEventService {
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
   private var socket: URLSessionWebSocketTask?
+  /// One reusable session for this socket. Creating a fresh `URLSession` per
+  /// (re)connect leaks the old one; reusing a single session avoids that.
+  private let urlSession = URLSession(configuration: .default)
+  /// Consecutive failed reconnects, for exponential backoff. Reset on a healthy
+  /// receive.
+  private var reconnectAttempts = 0
   private var receiveTask: Task<Void, Never>?
   private var channelLogin: String?
   private var broadcasterID: String?
@@ -149,7 +155,8 @@ final class HermesEventService {
     let normalized = login.lowercased()
     channelLogin = normalized
 
-    let task = URLSession(configuration: .default).webSocketTask(with: endpoint)
+    reconnectAttempts = 0
+    let task = urlSession.webSocketTask(with: endpoint)
     socket = task
     task.resume()
 
@@ -194,6 +201,7 @@ final class HermesEventService {
       guard let currentSocket = socket else { break }
       do {
         let frame = try await currentSocket.receive()
+        reconnectAttempts = 0
         switch frame {
         case .string(let text): handle(text)
         case .data(let data): handle(String(decoding: data, as: UTF8.self))
@@ -201,11 +209,13 @@ final class HermesEventService {
         }
       } catch {
         guard !Task.isCancelled, let login = channelLogin else { break }
-        try? await Task.sleep(for: .seconds(3))
+        let delay = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
+        reconnectAttempts += 1
+        try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled, channelLogin == login else { break }
 
         socket?.cancel(with: .goingAway, reason: nil)
-        let newTask = URLSession(configuration: .default).webSocketTask(with: endpoint)
+        let newTask = urlSession.webSocketTask(with: endpoint)
         socket = newTask
         hasSubscribed = false
         newTask.resume()
@@ -239,7 +249,7 @@ final class HermesEventService {
   private func reconnect() {
     receiveTask?.cancel()
     socket?.cancel(with: .goingAway, reason: nil)
-    let newTask = URLSession(configuration: .default).webSocketTask(with: endpoint)
+    let newTask = urlSession.webSocketTask(with: endpoint)
     socket = newTask
     hasSubscribed = false
     newTask.resume()

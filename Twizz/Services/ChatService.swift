@@ -133,6 +133,13 @@ final class ChatService {
   private let endpoint = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
 
   private var socket: URLSessionWebSocketTask?
+  /// One reusable session for the chat socket. Creating a fresh `URLSession` per
+  /// (re)connect leaks the old one (it is never invalidated); reusing a single
+  /// session avoids that accumulation over long viewing sessions.
+  private let urlSession = URLSession(configuration: .default)
+  /// Consecutive failed reconnects, for exponential backoff. Reset on a healthy
+  /// receive.
+  private var reconnectAttempts = 0
   private var receiveTask: Task<Void, Never>?
   private var channel: String?
   private var hasSentJoin = false
@@ -198,8 +205,9 @@ final class ChatService {
     youtubeSeenMessageOrder.removeAll()
     youtubeStatusMessage = nil
     syncWarmupStart = Date()
+    reconnectAttempts = 0
 
-    let task = URLSession(configuration: .default).webSocketTask(with: endpoint)
+    let task = urlSession.webSocketTask(with: endpoint)
     socket = task
     task.resume()
 
@@ -271,6 +279,7 @@ final class ChatService {
       guard let currentSocket = socket else { break }
       do {
         let frame = try await currentSocket.receive()
+        reconnectAttempts = 0
         switch frame {
         case .string(let text): handle(text)
         case .data(let data): handle(String(decoding: data, as: UTF8.self))
@@ -280,13 +289,16 @@ final class ChatService {
         guard !Task.isCancelled else { break }
         isConnected = false
 
-        // Reconnect after a brief pause, preserving the message buffer.
+        // Reconnect with exponential backoff (3s, 6s, 12s… capped at 30s),
+        // preserving the message buffer.
         guard let channelToRejoin = channel else { break }
-        try? await Task.sleep(for: .seconds(3))
+        let delay = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
+        reconnectAttempts += 1
+        try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled, channel == channelToRejoin else { break }
 
         socket?.cancel(with: .goingAway, reason: nil)
-        let newTask = URLSession(configuration: .default).webSocketTask(with: endpoint)
+        let newTask = urlSession.webSocketTask(with: endpoint)
         socket = newTask
         hasSentJoin = false
         hasCapAck = false
@@ -1131,7 +1143,7 @@ final class ChatService {
       }
 
       var released: [ChatMessage] = []
-      while let first = syncBuffer.first, first.releaseAt <= Date() {
+      while let first = syncBuffer.first, first.releaseAt <= now {
         released.append(first.message)
         syncBuffer.removeFirst()
       }

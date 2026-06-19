@@ -534,6 +534,63 @@ extension PlayerView {
           .fixedSize(horizontal: false, vertical: true)
       }
 
+      VStack(alignment: .leading, spacing: 10) {
+        settingsSectionHeader("Highlights")
+
+        settingsPill(
+          title: chatHighlightMentionsEnabled ? "Highlight Mentions On" : "Highlight Mentions Off",
+          isSelected: chatHighlightMentionsEnabled,
+          focusTag: .chatHighlightToggle
+        ) {
+          chatHighlightMentionsEnabled.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+
+        if chatHighlightMentionsEnabled {
+          Button {
+            highlightKeywordsActivationToken &+= 1
+          } label: {
+            Text(highlightKeywordsDisplayText)
+              .font(.subheadline)
+              .foregroundStyle(focus == .chatHighlightKeywords ? .black : .white)
+              .lineLimit(1)
+              .truncationMode(.tail)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(.horizontal, 28)
+              .frame(maxWidth: .infinity)
+              .frame(height: 52)
+              .modifier(ChatGlassFieldStyle(isFocused: focus == .chatHighlightKeywords))
+              .background(
+                ChatKeyboardHostField(
+                  text: $chatHighlightKeywords,
+                  activationToken: highlightKeywordsActivationToken,
+                  onSubmit: {},
+                  returnKeyType: .done,
+                  dismissesOnReturn: true,
+                  keyboardPrompt: "Keywords, separated by commas"
+                )
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+              )
+          }
+          .buttonStyle(ChatInputButtonStyle())
+          .focusEffectDisabled()
+          .focused($focus, equals: .chatHighlightKeywords)
+          .frame(maxWidth: .infinity)
+          .animation(.easeOut(duration: 0.18), value: focus == .chatHighlightKeywords)
+        }
+
+        Text(
+          chatHighlightMentionsEnabled
+            ? "Highlights any line that mentions or replies to you, plus any keywords above (other handles, a game name, \"giveaway\"…)."
+            : "Turn on to highlight lines that mention you or match your keywords."
+        )
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.55))
+        .fixedSize(horizontal: false, vertical: true)
+      }
+
       Button {
         resetChatAppearance()
       } label: {

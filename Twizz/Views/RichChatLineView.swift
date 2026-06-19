@@ -110,6 +110,89 @@ struct RichChatLineView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Collapse the whole line into one VoiceOver element so the couch
+        // experience reads "author, message" as a single utterance instead of
+        // stepping through every badge/emote image node (which otherwise speak
+        // raw emote URLs or surface empty, unlabeled image elements).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    /// Combined spoken label for the line: badges, the author name, then the
+    /// message body with emotes announced by name and cheers as a bits count.
+    private var accessibilityLabel: String {
+        var parts: [String] = []
+
+        if showBadges {
+            parts.append(contentsOf: message.badgeKeys.compactMap(Self.badgeAccessibilityName))
+        }
+        if shouldShowSourceBadge {
+            parts.append("YouTube")
+        }
+
+        if !message.username.isEmpty {
+            parts.append(message.isAction ? "\(message.username) (action)" : message.username)
+        }
+
+        let body = spokenBody
+        if !body.isEmpty {
+            parts.append(body)
+        }
+
+        return parts.joined(separator: ", ")
+    }
+
+    /// Flatten the rendered segments into speakable text: text verbatim, emotes
+    /// as their name, and cheers as "<amount> bits". Collapses the whitespace
+    /// that segmentation introduces so VoiceOver doesn't pause oddly.
+    private var spokenBody: String {
+        var result = ""
+        for segment in segments {
+            switch segment {
+            case .text(let text):
+                result += text
+            case .emote(let name, _):
+                result += " \(name) "
+            case .cheer(let amount, _, _):
+                result += " \(amount) bits "
+            }
+        }
+        return result
+            .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+            .joined(separator: " ")
+    }
+
+    /// Map a Twitch badge key (`category/version`) to a human-readable label,
+    /// e.g. `moderator/1` -> "Moderator badge". Falls back to a title-cased
+    /// category for badges without a hand-tuned name.
+    private static func badgeAccessibilityName(_ key: String) -> String? {
+        let category = key.split(separator: "/").first.map(String.init) ?? key
+        guard !category.isEmpty else { return nil }
+
+        let friendly: String
+        switch category.lowercased() {
+        case "broadcaster": friendly = "Broadcaster"
+        case "moderator": friendly = "Moderator"
+        case "subscriber": friendly = "Subscriber"
+        case "founder": friendly = "Founder"
+        case "vip": friendly = "VIP"
+        case "turbo": friendly = "Turbo"
+        case "premium": friendly = "Prime"
+        case "staff": friendly = "Staff"
+        case "admin": friendly = "Admin"
+        case "global_mod": friendly = "Global moderator"
+        case "partner": friendly = "Verified"
+        case "bits": friendly = "Bits"
+        case "bits-leader": friendly = "Bits leader"
+        case "sub-gifter", "sub-gift-leader": friendly = "Gift sub"
+        case "artist-badge": friendly = "Artist"
+        default:
+            friendly = category
+                .replacingOccurrences(of: "-", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+        }
+        return "\(friendly) badge"
     }
 
     private var sourceBadgeView: some View {

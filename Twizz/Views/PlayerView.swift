@@ -1617,7 +1617,7 @@ struct PlayerView: View {
     // or bottom edge are hidden inside the menu instead of bleeding out over the
     // chat. tvOS auto-scrolls a focused row fully into view, and the content's
     // generous interior padding keeps focus halos off this clip edge.
-    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+    .clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
     // Match the chat pane's real Liquid Glass (`.glassEffect(.regular)`) so the
     // panel reads the same as the Glass chat layout, instead of a flatter
     // frosted material.
@@ -2350,7 +2350,10 @@ struct PlayerView: View {
       }
     }
     .padding(.horizontal, 16)
-    .padding(.vertical, 12)
+    .padding(.top, 12)
+    // Match the composer's bottom gap to the 16pt left/right inset so it sits
+    // evenly inside the glass pane's rounded corners.
+    .padding(.bottom, 16)
     .background(
       chatLayoutMode == .glass
         ? AnyShapeStyle(Color.black.opacity(0.22))
@@ -3801,7 +3804,7 @@ private struct GlassChatPaneStyle: ViewModifier {
   static let edgeInset: CGFloat = 24
 
   private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 32, style: .continuous)
+    RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
 
   @ViewBuilder
@@ -3839,7 +3842,7 @@ private struct GlassChatPaneStyle: ViewModifier {
 /// panel can size to its content and its inner focus effects can lift freely.
 private struct ChatSettingsPanelGlassStyle: ViewModifier {
   private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 32, style: .continuous)
+    RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
 
   @ViewBuilder

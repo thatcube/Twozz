@@ -6,20 +6,26 @@ struct SearchView: View {
   let auth: TwitchAuthSession
   @Binding var selectedChannel: FollowedChannel?
   @Binding var channelPageTarget: ChannelPageTarget?
-  /// Invoked when a category result is chosen; the host switches to Browse.
-  let onSelectCategory: (TwitchCategory) -> Void
 
   @State private var service = SearchService()
   @State private var query = ""
+  @State private var path: [TwitchCategory] = []
 
   var body: some View {
-    NavigationStack {
+    NavigationStack(path: $path) {
       SearchResultsView(
         service: service,
         onSelectChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
         onWatchChannel: { selectedChannel = $0 },
-        onSelectCategory: onSelectCategory
+        onSelectCategory: { path.append($0) }
       )
+      .navigationDestination(for: TwitchCategory.self) { category in
+        CategoryStreamsView(
+          category: category,
+          selectedChannel: $selectedChannel,
+          channelPageTarget: $channelPageTarget
+        )
+      }
     }
     .searchable(
       text: $query,

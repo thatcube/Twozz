@@ -23,8 +23,9 @@ struct HomeView: View {
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
   @State private var pendingWatchChannel: FollowedChannel?
-  @State private var pendingBrowseCategory: TwitchCategory?
-  @State private var browsePath: [TwitchCategory] = []
+  /// Categories opened from the Home tab are pushed one level deep here, so the
+  /// category view is genuinely L2 of Home rather than a tab switch into Browse.
+  @State private var homePath: [TwitchCategory] = []
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
   @State private var refreshToast: RefreshToastState?
@@ -80,7 +81,18 @@ struct HomeView: View {
 
   var body: some View {
     TabView(selection: $selectedSidebarTab) {
-      tabContainer { homeTab }
+      tabContainer {
+        NavigationStack(path: $homePath) {
+          homeTab
+            .navigationDestination(for: TwitchCategory.self) { category in
+              CategoryStreamsView(
+                category: category,
+                selectedChannel: $selectedChannel,
+                channelPageTarget: $channelPageTarget
+              )
+            }
+        }
+      }
         .tag(SidebarTab.home)
         .tabItem {
           Label(SidebarTab.home.rawValue, image: SidebarTab.home.tablerImageName)
@@ -88,11 +100,8 @@ struct HomeView: View {
 
       tabContainer {
         BrowseView(
-          auth: auth,
           selectedChannel: $selectedChannel,
-          channelPageTarget: $channelPageTarget,
-          pendingCategory: $pendingBrowseCategory,
-          path: $browsePath
+          channelPageTarget: $channelPageTarget
         )
       }
       .tag(SidebarTab.browse)
@@ -104,11 +113,7 @@ struct HomeView: View {
         SearchView(
           auth: auth,
           selectedChannel: $selectedChannel,
-          channelPageTarget: $channelPageTarget,
-          onSelectCategory: { category in
-            pendingBrowseCategory = category
-            selectedSidebarTab = .browse
-          }
+          channelPageTarget: $channelPageTarget
         )
       }
       .tag(SidebarTab.search)
@@ -169,12 +174,6 @@ struct HomeView: View {
       }
     }
     .onChange(of: selectedSidebarTab) { _, tab in
-      // tvOS SwiftUI bug: while the Browse tab's NavigationStack has a pushed
-      // detail, the sidebar won't switch tabs. Popping Browse to root as the
-      // selection leaves Browse lets the tab change take effect.
-      if tab != .browse && !browsePath.isEmpty {
-        browsePath.removeAll()
-      }
       guard tab == .home else { return }
       Task {
         await refreshFollowedChannelsIfNeeded(force: false)
@@ -483,8 +482,7 @@ struct HomeView: View {
               .focused($focusedItemID, equals: itemID)
               .focusEffectDisabled()
               .onTapGesture {
-                pendingBrowseCategory = category
-                selectedSidebarTab = .browse
+                homePath.append(category)
               }
               .accessibilityAddTraits(.isButton)
               .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)

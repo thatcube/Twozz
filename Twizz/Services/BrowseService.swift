@@ -126,10 +126,20 @@ final class BrowseService {
         struct GQLData: Decodable { let game: GameResult? }
         struct GQLEnvelope: Decodable { let data: GQLData? }
 
+        // `broadcasterLanguages` is a GQL enum (e.g. EN), not a string, so it is
+        // taken from a whitelisted token below — never interpolated from raw
+        // input. When the viewer chooses "All", options are omitted entirely so
+        // the category's default ordering is preserved.
+        let optionsClause: String
+        if let token = StreamLanguagePreference.currentToken() {
+          optionsClause = ", options: {broadcasterLanguages: [\(token)]}"
+        } else {
+          optionsClause = ""
+        }
         let query = """
             query GameStreams($id: ID!, $first: Int!) {
               game(id: $id) {
-                streams(first: $first) {
+                streams(first: $first\(optionsClause)) {
                   edges {
                     node {
                       id

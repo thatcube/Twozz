@@ -167,11 +167,11 @@ struct GoLiveAlertsSettingsView: View {
     } placeholder: {
       ZStack {
         Circle().fill(.ultraThinMaterial)
-        Icon(glyph: .userCircle, size: 24)
+        Icon(glyph: .userCircle, size: 30)
           .foregroundStyle(.secondary)
       }
     }
-    .frame(width: 44, height: 44)
+    .frame(width: 56, height: 56)
     .clipShape(Circle())
   }
 

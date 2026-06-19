@@ -24,10 +24,10 @@ struct TwizzLiquidGlassCardModifier: ViewModifier {
       // Reduce Transparency: opaque, high-contrast fill instead of glass.
       content
         .background {
-          shape.fill(isFocused ? palette.liftSurface : Color.twizzOpaqueGlass)
+          shape.fill(isFocused ? palette.liftSurface : palette.cardOpaqueSurface)
         }
         .overlay {
-          shape.strokeBorder(Color.white.opacity(isFocused ? 0.0 : 0.16), lineWidth: 1)
+          shape.strokeBorder(isFocused ? Color.clear : palette.cardOpaqueBorder, lineWidth: 1)
         }
         .clipShape(shape)
     } else if #available(tvOS 26.0, *), isFocused || glassWhenUnfocused {
@@ -58,4 +58,17 @@ extension View {
       )
     )
   }
+}
+
+/// Whether a focused card should paint its text in the palette's opaque "lift"
+/// colors (which pair with the opaque `liftSurface` fill) instead of the
+/// translucent-glass `Color.primary`/`.secondary`. True whenever a focused card
+/// is rendering an opaque surface: glass is disabled (the in-app toggle OR the OS
+/// Reduce Transparency setting, unioned into `glassDisabled`), or the platform
+/// predates Liquid Glass. Shared by every card so the three copies can't drift.
+func twizzUsesLiftFocusedText(isFocused: Bool, glassDisabled: Bool) -> Bool {
+  guard isFocused else { return false }
+  if glassDisabled { return true }
+  if #available(tvOS 26.0, *) { return false }
+  return true
 }

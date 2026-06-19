@@ -98,6 +98,13 @@ struct ThemePalette: Equatable {
   let backgroundColors: [Color]
   /// Fill used behind a focused card (a strong contrast "lift").
   let liftSurface: Color
+  /// Opaque fill behind an *unfocused* card when glass is disabled (Reduce
+  /// Transparency / in-app toggle). Theme-aware so light mode stays white
+  /// instead of falling back to the shared near-black `twizzOpaqueGlass`.
+  let cardOpaqueSurface: Color
+  /// Hairline border drawn around an unfocused opaque card so it reads against
+  /// a same-colored background (e.g. white card on a white light-mode page).
+  let cardOpaqueBorder: Color
   /// Primary text drawn on top of `liftSurface`.
   let liftPrimaryText: Color
   /// Secondary text drawn on top of `liftSurface`.
@@ -115,6 +122,8 @@ struct ThemePalette: Equatable {
   static let oled = ThemePalette(
     backgroundColors: [.black, .black],
     liftSurface: .white,
+    cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
+    cardOpaqueBorder: Color.white.opacity(0.16),
     liftPrimaryText: .black.opacity(0.92),
     liftSecondaryText: .black.opacity(0.62),
     playerBackdrop: .black,
@@ -129,6 +138,8 @@ struct ThemePalette: Equatable {
       Color(red: 0.09, green: 0.09, blue: 0.10),
     ],
     liftSurface: .white,
+    cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
+    cardOpaqueBorder: Color.white.opacity(0.16),
     liftPrimaryText: .black.opacity(0.92),
     liftSecondaryText: .black.opacity(0.62),
     playerBackdrop: .black,
@@ -139,14 +150,16 @@ struct ThemePalette: Equatable {
 
   static let light = ThemePalette(
     backgroundColors: [
-      Color(red: 0.96, green: 0.96, blue: 0.97),
-      Color(red: 0.90, green: 0.90, blue: 0.92),
+      Color(white: 1.0),
+      Color(white: 0.97),
     ],
-    liftSurface: Color(red: 0.16, green: 0.16, blue: 0.18),
-    liftPrimaryText: .white.opacity(0.95),
-    liftSecondaryText: .white.opacity(0.70),
-    playerBackdrop: Color(red: 0.90, green: 0.90, blue: 0.92),
-    chatSideSurface: Color(white: 0.97).opacity(0.98),
+    liftSurface: .white,
+    cardOpaqueSurface: .white,
+    cardOpaqueBorder: Color.black.opacity(0.12),
+    liftPrimaryText: .black.opacity(0.90),
+    liftSecondaryText: .black.opacity(0.60),
+    playerBackdrop: .white,
+    chatSideSurface: Color(white: 1.0).opacity(0.98),
     chatSidePrimaryText: Color(white: 0.12),
     topGlow: ThemePalette.brandPurple.opacity(0.05)
   )

@@ -21,6 +21,7 @@ struct MediaContentCard: View {
   var mediaCornerRadius: CGFloat = 18
 
   @Environment(\.themePalette) private var palette
+  @Environment(\.glassDisabled) private var glassDisabled
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -99,10 +100,6 @@ struct MediaContentCard: View {
   }
 
   private var usesLiftFocusedText: Bool {
-    guard isFocused else { return false }
-    if #available(tvOS 26.0, *) {
-      return false
-    }
-    return true
+    twizzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
   }
 }

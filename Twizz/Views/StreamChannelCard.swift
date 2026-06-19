@@ -101,6 +101,7 @@ struct StreamChannelCard: View {
   var onGoToChannel: ((FollowedChannel) -> Void)? = nil
 
   @Environment(\.themePalette) private var palette
+  @Environment(\.glassDisabled) private var glassDisabled
   @State private var previewPlayer = AVPlayer()
   @State private var previewTask: Task<Void, Never>?
   @State private var revealVideoTask: Task<Void, Never>?
@@ -294,11 +295,7 @@ struct StreamChannelCard: View {
   }
 
   private var usesLiftFocusedText: Bool {
-    guard isFocused else { return false }
-    if #available(tvOS 26.0, *) {
-      return false
-    }
-    return true
+    twizzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
   }
 
   @MainActor

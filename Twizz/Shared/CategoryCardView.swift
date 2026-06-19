@@ -9,6 +9,7 @@ struct CategoryCardView: View {
   var width: CGFloat? = nil
 
   @Environment(\.themePalette) private var palette
+  @Environment(\.glassDisabled) private var glassDisabled
 
   /// Match the stream cards: aggressive outer glass rounding with the inner box
   /// art rounded to the same radius the stream card media uses.
@@ -73,11 +74,7 @@ struct CategoryCardView: View {
   static let contentShapeCornerRadius: CGFloat = 30
 
   private var usesLiftFocusedText: Bool {
-    guard isFocused else { return false }
-    if #available(tvOS 26.0, *) {
-      return false
-    }
-    return true
+    twizzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
   }
 }
 

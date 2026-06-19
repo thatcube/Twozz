@@ -1055,7 +1055,7 @@ struct PlayerView: View {
     .padding(.leading, 48)
     .padding(.trailing, controlsTrailingInset)
     .padding(.top, 12)
-    .padding(.bottom, 42)
+    .padding(.bottom, controlsBottomPadding)
     .background(
       LinearGradient(
         stops: [
@@ -1537,11 +1537,12 @@ struct PlayerView: View {
     // never hides it in glass layout mode.
     .overlay(alignment: .bottomLeading) {
       if showChatSettings {
-        let inset: CGFloat = isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16
+        let topInset: CGFloat = isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16
         GeometryReader { geo in
-          chatSettingsPanel(maxHeight: max(geo.size.height - inset * 2, 0))
+          chatSettingsPanel(maxHeight: max(geo.size.height - topInset - chatSettingsBottomClearance, 0))
             .frame(width: chatSettingsPanelWidth)
-            .padding(.vertical, inset)
+            .padding(.top, topInset)
+            .padding(.bottom, chatSettingsBottomClearance)
             .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
@@ -1554,6 +1555,14 @@ struct PlayerView: View {
 
   private let chatSettingsPanelWidth: CGFloat = 560
   private let chatSettingsPanelGap: CGFloat = 16
+  /// Distance the bottom control row sits above the screen's bottom edge. Kept
+  /// generous so the row (and the chat composer it aligns with) clears typical TV
+  /// overscan instead of hugging the very bottom.
+  private let controlsBottomPadding: CGFloat = 64
+  /// How far above the screen bottom the floating settings panel must start so it
+  /// floats *above* the control row rather than behind/under it. Control row
+  /// bottom inset plus its approximate height plus a small gap.
+  private var chatSettingsBottomClearance: CGFloat { controlsBottomPadding + 88 }
 
   // MARK: - Floating chat settings
 

@@ -14,17 +14,8 @@ extension PlayerView {
   }
 
   func diagBufferAheadDescription(_ item: AVPlayerItem) -> String {
-    let current = CMTimeGetSeconds(item.currentTime())
-    guard current.isFinite else { return "—" }
-    for value in item.loadedTimeRanges {
-      let range = value.timeRangeValue
-      let start = CMTimeGetSeconds(range.start)
-      let end = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
-      if start.isFinite, end.isFinite, current >= start - 0.5, current <= end + 0.5 {
-        return "\(diagFormat(max(0, end - current), decimals: 1))s"
-      }
-    }
-    return "—"
+    guard let ahead = bufferAheadSeconds(item) else { return "—" }
+    return "\(diagFormat(ahead, decimals: 1))s"
   }
 
   func diagWaitingReasonDescription() -> String {
@@ -59,6 +50,108 @@ extension PlayerView {
       if showLatencyDiagnostics {
         logDiagnosticsEvent("stall (\(reason))")
       }
+      recordStallForStability()
+    }
+  }
+
+  /// Stream-stability watchdog: track destabilizing events (stalls + involuntary
+  /// backward jumps) and, once they cluster, switch to deep-buffer stability mode.
+  /// This is the "detect a problematic stream and change strategy" fallback — most
+  /// streams never trip it, but a struggling broadcaster encoder (lots of stalls
+  /// despite ample bandwidth) does, and chasing the live edge there only makes it
+  /// worse. A stall is counted here; backward jumps are fed in from the playback
+  /// watchdog via `recordBackwardJumpForStability()`.
+  func recordStallForStability() {
+    recordInstabilityEvent()
+  }
+
+  /// An involuntary backward playhead jump (AVPlayer rewinding to refill its
+  /// buffer) is as strong an instability signal as a stall, so it counts too.
+  func recordBackwardJumpForStability() {
+    recordInstabilityEvent()
+  }
+
+  /// Predictive stability trip: the low-latency proxy analyzes each HLS manifest
+  /// refresh and, when a struggling encoder's playlists show structural trouble in
+  /// the opening refreshes, latches a `predictedUnstable` verdict. We act on it
+  /// the moment it appears — *before* the viewer sits through the stalls the
+  /// behavioral watchdog waits for — by tripping the same stability-mode path.
+  /// Only relevant while the prefetch proxy is the active (destabilizing)
+  /// strategy; if it's already off there is nothing to drop.
+  func checkPredictedInstability() {
+    guard !isVOD, !isStreamUnstable, lowLatencyProxyEnabled else { return }
+    guard !isUserPaused, !isScrubbing else { return }
+    guard lowLatencyProxy.predictedUnstable else { return }
+    streamUnstableWasPredicted = true
+    if showLatencyDiagnostics {
+      let snap = lowLatencyProxy.instabilityDiagnostics
+      logDiagnosticsEvent(
+        "predicted unstable (\(snap.detail), score \(diagFormat(snap.score, decimals: 1)))")
+    }
+    enterStreamStabilityMode()
+  }
+
+  private func recordInstabilityEvent() {
+    guard !isVOD, !isStreamUnstable else { return }
+    let now = Date()
+    lastStallAt = now
+    var recent = recentInstabilityEvents
+    recent.append(now)
+    recent.removeAll { now.timeIntervalSince($0) > unstableEventWindowSeconds }
+    recentInstabilityEvents = recent
+
+    // Be far more sensitive in the opening seconds: a stream that stutters the
+    // moment you arrive should be stabilized on the first event, not after you've
+    // sat through several. After the grace window, require a small cluster so a
+    // lone transient blip on an otherwise-healthy stream doesn't latch us.
+    let withinStartup =
+      streamPlaybackStartedAt.map { now.timeIntervalSince($0) <= unstableStartupGraceSeconds }
+      ?? true
+    let threshold = withinStartup ? unstableStartupEventThreshold : unstableEventThreshold
+    if recent.count >= threshold {
+      enterStreamStabilityMode()
+    }
+  }
+
+  /// Switch into deep-buffer stability mode: stop chasing the live edge, drop the
+  /// low-latency prefetch proxy (its promotion is what destabilizes a struggling
+  /// source), and ride a deep buffer of already-produced segments so the source's
+  /// jitter is absorbed instead of causing a stall/rewind loop. The flag latches
+  /// for the rest of this channel session — a stream that has proven it can't hold
+  /// the live edge keeps the safe strategy until the viewer changes channel
+  /// (`resetDiagnostics`); we never flap back and risk re-destabilizing it.
+  func enterStreamStabilityMode() {
+    streamUnstableSince = Date()
+    if showLatencyDiagnostics {
+      logDiagnosticsEvent("stream unstable -> stability mode")
+    }
+    // `isStreamUnstable` is now set, so the active policy is the deep-buffer
+    // fallback and `makeItem` will build the item without prefetch promotion.
+    applyActiveLivePlaybackPolicy()
+
+    // If the prefetch proxy was actually promoting (the real-world destabilizer),
+    // rebuild the pipeline without it. The reload restarts the timeline well
+    // behind the unstable edge and fills the deep buffer — no manual seek needed.
+    if lowLatencyProxyEnabled {
+      if showLatencyDiagnostics { logDiagnosticsEvent("stability: LL prefetch OFF") }
+      Task { await load(reason: "stabilityProxyOff", resetMetadata: false) }
+      return
+    }
+
+    // Proxy already off: just build a cushion by riding back behind the edge.
+    guard !isUserPaused, !isScrubbing, pinnedToLive,
+      let item = player.currentItem, let edge = liveSeekableEdgeSeconds(item)
+    else { return }
+    let start = item.seekableTimeRanges.first?.timeRangeValue.start
+    let startSeconds = start.map { CMTimeGetSeconds($0) } ?? 0
+    let target = max(edge - stabilityTargetBehindEdgeSeconds, startSeconds)
+    let tolerance = CMTime(seconds: 1.0, preferredTimescale: 600)
+    item.seek(
+      to: CMTime(seconds: target, preferredTimescale: 600),
+      toleranceBefore: tolerance,
+      toleranceAfter: tolerance
+    ) { [self] _ in
+      player.playImmediately(atRate: 1.0)
     }
   }
 
@@ -121,5 +214,16 @@ extension PlayerView {
     diagSessionStartedAt = Date()
     lastRecoveryAttemptAt = Date.distantPast
     lastStallNotificationAt = Date.distantPast
+    // New stream: forget any prior instability so we start in low-latency mode.
+    streamUnstableSince = nil
+    streamUnstableWasPredicted = false
+    recentInstabilityEvents = []
+    lastStallAt = nil
+    streamPlaybackStartedAt = nil
+    softStallSince = nil
+    lastSoftStallNudgeAt = Date.distantPast
+    // Drop the proxy's manifest-derived instability accumulators too, so the
+    // predictive verdict is scoped to this channel session.
+    lowLatencyProxy.resetInstabilityPrediction()
   }
 }

@@ -170,9 +170,17 @@ extension PlayerView {
     // The proxy is attached when EITHER low-latency promotion OR Stream Rewind
     // (DVR retention) is on. Each behavior is independent: promotion pulls the
     // live edge in, retention grows the seekable window for rewind.
-    let useProxy = lowLatencyProxyEnabled || streamRewindEnabled
+    //
+    // The stream-stability watchdog can veto promotion at runtime: on a
+    // chronically-stalling stream the prefetch promotion is the destabilizer
+    // (it shoves the playhead at a live edge the source can't sustain), so while
+    // `isStreamUnstable` we drop promotion and — when Rewind isn't holding the
+    // proxy on for DVR — detach the proxy entirely and play the plain Twitch
+    // playlist, exactly as a manual "LL proxy off" would.
+    let promotePrefetch = lowLatencyProxyEnabled && !isStreamUnstable
+    let useProxy = promotePrefetch || streamRewindEnabled
     lowLatencyProxy.configure(
-      promotePrefetch: lowLatencyProxyEnabled,
+      promotePrefetch: promotePrefetch,
       retainHistory: streamRewindEnabled,
       windowSeconds: rewindWindowSeconds
     )
@@ -187,27 +195,33 @@ extension PlayerView {
       asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
     }
     let item = AVPlayerItem(asset: asset)
-    // Favor smoothness over latency: extra buffer reduces native AVPlayer
-    // skip-ahead behavior and rebuffer risk on throughput dips.
-    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 8 : 3
+    // Buffer depth comes from the active profile: shallower for lower latency,
+    // deeper to let ABR hold higher quality. (See LivePlaybackPolicy.)
+    item.preferredForwardBufferDuration = activeLivePlaybackPolicy.preferredForwardBufferDuration
+    // The adaptive-rate controller nudges the live rate a few percent either side
+    // of 1.0 (anti-stall slow-down / gentle catch-up); time-domain pitch correction
+    // keeps the audio natural through those small changes.
+    item.audioTimePitchAlgorithm = .timeDomain
     // Keep refreshing the live playlist while paused so the seekable (rewind)
     // window keeps growing and pause-then-resume stays inside the DVR window.
     item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
     return item
   }
 
-  /// "Behind live" as the user experiences it: how far the playhead trails the
-  /// freshest segment we can actually fetch (the seekable-edge gap, ~2-6s).
+  /// "Behind live" as the viewer actually experiences it: how far behind the real
+  /// broadcast the on-screen picture is. That is the wall-clock delay
+  /// (`now − EXT-X-PROGRAM-DATE-TIME` at the playhead) — the same value used to
+  /// sync chat. It is the honest "glass-to-glass-ish" number; for a Twitch
+  /// low-latency stream it lands around ~5-15s.
   ///
-  /// We deliberately do NOT lead with the PROGRAM-DATE-TIME wall-clock delay.
-  /// That measures distance from Twitch's *encoder* timestamp, which for a
-  /// standard-latency stream is ~18-20s — and every other client (including the
-  /// Twitch phone app) sits that far back too. So it reads "20s behind live"
-  /// while you're visually in sync with your phone, which is just confusing.
-  /// The edge gap is the number that tracks "am I near the freshest content."
-  /// Wall-clock is kept only as a fallback when the edge gap is unavailable.
+  /// We deliberately do NOT lead with the seekable-edge gap. That only measures
+  /// the small in-buffer distance to the tail of the playlist we currently hold
+  /// (~2-6s), so it collapses toward ~0 whenever the playhead is near the edge —
+  /// reading "2s behind" while the picture is really 10-15s behind the broadcast.
+  /// The edge gap is kept only as a fallback when no PROGRAM-DATE-TIME is present,
+  /// and is still surfaced separately in the Diagnostics overlay.
   var rawLatencySeconds: Double? {
-    liveEdgeLatencySeconds ?? wallClockLatencySeconds
+    wallClockLatencySeconds ?? liveEdgeLatencySeconds
   }
 
   /// Smoothed value actually shown in the UI, to stop the number jumping around.
@@ -216,9 +230,9 @@ extension PlayerView {
   }
 
   /// True while playback is active but the latency reading hasn't settled yet.
-  /// The live-edge gap reads ~0 right after playback starts and then climbs to
-  /// the real value, so we wait for the number to stabilise (and clear a
-  /// plausible floor) before trusting it, with a hard sample cap as a backstop.
+  /// The estimate can read low or jump around for the first samples after a
+  /// (re)start, so we wait for it to stabilise (and clear a plausible floor)
+  /// before trusting it, with a hard sample cap as a backstop.
   var isLatencyWarmingUp: Bool {
     guard isPlaybackActive else { return false }
     guard let seconds = measuredLatencySeconds else { return true }
@@ -286,11 +300,32 @@ extension PlayerView {
         try? await Task.sleep(for: .seconds(1))
       }
     }
+    startRateController()
+  }
+
+  /// Runs the adaptive playback-rate controller on its own fast cadence so the
+  /// anti-stall slow-down reacts to a draining buffer well before it empties.
+  func startRateController() {
+    stopRateController()
+    rateControlTask = Task {
+      while !Task.isCancelled {
+        await MainActor.run {
+          applyLiveLatencyCorrection()
+        }
+        try? await Task.sleep(for: .seconds(rateControlIntervalSeconds))
+      }
+    }
+  }
+
+  func stopRateController() {
+    rateControlTask?.cancel()
+    rateControlTask = nil
   }
 
   func stopLatencyMonitor() {
     latencyTask?.cancel()
     latencyTask = nil
+    stopRateController()
     latencyReadout.update(color: .gray, label: "Waiting for playback")
     wallClockLatencySeconds = nil
     liveEdgeLatencySeconds = nil
@@ -300,7 +335,6 @@ extension PlayerView {
     isPlaybackActive = false
     didRequestPlayback = false
     edgeLatencyLowConfidenceStreak = 0
-    wallClockHighLatencyStreak = 0
     wallClockLowConfidenceStreak = 0
     lastPlaybackDateSample = nil
     lastPlaybackTimeSampleSeconds = nil
@@ -327,8 +361,15 @@ extension PlayerView {
     stalledPlaybackSamples = 0
     isRecoveringPlayback = false
     lastRecoveryAttemptAt = Date.distantPast
+    lastLiveResyncAt = Date.distantPast
+    lastLiveEdgeSnapAt = Date.distantPast
+    liveResyncAttempts = 0
     lastStallNotificationAt = Date.distantPast
     liveStallWaitingSince = nil
+    lastLiveEdgeSeconds = nil
+    liveEdgeFrozenSince = nil
+    softStallSince = nil
+    lastSoftStallNudgeAt = Date.distantPast
     offlineProbeInFlight = false
     lastOfflineProbeAt = Date.distantPast
   }
@@ -343,12 +384,94 @@ extension PlayerView {
     Task { await recoverFromPlaybackStall(reason: reason) }
   }
 
+  /// Seconds value of the live seekable edge (end of the last seekable range),
+  /// or `nil` when no live window exists yet.
+  func liveSeekableEdgeSeconds(_ item: AVPlayerItem) -> Double? {
+    guard let range = item.seekableTimeRanges.last?.timeRangeValue else { return nil }
+    let edge = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+    return edge.isFinite && edge > 0 ? edge : nil
+  }
+
+  /// Lightweight recovery for involuntary live-edge drift: seek back toward the
+  /// edge and re-kick playback, without the full-reload "jump" that
+  /// `recoverFromPlaybackStall` causes. Throttled, and escalates to a full reload
+  /// only after repeated resyncs fail to hold the edge.
+  func triggerLiveEdgeResyncIfAllowed(item: AVPlayerItem, edge: Double) {
+    guard !isRecoveringPlayback, !isUserPaused, !isScrubbing else { return }
+    let now = Date()
+    guard now.timeIntervalSince(lastLiveResyncAt) >= liveResyncCooldownSeconds else { return }
+    lastLiveResyncAt = now
+
+    liveResyncAttempts += 1
+    if liveResyncAttempts > maxLiveResyncAttempts {
+      // Light seeks aren't sticking — fall back to a full reload.
+      liveResyncAttempts = 0
+      if showLatencyDiagnostics { logDiagnosticsEvent("edge drift -> reload") }
+      triggerRecoveryIfAllowed(reason: "edge drift")
+      return
+    }
+
+    let target = max(edge - targetLiveEdgeSeconds, 0)
+    let tolerance = CMTime(seconds: 0.6, preferredTimescale: 600)
+    if showLatencyDiagnostics { logDiagnosticsEvent("live resync (edge drift)") }
+    item.seek(
+      to: CMTime(seconds: target, preferredTimescale: 600),
+      toleranceBefore: tolerance,
+      toleranceAfter: tolerance
+    ) { [self] _ in
+      player.playImmediately(atRate: 1.0)
+    }
+  }
+
+  /// How far the seekable window AVPlayer currently holds trails the *true*
+  /// broadcast edge, in seconds: wall-clock behind-live (`now − PROGRAM-DATE-TIME`)
+  /// minus the in-window gap to the seekable tail. When this is large the cached
+  /// media playlist is stale — seeking to the seekable edge lands well behind real
+  /// live, and only a fresh load can reach the true edge. Returns `nil` when either
+  /// signal is unavailable.
+  func liveWindowStalenessSeconds(_ item: AVPlayerItem) -> Double? {
+    guard let date = item.currentDate() else { return nil }
+    let wallClock = Date().timeIntervalSince(date)
+    guard wallClock.isFinite, wallClock >= 0 else { return nil }
+    guard let range = item.seekableTimeRanges.last?.timeRangeValue else { return nil }
+    let edge = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+    let current = CMTimeGetSeconds(item.currentTime())
+    guard edge.isFinite, current.isFinite, edge > 0 else { return nil }
+    let edgeGap = max(0, edge - current)
+    return wallClock - edgeGap
+  }
+
+  /// When the viewer returns to the live edge but AVPlayer's seekable window is
+  /// stale (trailing true live), a same-window seek can't reach the real edge.
+  /// Recreate the item so it fetches a fresh playlist and lands at the true
+  /// broadcast tail. Stream Rewind history survives because the proxy only clears
+  /// its DVR buffers when `retainHistory` actually changes — so this preserves the
+  /// ability to rewind while snapping playback back to real live.
+  func snapToTrueLiveIfStale() {
+    guard !isVOD, pinnedToLive, !isUserPaused, !isScrubbing, !isRecoveringPlayback else {
+      return
+    }
+    guard let item = player.currentItem, let source = currentSourceURL else { return }
+    guard let staleness = liveWindowStalenessSeconds(item),
+      staleness > staleLiveWindowSnapThresholdSeconds
+    else { return }
+    let now = Date()
+    guard now.timeIntervalSince(lastLiveEdgeSnapAt) >= liveEdgeSnapCooldownSeconds else { return }
+    lastLiveEdgeSnapAt = now
+    if showLatencyDiagnostics {
+      logDiagnosticsEvent("snap to true live (stale \(Int(staleness))s)")
+    }
+    player.replaceCurrentItem(with: makeItem(url: source))
+    startPlayback()
+  }
+
   func samplePlaybackHealth() {
     guard !isLoading, errorMessage == nil, !isOffline
     else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
       liveStallWaitingSince = nil
+      softStallSince = nil
       return
     }
     // An intentional viewer pause (DVR rewind) holds the playhead in place; that
@@ -358,11 +481,17 @@ extension PlayerView {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
       liveStallWaitingSince = nil
+      softStallSince = nil
       diagWasStalled = false
       diagIsFrozen = false
       diagFrozenSince = nil
       return
     }
+
+    // Early, predictive stability trip from the proxy's manifest analysis — acts
+    // before the behavioral stall/jump counters below ever fire.
+    checkPredictedInstability()
+
     guard let item = player.currentItem else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
@@ -395,20 +524,134 @@ extension PlayerView {
         diagWasStalled = false
         diagIsFrozen = false
         diagFrozenSince = nil
+        // First forward progress of this stream session: anchor the startup-grace
+        // window so an immediate stutter trips stability on the very first event.
+        if streamPlaybackStartedAt == nil, advanced > 0.05 {
+          streamPlaybackStartedAt = Date()
+        }
+      }
+
+      // An involuntary backward jump (AVPlayer rewinding to refill its buffer) is
+      // a strong instability signal. We never seek backward ourselves while
+      // chasing live, so any meaningful negative advance here is the source
+      // misbehaving — feed it to the stability watchdog alongside stalls.
+      if !isVOD, pinnedToLive, advanced <= -diagJumpBackwardThresholdSeconds {
+        recordBackwardJumpForStability()
       }
     }
 
     lastObservedPlaybackTimeSeconds = currentSeconds
 
+    // Live-edge drift recovery. While following live, AVPlayer can involuntarily
+    // rewind the playhead far back inside a large (DVR) seekable window to refill
+    // its buffer and then resume *playing forward* from there — which the
+    // frozen-playhead heuristic above never catches (the playhead is advancing).
+    // The viewer is left tens of seconds behind live, slowly playing, forever.
+    // Detect that directly from the edge gap and snap back with a light seek —
+    // but NOT while in stability mode, where riding behind the edge is the point.
+    if !isVOD, pinnedToLive, !isStreamUnstable, let edge = liveSeekableEdgeSeconds(item) {
+      let gap = edge - currentSeconds
+      if gap.isFinite, gap > liveEdgeResyncThresholdSeconds {
+        triggerLiveEdgeResyncIfAllowed(item: item, edge: edge)
+      } else if gap.isFinite, gap <= targetLiveEdgeSeconds + 6 {
+        // Back near the edge — clear the escalation counter.
+        liveResyncAttempts = 0
+      }
+    }
+
+    // Hard stall = AVPlayer parked waiting on a drained/unfillable buffer. Used
+    // both by the end-of-stream detection below and the reload recovery further
+    // down, so compute it once here.
     let isHardStallSignal =
       player.timeControlStatus == .waitingToPlayAtSpecifiedRate
       && (item.isPlaybackBufferEmpty || !item.isPlaybackLikelyToKeepUp)
+
+    // End-of-stream by a frozen live edge. A live broadcast keeps appending
+    // segments, so its seekable edge advances; an ended one freezes it. This is
+    // independent of the waiting/stall state (which the anti-stall slow-down keeps
+    // flickering, so the starvation timer below could otherwise never mature) and
+    // works in stability mode too. A merely-struggling stream still advances its
+    // edge, so it won't trip this.
+    if !isVOD, pinnedToLive {
+      let now = Date()
+      let edge = liveSeekableEdgeSeconds(item)
+      let advanced = edge.map { $0 > (lastLiveEdgeSeconds ?? -.greatestFiniteMagnitude) + 0.5 } ?? false
+      if let edge { lastLiveEdgeSeconds = max(lastLiveEdgeSeconds ?? edge, edge) }
+
+      if advanced {
+        liveEdgeFrozenSince = nil
+      } else if lastLiveEdgeSeconds != nil {
+        if liveEdgeFrozenSince == nil { liveEdgeFrozenSince = now }
+        let frozenFor = now.timeIntervalSince(liveEdgeFrozenSince ?? now)
+        let starved = (bufferAheadSeconds(item) ?? 0) < 1.0
+        if frozenFor >= endOfStreamStalledForceOfflineSeconds, starved, isHardStallSignal {
+          // Unambiguously ended: the edge has stopped advancing AND playback is
+          // hard-stalled on a starved buffer — there is no more content to play
+          // and none is arriving. Surface offline now, before the hard-stall
+          // reload path (which wipes this freeze timer via stopPlaybackWatchdog)
+          // can fire and trap a dead stream in a reload/frozen-frame loop. Twitch's
+          // status lookup can't be trusted here (it lags at `.unknown` for an
+          // ended/raided stream), so this acts on local signals alone.
+          if showLatencyDiagnostics { logDiagnosticsEvent("offline forced (edge frozen + hard stall)") }
+          presentOfflineState()
+        } else if frozenFor >= endOfStreamEdgeForceOfflineSeconds, starved {
+          // Edge frozen long enough with an empty buffer even without a clean hard-
+          // stall signal (e.g. the anti-stall slow-down keeps flickering the state):
+          // don't sit on a frozen frame forever waiting on Twitch's `.unknown`.
+          presentOfflineState()
+        } else if frozenFor >= endOfStreamEdgeFrozenSeconds {
+          probeOfflineIfStreamEnded()
+        }
+      }
+    } else {
+      liveEdgeFrozenSince = nil
+      lastLiveEdgeSeconds = nil
+    }
+
     if stalledPlaybackSamples >= stalledPlaybackThresholdSamples,
       isHardStallSignal,
       let frozenSince = diagFrozenSince,
       Date().timeIntervalSince(frozenSince) >= hardStallRecoverySeconds
     {
       triggerRecoveryIfAllowed(reason: "hard stall")
+    }
+
+    // Soft-stall deadlock recovery. AVPlayer parks in
+    // `.waitingToPlayAtSpecifiedRate` while it actually holds a healthy forward
+    // buffer (it is "likely to keep up" and the buffer isn't empty) — the
+    // `evaluatingBufferingRate` / `toMinimizeStalls` pathology. Nothing restarts
+    // it on its own: the adaptive-rate controller only re-issues a play command
+    // when the target rate changes, and here it stays 1.0×, so the playhead creeps
+    // and behind-live grows without bound while no buffer-empty hard-stall path
+    // applies. Kick it with playImmediately (which bypasses AVPlayer's buffering-
+    // rate evaluation and plays the buffered media at once); escalate to a reload
+    // if the kicks won't take. Mutually exclusive with isHardStallSignal by
+    // construction (that requires an empty/not-likely-to-keep-up buffer).
+    let isSoftStallSignal =
+      player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+      && !item.isPlaybackBufferEmpty
+      && item.isPlaybackLikelyToKeepUp
+      && (bufferAheadSeconds(item) ?? 0) >= softStallBufferFloorSeconds
+    if isSoftStallSignal {
+      let now = Date()
+      if softStallSince == nil { softStallSince = now }
+      let stuckFor = now.timeIntervalSince(softStallSince ?? now)
+      if stuckFor >= softStallReloadSeconds {
+        triggerRecoveryIfAllowed(reason: "soft stall deadlock")
+        softStallSince = nil
+        lastSoftStallNudgeAt = Date.distantPast
+      } else if stuckFor >= softStallNudgeSeconds,
+        now.timeIntervalSince(lastSoftStallNudgeAt) >= playbackWatchdogIntervalSeconds
+      {
+        lastSoftStallNudgeAt = now
+        player.playImmediately(atRate: desiredLivePlaybackRate(policy: activeLivePlaybackPolicy))
+        if showLatencyDiagnostics {
+          let buf = bufferAheadSeconds(item).map { diagFormat($0, decimals: 1) } ?? "—"
+          logDiagnosticsEvent("soft-stall nudge (buf \(buf)s)")
+        }
+      }
+    } else {
+      softStallSince = nil
     }
 
     // Authoritative end-of-stream detection. The reload-recovery path above is
@@ -464,7 +707,6 @@ extension PlayerView {
     guard !isOffline else { return }
     isRecoveringPlayback = true
     defer { isRecoveringPlayback = false }
-
     // Before blindly reloading (which can loop forever on a frozen last frame
     // once a broadcast ends), authoritatively check whether the channel is still
     // live. Only act on a definitive `.offline`; `.live`/`.unknown` fall through
@@ -549,14 +791,31 @@ extension PlayerView {
       smoothedLatencySeconds = nil
       latencySampleCount = 0
       latencyStableCount = 0
+      latencyOutlierStreak = 0
       return
     }
     guard let prev = smoothedLatencySeconds else {
       smoothedLatencySeconds = raw
       latencySampleCount = 1
       latencyStableCount = 0
+      latencyOutlierStreak = 0
       return
     }
+
+    // Reject a single wildly-deviating sample (e.g. a momentarily stale
+    // PROGRAM-DATE-TIME right after a seek, which can read hundreds of seconds)
+    // until it is corroborated by another sample, so a transient spike never
+    // flashes on screen. A genuine large change (a real deep rewind) persists and
+    // is accepted on the next tick.
+    if abs(raw - prev) >= latencyOutlierSeconds {
+      latencyOutlierStreak += 1
+      if latencyOutlierStreak < latencyOutlierConfirmSamples {
+        return
+      }
+    } else {
+      latencyOutlierStreak = 0
+    }
+
     let next: Double
     if abs(raw - prev) >= 3 {
       next = raw
@@ -662,12 +921,7 @@ extension PlayerView {
           ? nil
           : liveEdgeLatencyRaw
         liveEdgeLatencySeconds = liveEdgeLatency
-        applyLiveLatencyCorrection(
-          item: item,
-          range: range,
-          wallClockLatency: wallClockLatencySeconds,
-          liveEdgeLatency: liveEdgeLatency
-        )
+        applyLiveLatencyCorrection()
       } else {
         liveEdgeLatencySeconds = nil
         edgeLatencyLowConfidenceStreak = 0
@@ -675,36 +929,84 @@ extension PlayerView {
     } else {
       liveEdgeLatencySeconds = nil
       edgeLatencyLowConfidenceStreak = 0
-      applyLiveLatencyCorrection(
-        item: item,
-        range: nil,
-        wallClockLatency: wallClockLatencySeconds,
-        liveEdgeLatency: nil
-      )
+      applyLiveLatencyCorrection()
     }
   }
 
-  /// Keeps playback close to the live edge without constant hard seeks.
-  func applyLiveLatencyCorrection(
-    item: AVPlayerItem,
-    range: CMTimeRange?,
-    wallClockLatency: Double?,
-    liveEdgeLatency: Double?
-  ) {
+  /// Forward buffer headroom in seconds (how much playable media sits ahead of the
+  /// playhead in the range currently being played), or `nil` when unknown.
+  func bufferAheadSeconds(_ item: AVPlayerItem?) -> Double? {
+    guard let item else { return nil }
+    let current = CMTimeGetSeconds(item.currentTime())
+    guard current.isFinite else { return nil }
+    for value in item.loadedTimeRanges {
+      let range = value.timeRangeValue
+      let start = CMTimeGetSeconds(range.start)
+      let end = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+      if start.isFinite, end.isFinite, current >= start - 0.5, current <= end + 0.5 {
+        return max(0, end - current)
+      }
+    }
+    return nil
+  }
+
+  /// Bidirectional adaptive playback-rate control for live, driven by buffer
+  /// occupancy (the standard low-latency technique — cf. dash.js `liveCatchup`).
+  /// Two arms, anti-stall first:
+  ///   • Anti-stall — as the forward buffer drains under the policy floor, ease the
+  ///     rate down toward `minPlaybackRate` (~0.90×). Playing slightly slow buys the
+  ///     buffer time to refill, so a transient dip is absorbed instead of becoming a
+  ///     hard stall (and AVPlayer's jarring "waiting toMinimizeStalls" rebuffer).
+  ///   • Catch-up — only when there is healthy buffer headroom *and* we have drifted
+  ///     behind the live edge, nudge slightly above 1.0× to drift back. Never used
+  ///     to reduce quality, and never while starved.
+  /// Returns 1.0× otherwise. A few percent either side of 1.0 is inaudible with
+  /// pitch correction (`audioTimePitchAlgorithm`).
+  func desiredLivePlaybackRate(policy: LivePlaybackPolicy) -> Float {
+    if policy.minPlaybackRate < 1.0,
+      let buffer = bufferAheadSeconds(player.currentItem),
+      buffer < policy.slowdownBufferFloorSeconds {
+      let floor = max(policy.slowdownBufferFloorSeconds, 0.001)
+      let fraction = Float(max(0, min(1, buffer / floor)))
+      return policy.minPlaybackRate + (1.0 - policy.minPlaybackRate) * fraction
+    }
+
+    if policy.enablesGentleCatchUp,
+      let gap = liveEdgeLatencySeconds, gap > policy.catchUpThresholdSeconds,
+      let buffer = bufferAheadSeconds(player.currentItem),
+      buffer > policy.catchUpHealthyBufferSeconds {
+      // Proportional catch-up: the further past the target edge gap we are, the
+      // faster we chase (capped). Eases back toward 1.0 as we approach the target.
+      let excess = Float(gap - policy.catchUpThresholdSeconds)
+      let rate = 1.0 + policy.catchUpRampPerSecond * excess
+      return min(policy.maxCatchUpRate, rate)
+    }
+
+    return 1.0
+  }
+
+  /// Applies the adaptive live playback rate without fighting an intentional pause
+  /// or an in-progress scrub.
+  func applyLiveLatencyCorrection() {
     guard isPlaybackActive else { return }
-    // Never fight an intentional pause or an in-progress scrub: this monitor runs
-    // every tick and force-resetting the rate here would silently resume playback
-    // the instant the viewer pauses or starts scrubbing the rewind bar.
-    guard !isUserPaused, !isScrubbing else { return }
-    // Stability-first policy: do not perform any automatic seeks or rate changes
-    // during playback. Those interventions can look like user-visible jumps.
-    _ = item
-    _ = range
-    _ = wallClockLatency
-    _ = liveEdgeLatency
-    wallClockHighLatencyStreak = 0
-    if abs(player.rate - 1.0) > 0.01 {
-      player.playImmediately(atRate: 1.0)
+    guard !isUserPaused, !isScrubbing, !isVOD else { return }
+
+    let previousRate = player.rate
+    let targetRate = desiredLivePlaybackRate(policy: activeLivePlaybackPolicy)
+    guard abs(previousRate - targetRate) > 0.01 else { return }
+    player.playImmediately(atRate: targetRate)
+
+    // Log only when an arm engages/releases (crosses the 1.0 boundary), not on
+    // every small ramp step, so the event log stays readable.
+    if showLatencyDiagnostics {
+      let buffer = bufferAheadSeconds(player.currentItem).map { diagFormat($0, decimals: 1) } ?? "—"
+      if previousRate >= 0.99, targetRate < 0.99 {
+        logDiagnosticsEvent("slow-down \(diagFormat(Double(targetRate), decimals: 2))× (buf \(buffer)s)")
+      } else if previousRate <= 1.0, targetRate > 1.0 {
+        logDiagnosticsEvent("catch-up \(diagFormat(Double(targetRate), decimals: 2))× (buf \(buffer)s)")
+      } else if previousRate < 0.99, targetRate >= 0.99 {
+        logDiagnosticsEvent("rate normal (buf \(buffer)s)")
+      }
     }
   }
 

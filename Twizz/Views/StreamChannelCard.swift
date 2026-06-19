@@ -174,6 +174,26 @@ struct StreamChannelCard: View {
       onWatch: onWatch,
       onGoToChannel: onGoToChannel
     )
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityLabel)
+  }
+
+  /// A single spoken description per card: name, live/offline state, title,
+  /// game, and (when live) the viewer count — so VoiceOver reads one coherent
+  /// sentence instead of disconnected avatar/name/title fragments.
+  private var accessibilityLabel: Text {
+    var parts: [String] = [channel.displayName]
+    parts.append(channel.isLive ? "Live" : "Offline")
+    if !channel.title.isEmpty {
+      parts.append(channel.title)
+    }
+    if !channel.gameName.isEmpty {
+      parts.append(channel.gameName)
+    }
+    if channel.isLive, let viewerCount = channel.viewerCount {
+      parts.append("\(viewerCount) watching")
+    }
+    return Text(parts.joined(separator: ", "))
   }
 
   @ViewBuilder
@@ -203,14 +223,21 @@ struct StreamChannelCard: View {
         Circle()
           .fill(channel.isLive ? Color.red : Color.gray)
           .frame(width: 8, height: 8)
+        // A textual "LIVE" tag so the live/offline state never reads by color
+        // alone — the red dot conveys it visually, this conveys it in words.
+        if channel.isLive {
+          Text("LIVE")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(Color.white)
+        }
         if let viewerCount = channel.viewerCount {
           Text("\(viewerCount) watching")
             .font(.caption2)
-            .foregroundStyle(Color.white.opacity(0.78))
+            .foregroundStyle(Color.white.opacity(0.92))
         } else if !channel.isLive {
           Text("Offline")
             .font(.caption2)
-            .foregroundStyle(Color.white.opacity(0.78))
+            .foregroundStyle(Color.white.opacity(0.92))
         }
       }
       .padding(12)

@@ -50,6 +50,7 @@ private struct BrowseCategoriesView: View {
         HStack {
           Text("Browse")
             .font(.title.weight(.bold))
+            .accessibilityAddTraits(.isHeader)
 
           if service.isLoadingCategories {
             ProgressView().scaleEffect(0.85)
@@ -144,6 +145,7 @@ struct CategoryStreamsView: View {
             VStack(alignment: .leading, spacing: 2) {
               Text(category.name)
                 .font(.title.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
               if let viewers = category.viewerCount {
                 Text("\(viewers) watching")
                   .font(.footnote)

@@ -97,3 +97,39 @@ targets:
         # ExtensionKit/XPC runtime and instantiates ContentProvider.
         LD_ENTRY_POINT: _NSExtensionMain
         CODE_SIGN_ENTITLEMENTS: TopShelfExtension/TopShelfExtension.entitlements
+  TwizzTests:
+    type: bundle.unit-test
+    platform: tvOS
+    sources:
+      - path: TwizzTests
+    dependencies:
+      - target: Twizz
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Twizz.Tests
+        DEVELOPMENT_TEAM: N8Z5T4AK3X
+        CODE_SIGN_STYLE: Automatic
+        # These pure-logic tests use `@testable import Twizz`, so the bundle is
+        # hosted by the app. Override the project-wide Info.plist settings, which
+        # point at the app's own plist, with a generated one for the test bundle.
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: ""
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Twizz.app/Twizz"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  Twizz:
+    build:
+      targets:
+        Twizz: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TwizzTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

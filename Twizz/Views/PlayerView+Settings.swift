@@ -141,7 +141,7 @@ extension PlayerView {
 
       settingsDisclosureRow(
         title: "Playback & Diagnostics",
-        detail: lowLatencyProxyEnabled ? "Low-Latency On" : nil,
+        detail: preferredQuality == "Auto" ? livePlaybackProfile.pickerLabel : nil,
         focusTag: .chatMoreButton
       ) {
         openSubpage(.playback)
@@ -180,15 +180,6 @@ extension PlayerView {
         settingsSectionHeader("Playback")
 
         settingsPill(
-          title: lowLatencyProxyEnabled ? "Low-Latency Mode On" : "Low-Latency Mode Off",
-          isSelected: lowLatencyProxyEnabled,
-          focusTag: .chatLowLatencyToggle
-        ) {
-          lowLatencyProxyEnabled.toggle()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        settingsPill(
           title: streamRewindEnabled ? "Stream Rewind On" : "Stream Rewind Off",
           isSelected: streamRewindEnabled,
           focusTag: .chatRewindToggle
@@ -225,6 +216,18 @@ extension PlayerView {
         .frame(maxWidth: .infinity, alignment: .leading)
 
         if showLatencyDiagnostics {
+          // Advanced kill-switch: prefetch promotion (the low-latency proxy) is
+          // on by default and powers both Auto profiles. Exposed here only so it
+          // can be disabled while diagnosing a playback issue.
+          settingsPill(
+            title: lowLatencyProxyEnabled ? "Prefetch Proxy On" : "Prefetch Proxy Off",
+            isSelected: lowLatencyProxyEnabled,
+            focusTag: .chatLowLatencyToggle
+          ) {
+            lowLatencyProxyEnabled.toggle()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
           // Debug-only: outgoing raids can't be triggered on demand, so this
           // injects a simulated one (raiding to Monstercat, a near-24/7 stream)
           // to exercise the auto-follow banner + redirect. Visible only while the
@@ -288,7 +291,7 @@ extension PlayerView {
         }
 
         Text(
-          "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Stream Rewind keeps recent video buffered so you can pause and rewind live — focus the scrub bar, then swipe or press left/right to jump back or forward 10s and click or press play/pause to pause. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
+          "Choose Auto · Low Latency or Auto · High Quality from the quality picker to trade latency against quality. Stream Rewind keeps recent video buffered so you can pause and rewind live — focus the scrub bar, then swipe or press left/right to jump back or forward 10s and click or press play/pause to pause. Diagnostics shows live render/bitrate/buffer and freeze/jump events, plus an advanced prefetch-proxy switch."
         )
         .font(.caption2)
         .foregroundStyle(.white.opacity(0.6))

@@ -52,6 +52,17 @@ struct CategoryCardView: View {
       isFocused: isFocused,
       palette: palette
     )
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityLabel)
+  }
+
+  /// One spoken description per category tile: name plus the viewer count when
+  /// present, so VoiceOver reads it as a single element.
+  private var accessibilityLabel: Text {
+    if let viewers = category.viewerCount {
+      return Text("\(category.name), \(viewers) watching")
+    }
+    return Text(category.name)
   }
 
   /// The corner radius callers should use for the focus/hit-test content shape so

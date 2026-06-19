@@ -215,6 +215,7 @@ struct ChannelPageView: View {
           .foregroundStyle(.primary)
           .lineLimit(1)
           .minimumScaleFactor(0.6)
+          .accessibilityAddTraits(.isHeader)
 
         infoChips
       }
@@ -370,6 +371,7 @@ struct ChannelPageView: View {
         Image(systemName: "play.circle.fill")
           .font(.system(size: 40))
           .foregroundStyle(.primary.opacity(0.9))
+          .accessibilityHidden(true)
       }
       .padding(18)
       .frame(maxWidth: .infinity)
@@ -379,8 +381,28 @@ struct ChannelPageView: View {
         palette: palette
       )
       .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 22, y: 12)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(liveCardAccessibilityLabel(profile))
+      .accessibilityHint("Watch")
     }
     .padding(.horizontal, AppLayout.horizontalPadding)
+  }
+
+  /// Combined spoken label for the live hero card so VoiceOver announces one
+  /// coherent "Live, title, game, N viewers" instead of the decorative play
+  /// glyph and scattered chips.
+  private func liveCardAccessibilityLabel(_ profile: ChannelProfile) -> Text {
+    var parts: [String] = ["Live"]
+    if let title = profile.liveTitle, !title.isEmpty {
+      parts.append(title)
+    }
+    if let game = profile.liveGame, !game.isEmpty {
+      parts.append(game)
+    }
+    if let viewers = profile.liveViewerCount {
+      parts.append("\(Self.plainCount(viewers)) viewers")
+    }
+    return Text(parts.joined(separator: ", "))
   }
 
   private var liveThumbnail: some View {
@@ -526,6 +548,7 @@ struct ChannelPageView: View {
       VStack(alignment: .leading, spacing: 4) {
         Text("More like this")
           .font(.system(size: 26, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
           .padding(.horizontal, AppLayout.horizontalPadding)
 
         ScrollView(.horizontal, showsIndicators: false) {
@@ -579,6 +602,7 @@ struct ChannelPageView: View {
         if let description, !description.isEmpty {
           VStack(alignment: .leading, spacing: 8) {
             Text("About").font(.title3.weight(.bold))
+              .accessibilityAddTraits(.isHeader)
             Text(description)
               .font(.title3).foregroundStyle(.secondary)
               .lineLimit(3)
@@ -588,6 +612,7 @@ struct ChannelPageView: View {
         if !links.isEmpty {
           VStack(alignment: .leading, spacing: 8) {
             Text("Links").font(.title3.weight(.bold))
+              .accessibilityAddTraits(.isHeader)
             HStack(spacing: 28) {
               ForEach(links.prefix(6)) { link in
                 let platform = SocialPlatform.detect(url: link.url, name: link.title)
@@ -623,6 +648,7 @@ struct ChannelPageView: View {
     VStack(alignment: .leading, spacing: 4) {
       Text(title)
         .font(.system(size: 26, weight: .bold))
+        .accessibilityAddTraits(.isHeader)
         .padding(.horizontal, AppLayout.horizontalPadding)
 
       ScrollView(.horizontal, showsIndicators: false) {
@@ -641,6 +667,7 @@ struct ChannelPageView: View {
     VStack(alignment: .leading, spacing: 10) {
       Text(title)
         .font(.system(size: 26, weight: .bold))
+        .accessibilityAddTraits(.isHeader)
       HStack(spacing: 14) {
         ProgressView()
         Text("Loading…").foregroundStyle(.secondary)

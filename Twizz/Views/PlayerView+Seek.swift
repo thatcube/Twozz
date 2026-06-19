@@ -231,6 +231,10 @@ extension PlayerView {
       scrubTargetSeconds = nil
       if !isUserPaused { resumePlayback() }
       updateRewindReadout()
+      // Returning to the live edge over a stale seekable window leaves the viewer
+      // tens of seconds behind real live; a fresh load snaps to the true edge
+      // (and keeps the rewind window intact).
+      if !isVOD, pinnedToLive { snapToTrueLiveIfStale() }
     })
   }
 }

@@ -99,6 +99,7 @@ private struct SearchResultsView: View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Categories")
         .font(.title3.weight(.bold))
+        .accessibilityAddTraits(.isHeader)
 
       LazyVGrid(columns: categoryColumns, spacing: 28) {
         ForEach(service.categoryResults) { category in
@@ -123,6 +124,7 @@ private struct SearchResultsView: View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Channels")
         .font(.title3.weight(.bold))
+        .accessibilityAddTraits(.isHeader)
 
       LazyVGrid(columns: channelColumns, spacing: 24) {
         ForEach(service.channelResults) { channel in

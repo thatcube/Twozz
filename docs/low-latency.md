@@ -1,17 +1,21 @@
 # Low-Latency Playback — what we know
 
-Notes on the experimental **Low-Latency Mode** (the local playlist-rewriting
-proxy) and the stream latency work around it. This file deliberately separates
-**verified facts** from **open questions**. Only add something to "Established
-facts" once it is actually confirmed (by Apple docs, the HLS spec, the code
-itself, or a reproducible on-device observation). Hypotheses go under "Open
-questions" until proven.
+Notes on the live-playback latency work: the local playlist-rewriting **proxy**
+(prefetch promotion) and the two **Auto profiles** that trade latency against
+quality on top of it. This file deliberately separates **verified facts** from
+**open questions**. Only add something to "Established facts" once it is actually
+confirmed (by Apple docs, the HLS spec, the code itself, or a reproducible
+on-device observation). Hypotheses go under "Open questions" until proven.
 
 ## TL;DR
 
 - Twitch's own low-latency relies on a proprietary HLS tag AVPlayer ignores.
 - We close most of that gap with an in-process proxy that promotes those
-  segments. It is the real, stable latency win.
+  segments. It is always on for live and is the real, stable latency win.
+- The quality picker exposes two Auto profiles — **Auto · Low Latency** and
+  **Auto · High Quality** — that differ only in buffer depth and gentle
+  catch-up (see `LivePlaybackPolicy`). An explicit rendition pick is a third,
+  fixed-quality case.
 - AVPlayer on tvOS cannot match the Twitch app's sub-second player; ~2–6s
   behind the freshest segment is the realistic floor here.
 - Sharpness, freezes, and "jumps" are governed by buffering and ABR behavior,
@@ -24,11 +28,166 @@ questions" until proven.
    (via the GraphQL access token + Usher), and parses the per-rendition
    variants into `StreamQuality` values (each with a direct media-playlist URL).
 2. `PlayerView` plays it with `AVPlayer`.
-3. When **Low-Latency Mode** is on, `LowLatencyHLSProxy` sits in front of the
-   playlists via an `AVAssetResourceLoaderDelegate` on a custom URL scheme
-   (`twizz-ll://`).
-4. For new installs (no prior saved preference), **Low-Latency Mode defaults to
-   on**. Users can toggle it in in-player chat settings → Playback.
+3. `LowLatencyHLSProxy` sits in front of the playlists via an
+   `AVAssetResourceLoaderDelegate` on a custom URL scheme (`twizz-ll://`). It is
+   attached whenever prefetch promotion **or** Stream Rewind is on.
+4. Prefetch promotion is **on by default** and powers both Auto profiles. It is
+   no longer a user-facing toggle; an advanced **Prefetch Proxy** kill-switch
+   lives under the Diagnostics overlay for troubleshooting only.
+
+## The two Auto profiles (`LivePlaybackPolicy`)
+
+Both Auto rows stay on the adaptive master (ABR active) and keep prefetch
+promotion on; they differ only in how they trade quality for latency. The
+concrete tuning lives in `Twizz/Models/LivePlaybackProfile.swift`:
+
+- **Auto · Low Latency** (default) — shallow forward buffer (~3s) to sit near
+  the edge (and resume fast after a dip rather than waiting to refill a deep
+  buffer), plus a **bidirectional adaptive playback-rate controller** (see
+  `desiredLivePlaybackRate`) that runs on its own **sub-second loop**
+  (`rateControlIntervalSeconds`, ~4 Hz) — far faster than the 1 Hz latency
+  monitor — so it can react to a draining buffer before it empties. As the
+  forward buffer drains under ~1.5s it eases the rate down toward **0.90×**
+  (anti-stall: playing slightly slow lets the buffer refill so a transient dip is
+  absorbed instead of a hard stall); once the buffer clears ~2.0s *and* the edge
+  gap exceeds the **~2s target** — deliberately *tighter* than the 3.5s seek
+  landing point so catch-up always has slack to chase — it nudges the rate up
+  **proportionally** (the further behind the edge, the faster it chases, capped
+  at **1.12×**) and eases back toward 1.0× as it closes on the target. The two
+  arms settle at an equilibrium of ~2s from the edge with a safe buffer. ABR is
+  also free to drop resolution to avoid a stall; degraded quality is acceptable,
+  stutter is not.
+- **Auto · High Quality** — deeper forward buffer (~8s) so ABR has the runway to
+  settle on and hold the best stable resolution, accepting a little more
+  latency. No rate games (always 1.0×); it never sacrifices quality on its own.
+- **Pinned rendition** — a stable buffer (~8s) with no rate games; ABR is off, so
+  it holds exactly that rendition (and rebuffers rather than downshifting).
+- **Stability fallback** (automatic, all profiles) — a runtime override, not a
+  user-selectable row. A **stream-stability watchdog** counts destabilizing
+  events — stalls plus involuntary backward playhead jumps (an AVPlayer rewind we
+  never request) — in a rolling window (`unstableEventWindowSeconds`). Reaching
+  the threshold flags the stream *chronically unstable* — almost always a
+  struggling **broadcaster** encoder (lots of stalls/rewinds despite ample
+  observed bandwidth), not the viewer's connection. To stabilize a bad stream as
+  soon as you arrive, the trip is **aggressive and front-loaded**: during the
+  first `unstableStartupGraceSeconds` of playback a **single** event trips it;
+  after that any **two** events in the window do (so "2 stalls", "2 jumps", or "1
+  stall + 1 jump" all qualify). Stalls feed the watchdog from both the
+  `AVPlayerItemPlaybackStalled` notification and the frozen-playhead heuristic;
+  backward jumps feed it from the playback-health sampler. All of this runs with
+  the diagnostics overlay **off**.
+
+  Once flagged, the normal low-latency strategy is actively harmful: the
+  **low-latency prefetch proxy** keeps promoting `#EXT-X-TWITCH-PREFETCH` segments
+  and shoving the playhead at a live edge the source can't sustain, so it stalls,
+  rewinds, and loops. The fallback inverts the trade-off:
+  - **Drops the prefetch proxy.** `makeItem` suppresses promotion while unstable
+    (`promotePrefetch = lowLatencyProxyEnabled && !isStreamUnstable`) and, when
+    Stream Rewind isn't separately holding the proxy on for DVR, detaches it
+    entirely so AVPlayer plays the plain Twitch playlist — exactly what a manual
+    "LL proxy off" does. Entering stability triggers a lightweight reload so the
+    pipeline rebuilds without the proxy.
+  - **Deep forward buffer (~12s), no catch-up, edge-resync suppressed.** The
+    anti-stall slow-down stays on as the last line of defence.
+  This is the single biggest win for a bad stream in practice: with the proxy off
+  the deep buffer actually *fills* and playback goes rock-solid (riding ~15-20s
+  behind) instead of stuttering near the edge. The flag **latches for the whole
+  channel session** — a stream that has proven it can't hold the edge keeps the
+  safe strategy until the viewer changes channel (there is no auto-recovery; we
+  never flap the proxy back on and risk re-destabilizing it). Surfaced in the
+  Diagnostics overlay as "LL proxy auto-off (unstable)" + "⚠︎ STABILITY MODE".
+  Resets on every new channel session (`resetDiagnostics`).
+
+### Predictive instability (manifest analysis)
+
+The behavioral watchdog above is reactive: it has to wait for actual stalls and
+rewinds before it reacts, so the viewer still sits through the opening stutters
+of a chronically-bad stream. The **predictive** path closes that gap by reading
+the stream's own HLS media playlists — which the low-latency proxy already
+parses on every refresh — and flagging a struggling encoder *before* playback
+stutters. When it fires it trips the exact same `enterStreamStabilityMode()`
+path (drop the prefetch proxy, deep-buffer, reload), so all the behavior above is
+reused unchanged; only the *trigger* is earlier.
+
+It lives in `LowLatencyHLSProxy` (`recordInstabilitySignals`), accumulates a
+small score per media-playlist refresh, and publishes a thread-safe
+`predictedUnstable` verdict (guarded by `instabilityLock`, since the proxy writes
+it on its `delegateQueue` and the watchdog reads it from the `@MainActor`). The
+watchdog polls it in `samplePlaybackHealth` (`checkPredictedInstability`).
+
+**Signals used (all manifest-*structure* only — deliberately independent of
+wall-clock and `#EXT-X-PROGRAM-DATE-TIME`, so a device clock skewed from the
+broadcaster can never produce a false trip):**
+
+1. **Media-sequence stall** — the tail sequence (`#EXT-X-MEDIA-SEQUENCE` + number
+   of listed segments) didn't advance between refreshes, i.e. the encoder
+   appended no new segment this cycle. Strongest single signal
+   (`stalledRefreshPoints = 1.5`).
+2. **Irregular `#EXTINF`** — a listed segment deviates from
+   `#EXT-X-TARGETDURATION` by more than `segmentDurationToleranceFraction` (0.5 ⇒
+   a 2s-target segment shorter than 1.0s or longer than 3.0s). A steady encoder
+   emits near-exact target-length segments; a struggling one does not. The final
+   listed segment is excluded (a live tail can be a legitimate partial) and at
+   least `minSegmentsForDurationCheck` (3) segments are required
+   (`irregularRefreshPoints = 1.0`). **Streak escalation (the primary bad-encoder
+   signal — shxtou's dominant manifest reason on-device):** the *second and each
+   subsequent consecutive* off-cadence refresh scores `irregularStreakRefreshPoints`
+   (2.0) instead of the base 1.0, and a clean refresh *decays* the streak by one
+   (rather than hard-resetting), so an encoder that is off-cadence frequently — but
+   not on literally every refresh — still builds toward the escalating tier.
+   Conversely, the *isolated* (first-of-a-run) contribution is capped at
+   `irregularIsolatedScoreCap` (1.0): no matter how many isolated off-cadence
+   refreshes a window contains (e.g. the splice-in and splice-out boundaries of an
+   ad break), together they add at most 1.0. This separates a genuinely struggling
+   encoder (sustained jitter ⇒ 1.0 + 2.0 + 2.0 = 5.0, trips with margin) from an
+   ad splice (isolated boundary refreshes, capped at 1.0) by their **time
+   signature** rather than by a flat score — sustained jitter crosses the
+   threshold while spaced splices cannot accumulate to it.
+3. **New discontinuities** — the cumulative discontinuity count
+   (`#EXT-X-DISCONTINUITY-SEQUENCE` + in-window `#EXT-X-DISCONTINUITY`) grew since
+   the last refresh, i.e. the encoder broke timeline continuity again
+   (`discontinuityRefreshPoints = 0.75`). **Capped at `discontinuityScoreCap`
+   (1.5), below the trip threshold**, so a normal ad break (which inserts
+   discontinuities) can contribute but can never trip the predictor on its own.
+   With the irregular isolated cap above, the worst-case ad break — off-cadence
+   segments *and* a discontinuity at both boundaries — tops out at 1.0 + 1.5 = 2.5,
+   still below the 3.0 threshold.
+
+**Tuning.** The score latches `predictedUnstable` once it reaches
+`predictedUnstableScoreThreshold` (3.0) *and* at least
+`minRefreshesBeforePrediction` (3) refreshes have been seen; accumulation stops
+after `observationRefreshWindow` (12) refreshes (the predictor is an *early*
+signal only — anything later is left to the behavioral watchdog, and bounding the
+window stops a mid-stream ad break from tripping it late). With Twitch's ~2s
+refresh cadence a chronically-bad stream (`shxtou`, `RTGame`, struggling
+encoders) trips within roughly the first 3–4 refreshes (~6–8s), while a flawless
+stream (score 0) or a single ad break (≤1.5) never does. All thresholds are named
+`static let`s on `LowLatencyHLSProxy`; **they are first-cut values reasoned from
+the HLS spec + Twitch's observed manifest behavior and still want on-device
+confirmation against real known-bad streams.** Surfaced in the Diagnostics
+overlay: a live `Predict: score x.x/3.0 · N refreshes · <reason>` line before a
+trip, and `⚠︎ STABILITY MODE [predictive]` (vs `[observed]`) once latched. The
+verdict is per channel session (cleared in `resetDiagnostics` /
+`LowLatencyHLSProxy.resetInstabilityPrediction`).
+
+**Rejected for this first cut: PDT / prefetch *staleness*.** "How old is the
+freshest segment" (now − newest `#EXT-X-PROGRAM-DATE-TIME`) is an intuitive
+encoder-falling-behind signal, but normal healthy low latency is already ~5–15s
+behind live, and an absolute age measurement depends on the device clock matching
+the broadcaster's — clock skew makes it false-trip-prone. The skew-invariant
+structural signals above distinguish bad streams without that risk. A
+*skew-invariant* version (the newest-content age *growing* across refreshes, or
+prefetch dropping out after having been present) is a reasonable future addition.
+
+The adaptive-rate technique mirrors low-latency DASH/HLS players (e.g. dash.js
+`liveCatchup`): keep latency near a target by trimming a few percent off the
+playback rate either side of 1.0 rather than hard seeks/pauses. Time-domain
+pitch correction (`audioTimePitchAlgorithm = .timeDomain`) keeps the audio
+natural through those changes.
+
+Stutter-resistance in both Auto modes comes from ABR headroom plus the
+anti-stall slow-down, not from a hard pin: ABR lets the stream step down instead
+of stalling, and the slow-down rides out short buffer dips.
 
 ## Established facts (verified)
 
@@ -70,28 +229,98 @@ questions" until proven.
 - **A pinned rendition has no ABR fallback.** If its bitrate exceeds the
   connection, it rebuffers instead of stepping down — so "Auto" is the safe
   choice when a pin is unstable.
-- **Playback speed never affects resolution.** Catch-up rate changes (≤1.05x)
-  cannot blur the picture; blur is always an ABR/rendition issue.
+- **Playback speed never affects resolution.** Adaptive-rate changes (~0.90×–
+  1.12×) cannot blur the picture; blur is always an ABR/rendition issue.
 
 ### The latency readout
 - There are two different "latency" numbers, and they mean different things:
-  - **Encoder delay** = `Date()` − `PROGRAM-DATE-TIME` of the current frame.
-    For a standard-latency Twitch stream this is ~18–20s. The Twitch phone app
-    sits this far behind too. So this number reading "~20s" while you are
-    visually in sync with your phone is expected — it is distance from the
-    *encoder*, not from what any viewer can actually reach.
-  - **Edge gap** = how far the playhead trails the freshest segment we can
-    fetch (the seekable-window end). This is ~2–6s and is the number that
-    tracks "am I near the freshest available content / in sync with my phone."
-- The on-screen badge now **leads with the edge gap**, with encoder delay kept
-  only as a fallback when the edge gap is unavailable.
+  - **Wall-clock behind-live** = `Date()` − `PROGRAM-DATE-TIME` of the current
+    frame. This is how far behind the real broadcast the on-screen picture is —
+    the metric a viewer actually experiences (and the one used for chat sync).
+    For Twitch low-latency this is typically ~5–15s.
+  - **Edge gap** = how far the playhead trails the freshest segment we can fetch
+    (the seekable-window end). This is ~2–6s; it collapses to ~0 at the edge and
+    is *not* a reliable "behind live" figure on its own.
+- The on-screen badge **leads with wall-clock behind-live**, with the edge gap
+  kept only as a fallback when wall-clock (`currentDate()`) is unavailable. The
+  badge is **hidden by default** (`showLatencyBadge`).
+- `PROGRAM-DATE-TIME` is approximate and occasionally stale (especially right
+  after a stall/reload), so the raw wall-clock value can momentarily spike; the
+  smoother applies outlier rejection, but transient jumps in the diagnostic
+  readout do not reflect a real change in playback position.
 
 ### Recovery behavior
-- The playback watchdog, on a detected freeze, calls `recoverFromPlaybackStall`,
-  which does a **full reload** (`load(...)`) and restarts playback near the live
-  edge. A reload therefore looks like a large forward "jump" on screen — this is
-  one known, code-level source of jumps (counted separately as "Reloads" in the
-  Diagnostics overlay).
+- **Involuntary live-edge drift is detected independently of the frozen-playhead
+  heuristic.** With a large DVR window and `automaticallyWaitsToMinimizeStalling`
+  on, AVPlayer can rewind the playhead far back inside the seekable window to
+  refill its buffer and then play *forward* from there — so the old "playhead
+  isn't advancing" stall check never fired, and the player could sit 120s+ behind
+  live indefinitely. `samplePlaybackHealth` now also watches the edge gap while
+  pinned to live and, past a threshold (~15s — far above the normal sub-second
+  edge gap and ordinary rebuffer jitter, but low enough to rescue the viewer long
+  before they're a minute behind), runs a **resync ladder**: a throttled
+  lightweight seek back toward the edge (instant recovery the gentle rate
+  catch-up can't achieve for a large hole), escalating to a full reload only after
+  repeated failures.
+- The playback watchdog, on a detected hard freeze, calls
+  `recoverFromPlaybackStall`, which does a **full reload** (`load(...)`) and
+  restarts playback near the live edge. A reload therefore looks like a large
+  forward "jump" on screen — this is one known, code-level source of jumps
+  (counted separately as "Reloads" in the Diagnostics overlay).
+- **Snap to true live on return.** After scrubbing through the DVR window and
+  returning to the live edge, AVPlayer's seekable window can itself trail the
+  true broadcast tail (its cached media playlist is stale), so a same-window seek
+  leaves the viewer ~10s+ behind. On scrub commit, when pinned to live and that
+  staleness (wall-clock behind-live minus the in-window edge gap) exceeds a
+  threshold, `snapToTrueLiveIfStale` forces a fresh load that lands at the real
+  edge. The proxy only clears its DVR buffers when `retainHistory` actually
+  changes, so the rewind window survives the reload.
+- **Soft-stall deadlock recovery (the "Playing/waiting · evaluatingBufferingRate"
+  freeze with a healthy buffer).** AVPlayer can park in
+  `.waitingToPlayAtSpecifiedRate` (reason `.evaluatingBufferingRate` or
+  `.toMinimizeStalls`) *even while it holds a perfectly healthy forward buffer*
+  (`isPlaybackLikelyToKeepUp == true`, buffer not empty). It decided the network
+  might not sustain the rate and then never re-evaluates on its own — because our
+  adaptive-rate controller (`applyLiveLatencyCorrection`) only issues a play
+  command when the **target rate changes**, and here it stays 1.0×. The playhead
+  creeps (not a hard freeze, so "Stalls" stays 0 and the buffer-empty hard-stall /
+  offline paths never fire) while behind-live grows without bound — the classic
+  "9k viewers, ~24s → ~52s behind live, buffer ahead stuck at 4.3s" report.
+  `samplePlaybackHealth` now detects "waiting despite a healthy buffer"
+  (`isSoftStallSignal`, mutually exclusive with the buffer-empty `isHardStallSignal`
+  by construction) and, after a short grace (`softStallNudgeSeconds`, 3s), kicks it
+  with `player.playImmediately(atRate:)` — which explicitly *bypasses* AVPlayer's
+  buffering-rate evaluation and plays the buffered media at once. If repeated
+  nudges can't break it within `softStallReloadSeconds` (12s), it escalates to a
+  reload (which also re-lands near live, recovering the latency that grew while
+  stuck). On-device this surfaces a "soft-stall nudge (buf …s)" line in the
+  Diagnostics event log. This also helps slow stream starts.
+- **End-of-stream / offline detection (the "stream ended but it just froze"
+  bug).** When a broadcast ends or raids, Twitch's `streamLiveStatus` GraphQL
+  keeps returning `.unknown` (not `.offline`) for tens of seconds to minutes, so
+  every offline path that *asks Twitch* (`probeOfflineIfStreamEnded`, the reload
+  recovery's pre-check, `load`'s post-failure check) fails to fire. The only
+  trustworthy signal is local: **a live broadcast keeps advancing its seekable
+  edge; an ended one freezes it.** `samplePlaybackHealth` tracks the max edge and
+  how long it has been frozen (`liveEdgeFrozenSince`). Two Twitch-independent
+  force-offline tiers (in addition to a 12s `probeOfflineIfStreamEnded` poke):
+  - **Fast (`endOfStreamStalledForceOfflineSeconds`, 8s):** edge frozen **and**
+    buffer starved (<1s) **and** a clean `isHardStallSignal`. This is the
+    unambiguous "ended" signature — no content left to play and none arriving.
+    It is deliberately set *below* the hard-stall reload window (≈12s of frozen
+    playhead): a recovery reload calls `stopPlaybackWatchdog`, which wipes the
+    `liveEdgeFrozenSince`/`lastLiveEdgeSeconds` freeze timer, so without this a
+    dead stream loops reload→stall→reload (or sits on a frozen frame) forever and
+    never surfaces offline — the nmplol/this-stream report. Because the edge
+    freezes *before* the playhead (the buffer drains first), this fast tier
+    provably fires before the reload can reset it, for any buffer depth.
+  - **Slow (`endOfStreamEdgeForceOfflineSeconds`, 30s):** edge frozen + buffer
+    starved even *without* a clean hard-stall signal (the anti-stall slow-down
+    can keep flickering `timeControlStatus`), as a final backstop.
+  A merely-struggling-but-live stream keeps advancing its edge (clears the timer)
+  and, in stability mode, rides a deep non-starved buffer, so neither tier
+  false-trips it. On-device the fast tier logs
+  "offline forced (edge frozen + hard stall)".
 
 ## Realistic floor
 
@@ -113,23 +342,40 @@ These are hypotheses. Do not treat them as fact until the Diagnostics overlay
   1. AVPlayer's own skip-to-live after the buffer dips (native behavior).
   2. The watchdog reload (confirmed mechanism; magnitude/frequency TBD).
   3. A pinned rendition stalling then re-snapping.
-  4. The proxy's `#EXTINF` duration heuristic: prefetch segment durations are
-     guessed from the previous real segment. If those guesses drift from real
-     durations, the media timeline can accumulate error and AVPlayer may resync
-     with a jump. Plausible, unproven.
+  4. The proxy's `#EXTINF` duration heuristic: prefetch tags carry no duration,
+     so the proxy synthesizes one. It now uses the **average** of the real
+     segment durations (matching Streamlink) rather than just the previous
+     segment, which is steadier near boundaries. Residual timeline drift from
+     this estimate is still possible but less likely; unproven.
 - **Are streams actually delivered at the selected resolution?** The Diagnostics
   overlay now shows the real rendered size (`presentationSize`) and the
   indicated bitrate, so this can finally be checked per stream instead of
   guessed.
+- **Does the predictive instability detector survive a mid-roll ad transition?**
+  Twitch's mid-roll ads splice via `#EXT-X-DISCONTINUITY` and can briefly perturb
+  the manifest (discontinuity markers, occasionally off-cadence ad segments)
+  without the *broadcaster's* encoder being unhealthy. The discontinuity score is
+  capped (`discontinuityScoreCap = 1.5`, below the 3.0 trip threshold) precisely
+  so an ad break can't trip the predictor on its own, and `testDiscontinuities`
+  `AloneDoNotFalseTrip` covers the synthetic case — but this must be **confirmed
+  on-device against a real mid-roll ad** to be sure the splice doesn't also throw
+  enough irregular-`#EXTINF` or stalled-sequence points to clear the threshold
+  alongside the discontinuities. Watch the overlay `Predict:` score across an ad
+  to verify it stays under 3.0.
 
 ## Diagnostics overlay (how to gather data)
 
-Player → open chat settings (`slider.horizontal.3`) → **Playback**. The same
-section contains both **Low-Latency Mode** and **Diagnostics Overlay** toggles.
-With Diagnostics on, the player shows a panel (while controls are visible)
-reporting, all measured live from the current item:
+Player → open chat settings (`slider.horizontal.3`) → **Playback**. Turn on the
+**Diagnostics Overlay** toggle; doing so also reveals the advanced **Prefetch
+Proxy** kill-switch and the simulate-event buttons. With Diagnostics on, the
+player shows a panel (while controls are visible) reporting, all measured live
+from the current item:
 
-- **Mode** — proxy on/off and whether quality is Auto/adaptive or pinned.
+- **Mode** — proxy on/off and whether quality is Auto/adaptive or pinned. When
+  the predictive detector is still watching a live stream this row is followed by
+  a `Predict:` line (running score / threshold, refreshes seen, latest reason);
+  once stability mode latches, the `STABILITY MODE` line is tagged `[predictive]`
+  or `[observed]` to show which trigger fired.
 - **Render** — actual decoded video size (`presentationSize`) and playback rate.
   This is the ground truth for "is it really 1080p".
 - **Bitrate** — indicated (the rendition ABR chose) vs observed (measured
@@ -146,7 +392,7 @@ visible.
 
 How jumps are detected: each second we compare actual playhead advance against
 wall-clock × rate. Unexplained forward movement ≥ 2.0s is logged as a forward
-jump; backward movement ≥ 1.0s as a back jump. Normal catch-up (≤1.05x) stays
+jump; backward movement ≥ 1.0s as a back jump. Normal catch-up (≤1.12x) stays
 well under these thresholds.
 
 ### When reporting a freeze or jump

@@ -47,6 +47,7 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 28) {
             Text("Settings")
               .font(.system(size: 38, weight: .bold))
+              .accessibilityAddTraits(.isHeader)
 
             preferencesGroup
             accountSection
@@ -346,6 +347,7 @@ struct SettingsView: View {
       VStack(alignment: .leading, spacing: 6) {
         Text("Top Shelf")
           .font(.system(size: 32, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
           .foregroundStyle(.secondary)
 
         Text("Diagnostics for the stream cards shown above the app on the Home screen.")
@@ -422,6 +424,7 @@ private struct AboutSection: View {
 
         Text("About")
           .font(.system(size: 32, weight: .bold))
+          .accessibilityAddTraits(.isHeader)
 
         VStack(alignment: .leading, spacing: 10) {
           infoRow("Name", "Twizz")

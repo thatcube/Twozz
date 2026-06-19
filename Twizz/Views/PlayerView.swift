@@ -149,6 +149,11 @@ struct PlayerView: View {
   @Environment(\.dismiss) var dismiss
   @Environment(\.themePalette) var palette
   @AppStorage("preferredQuality") var preferredQuality = "Auto"
+  /// Latency-vs-quality profile for the adaptive ("Auto") stream, surfaced as the
+  /// two Auto rows in the quality picker. Stored as the enum raw value; read it
+  /// through `livePlaybackProfile`.
+  @AppStorage("livePlaybackProfile") var livePlaybackProfileRaw = LivePlaybackProfile.default
+    .rawValue
   @AppStorage("chatTextSizeValue") var chatTextSizeValue = Double(
     ChatAppearance.defaultTextSize)
   @AppStorage("chatEmoteAuto") var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
@@ -266,6 +271,10 @@ struct PlayerView: View {
   @State var isQualityMenuPresented = false
   @State var latencyTask: Task<Void, Never>?
   @State var playbackWatchdogTask: Task<Void, Never>?
+  /// Drives the adaptive playback-rate controller at a sub-second cadence — far
+  /// faster than the 1 Hz latency monitor — so the anti-stall slow-down can react
+  /// to a draining buffer before it empties into a hard stall.
+  @State var rateControlTask: Task<Void, Never>?
   // The live-latency and playback-watchdog tasks rewrite a large set of
   // bookkeeping values once per second. Storing them as `@State` re-executed the
   // entire (very large) PlayerView body every tick, which rebuilt the focused
@@ -332,6 +341,10 @@ struct PlayerView: View {
     get { mon.latencyStableCount }
     nonmutating set { mon.latencyStableCount = newValue }
   }
+  var latencyOutlierStreak: Int {
+    get { mon.latencyOutlierStreak }
+    nonmutating set { mon.latencyOutlierStreak = newValue }
+  }
   // The real (pre-proxy) source URL of the currently loaded item, so we can tell
   // whether a quality switch actually needs to replace the item. AVURLAsset.url
   // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
@@ -345,21 +358,9 @@ struct PlayerView: View {
     get { mon.didRequestPlayback }
     nonmutating set { mon.didRequestPlayback = newValue }
   }
-  var lastHardCatchUpJumpAt: Date {
-    get { mon.lastHardCatchUpJumpAt }
-    nonmutating set { mon.lastHardCatchUpJumpAt = newValue }
-  }
-  var lastWallClockCatchUpAt: Date {
-    get { mon.lastWallClockCatchUpAt }
-    nonmutating set { mon.lastWallClockCatchUpAt = newValue }
-  }
   var edgeLatencyLowConfidenceStreak: Int {
     get { mon.edgeLatencyLowConfidenceStreak }
     nonmutating set { mon.edgeLatencyLowConfidenceStreak = newValue }
-  }
-  var wallClockHighLatencyStreak: Int {
-    get { mon.wallClockHighLatencyStreak }
-    nonmutating set { mon.wallClockHighLatencyStreak = newValue }
   }
   var wallClockLowConfidenceStreak: Int {
     get { mon.wallClockLowConfidenceStreak }
@@ -389,9 +390,32 @@ struct PlayerView: View {
     get { mon.lastRecoveryAttemptAt }
     nonmutating set { mon.lastRecoveryAttemptAt = newValue }
   }
+  var lastLiveResyncAt: Date {
+    get { mon.lastLiveResyncAt }
+    nonmutating set { mon.lastLiveResyncAt = newValue }
+  }
+  var lastLiveEdgeSnapAt: Date {
+    get { mon.lastLiveEdgeSnapAt }
+    nonmutating set { mon.lastLiveEdgeSnapAt = newValue }
+  }
+  var liveResyncAttempts: Int {
+    get { mon.liveResyncAttempts }
+    nonmutating set { mon.liveResyncAttempts = newValue }
+  }
   var liveStallWaitingSince: Date? {
     get { mon.liveStallWaitingSince }
     nonmutating set { mon.liveStallWaitingSince = newValue }
+  }
+  /// Highest live seekable-edge position seen this session, and when it last
+  /// stopped advancing — used to detect an ended broadcast (the edge freezes)
+  /// independently of the flaky waiting/stall state.
+  var lastLiveEdgeSeconds: Double? {
+    get { mon.lastLiveEdgeSeconds }
+    nonmutating set { mon.lastLiveEdgeSeconds = newValue }
+  }
+  var liveEdgeFrozenSince: Date? {
+    get { mon.liveEdgeFrozenSince }
+    nonmutating set { mon.liveEdgeFrozenSince = newValue }
   }
   var offlineProbeInFlight: Bool {
     get { mon.offlineProbeInFlight }
@@ -401,6 +425,39 @@ struct PlayerView: View {
     get { mon.lastOfflineProbeAt }
     nonmutating set { mon.lastOfflineProbeAt = newValue }
   }
+  var recentInstabilityEvents: [Date] {
+    get { mon.recentInstabilityEvents }
+    nonmutating set { mon.recentInstabilityEvents = newValue }
+  }
+  var streamUnstableSince: Date? {
+    get { mon.streamUnstableSince }
+    nonmutating set { mon.streamUnstableSince = newValue }
+  }
+  var lastStallAt: Date? {
+    get { mon.lastStallAt }
+    nonmutating set { mon.lastStallAt = newValue }
+  }
+  var streamPlaybackStartedAt: Date? {
+    get { mon.streamPlaybackStartedAt }
+    nonmutating set { mon.streamPlaybackStartedAt = newValue }
+  }
+  /// When AVPlayer first parked in a "waiting despite a healthy buffer" soft-stall
+  /// deadlock, and when we last nudged it. Drives the playImmediately kick that
+  /// breaks `evaluatingBufferingRate`/`toMinimizeStalls` parks.
+  var softStallSince: Date? {
+    get { mon.softStallSince }
+    nonmutating set { mon.softStallSince = newValue }
+  }
+  var lastSoftStallNudgeAt: Date {
+    get { mon.lastSoftStallNudgeAt }
+    nonmutating set { mon.lastSoftStallNudgeAt = newValue }
+  }
+  var streamUnstableWasPredicted: Bool {
+    get { mon.streamUnstableWasPredicted }
+    nonmutating set { mon.streamUnstableWasPredicted = newValue }
+  }
+  /// True while the stream-stability watchdog has us in deep-buffer stability mode.
+  var isStreamUnstable: Bool { mon.streamUnstableSince != nil }
   @State var lastStallNotificationAt = Date.distantPast
   @State var suppressLowLatencyToggleReload = false
   @State var consecutiveLoadFailures = 0
@@ -533,28 +590,13 @@ struct PlayerView: View {
   /// just-arrived DVR window and a full 30-min one both feel the same instead of
   /// the small one being hypersensitive.
   let scrubFullWindowTravelUnits: Double = 4
-  // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
-  // blur on-device. Freeze-free playback is the top priority, then sharpness.
+  // blur on-device. Per-mode buffer/ABR behavior lives in LivePlaybackPolicy;
+  // this is the shared target gap used by live-edge follow + drift recovery.
   let targetLiveEdgeSeconds: Double = 3.5
-  let softCatchUpThresholdSeconds: Double = 8
-  // In low-latency mode the proxy adds prefetch segments to the seekable window,
-  // which inflates the seekable-edge latency metric. A zero-tolerance hard seek
-  // against that inflated edge rebuffers and freezes, so disable hard seeks while
-  // low-latency mode is on and rely on gentle rate correction + a healthy buffer.
-  var hardCatchUpThresholdSeconds: Double {
-    lowLatencyProxyEnabled ? .greatestFiniteMagnitude : 14
-  }
-  let hardCatchUpCooldownSeconds: Double = 20
-  let maxCatchUpRate: Float = 1.04
   let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
   let edgeLatencyUnavailableSamples = 4
-  let wallClockSoftCatchUpThresholdSeconds: Double = 12
-  let wallClockHardCatchUpThresholdSeconds: Double = 16
-  let wallClockHardCatchUpRequiredSamples = 10
-  let wallClockHardCatchUpCooldownSeconds: Double = 90
-  let targetWallClockSeconds: Double = 6.5
   let wallClockUnavailableSamples = 4
   let wallClockStaleDateDeltaEpsilonSeconds: Double = 0.08
   let wallClockStalePlaybackAdvanceThresholdSeconds: Double = 0.6
@@ -572,10 +614,69 @@ struct PlayerView: View {
   let latencyStableSamplesRequired = 2
   let latencyPlausibleFloorSeconds: Double = 2
   let latencyStableDeltaSeconds: Double = 2
+  /// A single latency sample deviating from the smoothed value by at least this
+  /// much is treated as a suspect outlier and held back until corroborated.
+  let latencyOutlierSeconds: Double = 25
+  let latencyOutlierConfirmSamples = 2
   let playbackWatchdogIntervalSeconds: Double = 2
+  /// Cadence for the adaptive playback-rate controller. Sub-second so the
+  /// anti-stall slow-down can catch a fast buffer drain (a 1 Hz loop reacts too
+  /// late — the buffer can empty between samples).
+  let rateControlIntervalSeconds: Double = 0.25
   let hardStallRecoverySeconds: Double = 10
   let recoveryCooldownSeconds: Double = 15
+  /// Live-edge drift recovery. When the player is following live (`pinnedToLive`)
+  /// but the playhead has involuntarily fallen this far behind the seekable edge,
+  /// snap it back toward live with a lightweight seek instead of waiting for the
+  /// frozen-playhead watchdog (which a slow-playing-after-rewind player defeats).
+  /// The live *edge gap* (distance from the playhead to the seekable tail) sits
+  /// near 0 in normal playback and only a couple seconds during ordinary rebuffer
+  /// jitter, so a gap this large unambiguously means "rewound far back and stuck."
+  /// The gentle rate catch-up can't recover a hole this big (1.12× would take
+  /// minutes), so seek back directly. Kept well above the ~2s catch-up target so
+  /// it never fights ordinary drift.
+  let liveEdgeResyncThresholdSeconds: Double = 15
+  /// Minimum spacing between lightweight live-edge resync seeks.
+  let liveResyncCooldownSeconds: Double = 6
+  /// After this many resync seeks fail to hold the edge, escalate to a full reload.
+  let maxLiveResyncAttempts = 3
+  /// When the viewer returns to the live edge but the seekable window AVPlayer
+  /// holds trails the true broadcast by at least this much, a same-window seek
+  /// can't reach real live — so we force a fresh load that lands at the true edge.
+  /// Measured as wall-clock behind-live minus the in-window edge gap, so it only
+  /// fires when the cached playlist is genuinely stale (not for normal latency).
+  let staleLiveWindowSnapThresholdSeconds: Double = 10
+  /// Minimum spacing between snap-to-true-live reloads, so a single return-to-live
+  /// can never loop into repeated reloads.
+  let liveEdgeSnapCooldownSeconds: Double = 6
   let stallNotificationDebounceSeconds: Double = 2.5
+  /// Stream-stability watchdog. It counts destabilizing events — stalls plus
+  /// involuntary backward playhead jumps (an AVPlayer rewind we never request) —
+  /// within a rolling window. Reaching the threshold flags the stream as
+  /// chronically unstable and switches to deep-buffer stability mode (drop the
+  /// prefetch proxy and ride behind the edge instead of chasing it). A struggling
+  /// broadcaster encoder trips this; healthy streams effectively never do.
+  let unstableEventWindowSeconds: Double = 45
+  /// Steady-state: any two destabilizing events in the window trip it (so "2
+  /// stalls", "2 jumps", or "1 stall + 1 jump" all qualify).
+  let unstableEventThreshold = 2
+  /// During the opening seconds of a stream a single event trips it, so a stream
+  /// that stutters the moment you arrive is stabilized almost immediately instead
+  /// of making you watch it sort itself out.
+  let unstableStartupEventThreshold = 1
+  let unstableStartupGraceSeconds: Double = 12
+  /// On entering stability mode, seek back to roughly this far behind the live
+  /// edge to build a cushion (and skip past a stuck near-edge segment). Only used
+  /// when the proxy was already off; otherwise a reload repositions the timeline.
+  let stabilityTargetBehindEdgeSeconds: Double = 20
+  /// Predictive stability: the proxy (`LowLatencyHLSProxy`) analyzes each HLS
+  /// media-playlist refresh and latches a `predictedUnstable` verdict when a
+  /// struggling encoder's manifests show structural trouble (media-sequence
+  /// stalls, irregular `#EXTINF`, recurring discontinuities) in the opening
+  /// refreshes. The watchdog polls that verdict here and trips the same
+  /// `enterStreamStabilityMode()` path *before* the viewer sits through stalls.
+  /// The scoring thresholds live next to the data they score, as the
+  /// `static let`s on `LowLatencyHLSProxy`.
   /// How long the player may sit unable to play (waiting on a starved buffer)
   /// before we authoritatively ask Twitch whether the channel is still live.
   /// Short enough to surface an ended broadcast promptly, long enough that a
@@ -583,6 +684,41 @@ struct PlayerView: View {
   let offlineProbeStallSeconds: Double = 6
   /// Minimum spacing between authoritative offline probes while still stuck.
   let offlineProbeCooldownSeconds: Double = 8
+  /// End-of-stream detection by a frozen live edge. A live broadcast keeps
+  /// appending segments, so its seekable edge advances; an ended one freezes it.
+  /// Once the edge hasn't advanced for this long while we're trying to follow
+  /// live, ask Twitch whether the channel is still up (this is independent of the
+  /// waiting/stall state, which the anti-stall slow-down keeps flickering). A
+  /// merely-struggling stream still advances its edge, so it won't trip this.
+  let endOfStreamEdgeFrozenSeconds: Double = 12
+  /// Safety net for when Twitch's status lookup keeps returning `.unknown` for an
+  /// ended stream: if the edge has been frozen this long AND the buffer is empty,
+  /// surface the offline state anyway rather than sit on a dead frame forever.
+  let endOfStreamEdgeForceOfflineSeconds: Double = 30
+  /// Fast end-of-stream force-offline for the unambiguous "ended" signature: the
+  /// live edge has stopped advancing AND playback is hard-stalled on a starved
+  /// buffer. A struggling-but-live stream keeps advancing its edge (clearing the
+  /// freeze timer) and a deep-buffer stability ride stays non-starved, so neither
+  /// trips this. Kept below the hard-stall reload window so a dead stream surfaces
+  /// offline before a (futile) recovery reload can reset the freeze timer.
+  let endOfStreamStalledForceOfflineSeconds: Double = 8
+  /// Soft-stall deadlock recovery. AVPlayer can park in
+  /// `.waitingToPlayAtSpecifiedRate` (reason `.evaluatingBufferingRate` or
+  /// `.toMinimizeStalls`) even while it holds a perfectly healthy forward buffer:
+  /// it decides the network might not sustain the rate and then never re-evaluates
+  /// on its own, because our adaptive-rate controller only issues a play command
+  /// when the *target rate changes* (here it stays 1.0×). The playhead creeps,
+  /// behind-live grows without bound, yet no buffer-empty hard-stall path fires.
+  /// We detect "waiting despite a healthy buffer" and kick it with playImmediately.
+  /// Minimum forward buffer that makes a `.waitingToPlayAtSpecifiedRate` state a
+  /// deadlock to break rather than a legitimate rebuffer to wait out.
+  let softStallBufferFloorSeconds: Double = 1.5
+  /// How long the player may sit waiting-with-healthy-buffer before the first nudge
+  /// (a brief wait right after a seek/start is normal and shouldn't be kicked).
+  let softStallNudgeSeconds: Double = 3
+  /// If repeated nudges can't break the deadlock within this long, reload — which
+  /// also re-lands near live, recovering the latency that grew while we were stuck.
+  let softStallReloadSeconds: Double = 12
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
@@ -911,6 +1047,10 @@ struct PlayerView: View {
       else { return }
       lastStallNotificationAt = now
       markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
+      // Re-kick immediately. With automaticallyWaitsToMinimizeStalling the player
+      // usually self-resumes once buffered, but an explicit nudge shortens the
+      // gap and helps the player that has stalled without auto-resuming.
+      player.playImmediately(atRate: 1.0)
     }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) {
       notification in
@@ -1470,7 +1610,7 @@ struct PlayerView: View {
         if !isVOD {
         QualityMenu(
           options: qualityOptions,
-          selectedOption: preferredQuality,
+          selectedOption: selectedQualityOption,
           buttonLabel: qualityButtonLabel,
           reservedWidthLabels: qualityButtonLabelCandidates,
           displayLabel: { qualityDisplayLabel($0) },
@@ -1687,9 +1827,33 @@ struct PlayerView: View {
   var diagnosticsLines: [String] {
     var lines: [String] = []
 
-    let mode = lowLatencyProxyEnabled ? "LL proxy ON" : "LL proxy off"
+    let mode: String
+    if lowLatencyProxyEnabled {
+      mode = isStreamUnstable ? "LL proxy auto-off (unstable)" : "LL proxy ON"
+    } else {
+      mode = "LL proxy off"
+    }
     let pin = preferredQuality == "Auto" ? "Auto/adaptive" : "\(preferredQuality) (pinned)"
     lines.append("Mode: \(mode) · \(pin)")
+    if isStreamUnstable {
+      let trigger = streamUnstableWasPredicted ? "predictive" : "observed"
+      lines.append(
+        "⚠︎ STABILITY MODE [\(trigger)] (proxy off, deep buffer, riding behind edge)")
+    }
+    // Surface the predictive instability score whenever the proxy is engaged —
+    // both before a trip (watch it climb) and after (the score it had reached when
+    // it tripped, so a near-miss "observed" trip is still visible for tuning).
+    if lowLatencyProxyEnabled, !isVOD {
+      let snap = lowLatencyProxy.instabilityDiagnostics
+      if snap.refreshes > 0 {
+        var line =
+          "Predict: score \(diagFormat(snap.score, decimals: 1))"
+          + "/\(diagFormat(LowLatencyHLSProxy.predictedUnstableScoreThreshold, decimals: 1))"
+          + " · \(snap.refreshes) refresh\(snap.refreshes == 1 ? "" : "es")"
+        if !snap.detail.isEmpty { line += " · \(snap.detail)" }
+        lines.append(line)
+      }
+    }
 
     if let item = player.currentItem {
       let size = item.presentationSize
@@ -3019,12 +3183,12 @@ final class PlaybackMonitorBox {
   /// Consecutive samples whose smoothed value barely moved — i.e. the reading
   /// has stopped climbing off the live edge and looks trustworthy.
   var latencyStableCount = 0
+  /// Consecutive samples deviating from the smoothed value by an outlier margin,
+  /// used to hold back a transient latency spike until it is corroborated.
+  var latencyOutlierStreak = 0
   var isPlaybackActive = false
   var didRequestPlayback = false
-  var lastHardCatchUpJumpAt = Date.distantPast
-  var lastWallClockCatchUpAt = Date.distantPast
   var edgeLatencyLowConfidenceStreak = 0
-  var wallClockHighLatencyStreak = 0
   var wallClockLowConfidenceStreak = 0
   var lastPlaybackDateSample: Date?
   var lastPlaybackTimeSampleSeconds: Double?
@@ -3032,12 +3196,45 @@ final class PlaybackMonitorBox {
   var stalledPlaybackSamples = 0
   var isRecoveringPlayback = false
   var lastRecoveryAttemptAt = Date.distantPast
+  /// Throttle + escalation state for the lightweight live-edge resync that pulls
+  /// the playhead back when AVPlayer involuntarily drifts far behind live (the
+  /// "rewound 120s and never recovered" failure). Escalates to a full reload only
+  /// after repeated resyncs fail to stick.
+  var lastLiveResyncAt = Date.distantPast
+  var liveResyncAttempts = 0
+  /// Throttles the snap-to-true-live reload that fires when the viewer returns to
+  /// the live edge atop a stale seekable window.
+  var lastLiveEdgeSnapAt = Date.distantPast
   /// When the player first entered a sustained "waiting with a starved buffer"
   /// state. Drives the authoritative end-of-stream (offline) probe.
   var liveStallWaitingSince: Date?
+  /// Highest live seekable-edge position seen, and when it stopped advancing.
+  /// An ended broadcast freezes the edge, which is a cleaner end-of-stream signal
+  /// than the waiting/stall state the anti-stall slow-down keeps flickering.
+  var lastLiveEdgeSeconds: Double?
+  var liveEdgeFrozenSince: Date?
   /// Guards against overlapping offline probes and rate-limits them.
   var offlineProbeInFlight = false
   var lastOfflineProbeAt = Date.distantPast
+  /// Timestamps of recent counted stalls, pruned to a rolling window, used to
+  /// detect a chronically-unstable stream (a struggling broadcaster encoder).
+  var recentInstabilityEvents: [Date] = []
+  /// Set when the stream-stability watchdog has switched into deep-buffer
+  /// stability mode; `nil` while the stream is behaving. Latched (sticky) for the
+  /// rest of the channel session.
+  var streamUnstableSince: Date?
+  /// When the most recent stall/jump was counted.
+  var lastStallAt: Date?
+  /// Set when the stability trip came from the proxy's predictive (manifest)
+  /// signal rather than from observed stalls/jumps. Drives the overlay readout.
+  var streamUnstableWasPredicted = false
+  /// When playback first started advancing for this stream session, used to apply
+  /// a more sensitive (single-event) instability trip during the opening seconds.
+  var streamPlaybackStartedAt: Date?
+  /// Soft-stall deadlock state: when AVPlayer first parked in "waiting despite a
+  /// healthy buffer", and when we last issued a play nudge to break it.
+  var softStallSince: Date?
+  var lastSoftStallNudgeAt = Date.distantPast
 }
 
 /// The only latency state SwiftUI observes for the on-screen badge. Updated once

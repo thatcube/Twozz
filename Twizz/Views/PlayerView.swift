@@ -395,7 +395,7 @@ struct PlayerView: View {
   /// Trackpad swipe sensitivity: timeline-seconds moved per unit of finger travel
   /// on the trackpad (the surface spans roughly -1...1, so a full edge-to-edge
   /// swipe ≈ 2 units). Higher = a given swipe covers more of the rewind window.
-  private let scrubGainSecondsPerUnit: Double = 28
+  private let scrubGainSecondsPerUnit: Double = 14
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
@@ -3844,10 +3844,11 @@ struct PlayerView: View {
     }
     let span = max(window.end - window.start, 0.001)
     // While following live, pin the orb to the right edge and show LIVE rather than
-    // tracking the real (segment-quantized) playhead, which would jitter ±a few
-    // seconds and flicker between LIVE and -0:0x. Only do this when not paused and
-    // not actively scrubbing/stepping.
-    if pinnedToLive, scrubTargetSeconds == nil, !isUserPaused {
+    // tracking the real (segment-quantized) playhead. The furthest-forward point
+    // the viewer can reach is `liveCap` (a few seconds behind the true edge), so
+    // even mid-swipe, once they're back at that cap we show LIVE — it is as live as
+    // playback can get — instead of a residual "-0:04".
+    if pinnedToLive, !isUserPaused {
       rewindReadout.update(
         positionFraction: 1, behindLiveSeconds: 0, windowSeconds: span,
         isPaused: false, isAtLiveEdge: true)

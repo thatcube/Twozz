@@ -364,14 +364,25 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
                 let urlString = String(t.dropFirst(Self.prefetchTag.count))
                     .trimmingCharacters(in: .whitespaces)
                 guard !urlString.isEmpty else { continue }
+                // Twitch prefetch tags carry no #EXTINF. Streamlink estimates their
+                // length from the average of the real segments rather than the last
+                // one, which is steadier when durations vary near a boundary. Fall
+                // back to the last seen duration when no real segment exists yet.
+                let prefetchDuration: Double
+                if segments.isEmpty {
+                    prefetchDuration = lastDuration
+                } else {
+                    prefetchDuration =
+                        segments.reduce(0.0) { $0 + $1.duration } / Double(segments.count)
+                }
                 var block = pending
-                block.append("\(Self.extinfTag)\(String(format: "%.3f", lastDuration)),")
+                block.append("\(Self.extinfTag)\(String(format: "%.3f", prefetchDuration)),")
                 block.append(urlString)
                 prefetch.append(
                     MediaSegment(
                         url: urlString,
                         lines: block,
-                        duration: lastDuration,
+                        duration: prefetchDuration,
                         isDiscontinuity: pendingHasDiscontinuity
                     )
                 )

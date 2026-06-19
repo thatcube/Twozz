@@ -289,6 +289,17 @@ These are hypotheses. Do not treat them as fact until the Diagnostics overlay
   overlay now shows the real rendered size (`presentationSize`) and the
   indicated bitrate, so this can finally be checked per stream instead of
   guessed.
+- **Does the predictive instability detector survive a mid-roll ad transition?**
+  Twitch's mid-roll ads splice via `#EXT-X-DISCONTINUITY` and can briefly perturb
+  the manifest (discontinuity markers, occasionally off-cadence ad segments)
+  without the *broadcaster's* encoder being unhealthy. The discontinuity score is
+  capped (`discontinuityScoreCap = 1.5`, below the 3.0 trip threshold) precisely
+  so an ad break can't trip the predictor on its own, and `testDiscontinuities`
+  `AloneDoNotFalseTrip` covers the synthetic case — but this must be **confirmed
+  on-device against a real mid-roll ad** to be sure the splice doesn't also throw
+  enough irregular-`#EXTINF` or stalled-sequence points to clear the threshold
+  alongside the discontinuities. Watch the overlay `Predict:` score across an ad
+  to verify it stays under 3.0.
 
 ## Diagnostics overlay (how to gather data)
 

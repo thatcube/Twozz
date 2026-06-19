@@ -192,6 +192,30 @@ final class LowLatencyHLSProxyTests: XCTestCase {
     XCTAssertTrue(proxy.predictedUnstable, "a non-advancing media sequence signals a stalled encoder")
   }
 
+  /// Exactly two consecutive media-sequence stalls (the strongest, ad-safe
+  /// signal) must trip the predictor on their own at the third refresh — the
+  /// `stalledRefreshPoints = 2.0` weighting means 2 × 2.0 = 4.0 clears the 3.0
+  /// threshold, beating the reactive stall/jump watchdog. The score reaching ≥3.5
+  /// proves the 2.0 weight is applied (the old 1.5 weight would total only 3.0).
+  func testTwoConsecutiveStallsTripPredictively() {
+    let proxy = makeProxy()
+    let frozen = instabilityPlaylist(
+      mediaSequence: 100,
+      segments: [
+        (name: "seg100", duration: 2, discontinuity: false),
+        (name: "seg101", duration: 2, discontinuity: false),
+        (name: "seg102", duration: 2, discontinuity: false),
+      ])
+    // Refresh 1 establishes the baseline; refreshes 2 and 3 are the two stalls.
+    feedRefreshes(proxy, Array(repeating: frozen, count: 3))
+
+    let snap = proxy.instabilityDiagnostics
+    XCTAssertTrue(snap.predictedUnstable, "two consecutive stalls should trip at the third refresh")
+    XCTAssertGreaterThanOrEqual(
+      snap.score, 3.5, "stall weight 2.0 should total 4.0 across two stalls, not 3.0")
+    XCTAssertEqual(snap.detail, "media-seq stalled")
+  }
+
   /// Wildly irregular `#EXTINF` durations (a struggling encoder) should trip the
   /// predictor even while the sequence keeps advancing.
   func testIrregularSegmentDurationsArePredictedUnstable() {

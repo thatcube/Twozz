@@ -121,8 +121,11 @@ broadcaster can never produce a false trip):**
 
 1. **Media-sequence stall** — the tail sequence (`#EXT-X-MEDIA-SEQUENCE` + number
    of listed segments) didn't advance between refreshes, i.e. the encoder
-   appended no new segment this cycle. Strongest single signal
-   (`stalledRefreshPoints = 1.5`).
+   appended no new segment this cycle. Strongest single signal, and the one a
+   mid-roll ad splice structurally **cannot** fake (a splice still advances the
+   sequence). Weighted (`stalledRefreshPoints = 2.0`) so that two consecutive
+   stalls reach the threshold on their own (2 × 2.0 = 4.0) and trip predictively
+   at the third refresh — deliberately ahead of the reactive stall/jump watchdog.
 2. **Irregular `#EXTINF`** — a listed segment deviates from
    `#EXT-X-TARGETDURATION` by more than `segmentDurationToleranceFraction` (0.5 ⇒
    a 2s-target segment shorter than 1.0s or longer than 3.0s). A steady encoder

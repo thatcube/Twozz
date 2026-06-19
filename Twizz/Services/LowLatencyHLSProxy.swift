@@ -106,8 +106,14 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     /// predictor. Kept below `predictedUnstableScoreThreshold`.
     static let discontinuityScoreCap = 1.5
     /// A refresh where the tail media-sequence didn't advance (the encoder
-    /// produced no new segment) scores this much — the strongest single signal.
-    static let stalledRefreshPoints = 1.5
+    /// produced no new segment) scores this much — the strongest single signal,
+    /// and the one a mid-roll ad splice structurally cannot fake (a splice still
+    /// advances the media sequence). Weighted so two consecutive stalls reach
+    /// `predictedUnstableScoreThreshold` on their own (2 × 2.0 = 4.0), tripping
+    /// predictively at the third refresh — ahead of the reactive stall/jump
+    /// watchdog — while the ad-splice ceiling (`discontinuityScoreCap` +
+    /// `irregularRefreshPoints` = 2.5) stays safely below the threshold.
+    static let stalledRefreshPoints = 2.0
     /// A real segment counts as "off-cadence" when its `#EXTINF` deviates from
     /// `#EXT-X-TARGETDURATION` by more than this fraction (0.5 ⇒ a 2s-target
     /// segment must be <1.0s or >3.0s). Lenient on purpose to avoid false trips.

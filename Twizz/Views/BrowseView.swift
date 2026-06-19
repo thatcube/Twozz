@@ -133,7 +133,6 @@ private struct BrowseStreamsView: View {
   @Binding var selectedChannel: FollowedChannel?
   @Binding var channelPageTarget: ChannelPageTarget?
 
-  @Environment(\.dismiss) private var dismiss
   @FocusState private var focusedStreamID: String?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
@@ -153,21 +152,6 @@ private struct BrowseStreamsView: View {
         VStack(alignment: .leading, spacing: 20) {
           // Header (scrolls with content)
           HStack(spacing: 20) {
-            Button(action: { dismiss() }) {
-              HStack(spacing: 8) {
-                Icon(glyph: .chevronLeft, size: 26)
-                Text("Categories")
-              }
-              .font(.callout.weight(.medium))
-              .padding(.horizontal, 18)
-              .padding(.vertical, 8)
-              .background(
-                RoundedRectangle(cornerRadius: 10)
-                  .fill(Color.primary.opacity(0.1))
-              )
-            }
-            .buttonStyle(.plain)
-
             if let url = category.boxArtURL {
               AsyncImage(url: url) { img in
                 img.resizable().scaledToFill()

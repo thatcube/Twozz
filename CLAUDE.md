@@ -76,6 +76,28 @@ built-in components and the system's native appearance over custom-built equival
    more familiar to users, more maintainable, and stay consistent with tvOS conventions
    and future OS updates.
 
+## Icons: use Tabler icons globally
+
+The app uses **Tabler icons** (MIT) everywhere for iconography. Whenever you add
+or change an icon, use a Tabler glyph — do not introduce SF Symbols, emoji, or
+other icon sets unless the user explicitly says not to use Tabler for that case.
+
+How it works in this repo:
+
+1. Icons are rendered via the `Icon`/`Glyph` API in `Twizz/Views/Icon.swift`.
+2. Glyphs are vendored as template SVGs in `Assets.xcassets/Tabler` as
+   `tb-<name>` imagesets. Only icons actually used in the UI are bundled, to keep
+   the asset catalog small.
+3. **To add an icon:** download the SVG from tabler-icons, drop it into
+   `Assets.xcassets/Tabler` as a `tb-<name>` template imageset, then add a case
+   to the `Glyph` enum in `Icon.swift` whose raw value is `<name>`. Reference it
+   with `Icon(glyph: .yourName)`.
+4. Prefer an existing `Glyph` case before adding a new one.
+
+This rule overrides the "reach for native first" default for *iconography only*:
+favor a Tabler glyph over an SF Symbol. Native components are still preferred for
+everything else.
+
 ## Deploy-to-device rule (always)
 
 After any code change that is successfully built, always deploy and launch the latest build on the paired Apple TV for immediate user testing.

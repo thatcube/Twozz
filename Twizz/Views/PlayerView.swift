@@ -1809,8 +1809,11 @@ struct PlayerView: View {
       let trigger = streamUnstableWasPredicted ? "predictive" : "observed"
       lines.append(
         "⚠︎ STABILITY MODE [\(trigger)] (proxy off, deep buffer, riding behind edge)")
-    } else if lowLatencyProxyEnabled, !isVOD {
-      // Surface the live predictive score so a near-trip is observable on stream.
+    }
+    // Surface the predictive instability score whenever the proxy is engaged —
+    // both before a trip (watch it climb) and after (the score it had reached when
+    // it tripped, so a near-miss "observed" trip is still visible for tuning).
+    if lowLatencyProxyEnabled, !isVOD {
       let snap = lowLatencyProxy.instabilityDiagnostics
       if snap.refreshes > 0 {
         var line =

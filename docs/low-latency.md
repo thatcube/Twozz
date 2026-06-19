@@ -279,6 +279,32 @@ of stalling, and the slow-down rides out short buffer dips.
   reload (which also re-lands near live, recovering the latency that grew while
   stuck). On-device this surfaces a "soft-stall nudge (buf …s)" line in the
   Diagnostics event log. This also helps slow stream starts.
+- **End-of-stream / offline detection (the "stream ended but it just froze"
+  bug).** When a broadcast ends or raids, Twitch's `streamLiveStatus` GraphQL
+  keeps returning `.unknown` (not `.offline`) for tens of seconds to minutes, so
+  every offline path that *asks Twitch* (`probeOfflineIfStreamEnded`, the reload
+  recovery's pre-check, `load`'s post-failure check) fails to fire. The only
+  trustworthy signal is local: **a live broadcast keeps advancing its seekable
+  edge; an ended one freezes it.** `samplePlaybackHealth` tracks the max edge and
+  how long it has been frozen (`liveEdgeFrozenSince`). Two Twitch-independent
+  force-offline tiers (in addition to a 12s `probeOfflineIfStreamEnded` poke):
+  - **Fast (`endOfStreamStalledForceOfflineSeconds`, 8s):** edge frozen **and**
+    buffer starved (<1s) **and** a clean `isHardStallSignal`. This is the
+    unambiguous "ended" signature — no content left to play and none arriving.
+    It is deliberately set *below* the hard-stall reload window (≈12s of frozen
+    playhead): a recovery reload calls `stopPlaybackWatchdog`, which wipes the
+    `liveEdgeFrozenSince`/`lastLiveEdgeSeconds` freeze timer, so without this a
+    dead stream loops reload→stall→reload (or sits on a frozen frame) forever and
+    never surfaces offline — the nmplol/this-stream report. Because the edge
+    freezes *before* the playhead (the buffer drains first), this fast tier
+    provably fires before the reload can reset it, for any buffer depth.
+  - **Slow (`endOfStreamEdgeForceOfflineSeconds`, 30s):** edge frozen + buffer
+    starved even *without* a clean hard-stall signal (the anti-stall slow-down
+    can keep flickering `timeControlStatus`), as a final backstop.
+  A merely-struggling-but-live stream keeps advancing its edge (clears the timer)
+  and, in stability mode, rides a deep non-starved buffer, so neither tier
+  false-trips it. On-device the fast tier logs
+  "offline forced (edge frozen + hard stall)".
 
 ## Realistic floor
 

@@ -687,6 +687,13 @@ struct PlayerView: View {
   /// ended stream: if the edge has been frozen this long AND the buffer is empty,
   /// surface the offline state anyway rather than sit on a dead frame forever.
   let endOfStreamEdgeForceOfflineSeconds: Double = 30
+  /// Fast end-of-stream force-offline for the unambiguous "ended" signature: the
+  /// live edge has stopped advancing AND playback is hard-stalled on a starved
+  /// buffer. A struggling-but-live stream keeps advancing its edge (clearing the
+  /// freeze timer) and a deep-buffer stability ride stays non-starved, so neither
+  /// trips this. Kept below the hard-stall reload window so a dead stream surfaces
+  /// offline before a (futile) recovery reload can reset the freeze timer.
+  let endOfStreamStalledForceOfflineSeconds: Double = 8
   /// Soft-stall deadlock recovery. AVPlayer can park in
   /// `.waitingToPlayAtSpecifiedRate` (reason `.evaluatingBufferingRate` or
   /// `.toMinimizeStalls`) even while it holds a perfectly healthy forward buffer:

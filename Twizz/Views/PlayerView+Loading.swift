@@ -559,6 +559,13 @@ extension PlayerView {
       }
     }
 
+    // Hard stall = AVPlayer parked waiting on a drained/unfillable buffer. Used
+    // both by the end-of-stream detection below and the reload recovery further
+    // down, so compute it once here.
+    let isHardStallSignal =
+      player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+      && (item.isPlaybackBufferEmpty || !item.isPlaybackLikelyToKeepUp)
+
     // End-of-stream by a frozen live edge. A live broadcast keeps appending
     // segments, so its seekable edge advances; an ended one freezes it. This is
     // independent of the waiting/stall state (which the anti-stall slow-down keeps
@@ -577,9 +584,20 @@ extension PlayerView {
         if liveEdgeFrozenSince == nil { liveEdgeFrozenSince = now }
         let frozenFor = now.timeIntervalSince(liveEdgeFrozenSince ?? now)
         let starved = (bufferAheadSeconds(item) ?? 0) < 1.0
-        if frozenFor >= endOfStreamEdgeForceOfflineSeconds, starved {
-          // Twitch's status lookup is being unhelpful (returning .unknown) for a
-          // clearly-dead stream — don't sit on a frozen frame forever.
+        if frozenFor >= endOfStreamStalledForceOfflineSeconds, starved, isHardStallSignal {
+          // Unambiguously ended: the edge has stopped advancing AND playback is
+          // hard-stalled on a starved buffer — there is no more content to play
+          // and none is arriving. Surface offline now, before the hard-stall
+          // reload path (which wipes this freeze timer via stopPlaybackWatchdog)
+          // can fire and trap a dead stream in a reload/frozen-frame loop. Twitch's
+          // status lookup can't be trusted here (it lags at `.unknown` for an
+          // ended/raided stream), so this acts on local signals alone.
+          if showLatencyDiagnostics { logDiagnosticsEvent("offline forced (edge frozen + hard stall)") }
+          presentOfflineState()
+        } else if frozenFor >= endOfStreamEdgeForceOfflineSeconds, starved {
+          // Edge frozen long enough with an empty buffer even without a clean hard-
+          // stall signal (e.g. the anti-stall slow-down keeps flickering the state):
+          // don't sit on a frozen frame forever waiting on Twitch's `.unknown`.
           presentOfflineState()
         } else if frozenFor >= endOfStreamEdgeFrozenSeconds {
           probeOfflineIfStreamEnded()
@@ -590,9 +608,6 @@ extension PlayerView {
       lastLiveEdgeSeconds = nil
     }
 
-    let isHardStallSignal =
-      player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-      && (item.isPlaybackBufferEmpty || !item.isPlaybackLikelyToKeepUp)
     if stalledPlaybackSamples >= stalledPlaybackThresholdSamples,
       isHardStallSignal,
       let frozenSince = diagFrozenSince,

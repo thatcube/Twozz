@@ -433,6 +433,17 @@ struct PlayerView: View {
     get { mon.streamPlaybackStartedAt }
     nonmutating set { mon.streamPlaybackStartedAt = newValue }
   }
+  /// When AVPlayer first parked in a "waiting despite a healthy buffer" soft-stall
+  /// deadlock, and when we last nudged it. Drives the playImmediately kick that
+  /// breaks `evaluatingBufferingRate`/`toMinimizeStalls` parks.
+  var softStallSince: Date? {
+    get { mon.softStallSince }
+    nonmutating set { mon.softStallSince = newValue }
+  }
+  var lastSoftStallNudgeAt: Date {
+    get { mon.lastSoftStallNudgeAt }
+    nonmutating set { mon.lastSoftStallNudgeAt = newValue }
+  }
   /// True while the stream-stability watchdog has us in deep-buffer stability mode.
   var isStreamUnstable: Bool { mon.streamUnstableSince != nil }
   @State var lastStallNotificationAt = Date.distantPast
@@ -664,6 +675,23 @@ struct PlayerView: View {
   /// ended stream: if the edge has been frozen this long AND the buffer is empty,
   /// surface the offline state anyway rather than sit on a dead frame forever.
   let endOfStreamEdgeForceOfflineSeconds: Double = 30
+  /// Soft-stall deadlock recovery. AVPlayer can park in
+  /// `.waitingToPlayAtSpecifiedRate` (reason `.evaluatingBufferingRate` or
+  /// `.toMinimizeStalls`) even while it holds a perfectly healthy forward buffer:
+  /// it decides the network might not sustain the rate and then never re-evaluates
+  /// on its own, because our adaptive-rate controller only issues a play command
+  /// when the *target rate changes* (here it stays 1.0×). The playhead creeps,
+  /// behind-live grows without bound, yet no buffer-empty hard-stall path fires.
+  /// We detect "waiting despite a healthy buffer" and kick it with playImmediately.
+  /// Minimum forward buffer that makes a `.waitingToPlayAtSpecifiedRate` state a
+  /// deadlock to break rather than a legitimate rebuffer to wait out.
+  let softStallBufferFloorSeconds: Double = 1.5
+  /// How long the player may sit waiting-with-healthy-buffer before the first nudge
+  /// (a brief wait right after a seek/start is normal and shouldn't be kicked).
+  let softStallNudgeSeconds: Double = 3
+  /// If repeated nudges can't break the deadlock within this long, reload — which
+  /// also re-lands near live, recovering the latency that grew while we were stuck.
+  let softStallReloadSeconds: Double = 12
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
@@ -3122,6 +3150,10 @@ final class PlaybackMonitorBox {
   /// When playback first started advancing for this stream session, used to apply
   /// a more sensitive (single-event) instability trip during the opening seconds.
   var streamPlaybackStartedAt: Date?
+  /// Soft-stall deadlock state: when AVPlayer first parked in "waiting despite a
+  /// healthy buffer", and when we last issued a play nudge to break it.
+  var softStallSince: Date?
+  var lastSoftStallNudgeAt = Date.distantPast
 }
 
 /// The only latency state SwiftUI observes for the on-screen badge. Updated once

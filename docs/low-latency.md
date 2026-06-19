@@ -194,6 +194,26 @@ of stalling, and the slow-down rides out short buffer dips.
   threshold, `snapToTrueLiveIfStale` forces a fresh load that lands at the real
   edge. The proxy only clears its DVR buffers when `retainHistory` actually
   changes, so the rewind window survives the reload.
+- **Soft-stall deadlock recovery (the "Playing/waiting · evaluatingBufferingRate"
+  freeze with a healthy buffer).** AVPlayer can park in
+  `.waitingToPlayAtSpecifiedRate` (reason `.evaluatingBufferingRate` or
+  `.toMinimizeStalls`) *even while it holds a perfectly healthy forward buffer*
+  (`isPlaybackLikelyToKeepUp == true`, buffer not empty). It decided the network
+  might not sustain the rate and then never re-evaluates on its own — because our
+  adaptive-rate controller (`applyLiveLatencyCorrection`) only issues a play
+  command when the **target rate changes**, and here it stays 1.0×. The playhead
+  creeps (not a hard freeze, so "Stalls" stays 0 and the buffer-empty hard-stall /
+  offline paths never fire) while behind-live grows without bound — the classic
+  "9k viewers, ~24s → ~52s behind live, buffer ahead stuck at 4.3s" report.
+  `samplePlaybackHealth` now detects "waiting despite a healthy buffer"
+  (`isSoftStallSignal`, mutually exclusive with the buffer-empty `isHardStallSignal`
+  by construction) and, after a short grace (`softStallNudgeSeconds`, 3s), kicks it
+  with `player.playImmediately(atRate:)` — which explicitly *bypasses* AVPlayer's
+  buffering-rate evaluation and plays the buffered media at once. If repeated
+  nudges can't break it within `softStallReloadSeconds` (12s), it escalates to a
+  reload (which also re-lands near live, recovering the latency that grew while
+  stuck). On-device this surfaces a "soft-stall nudge (buf …s)" line in the
+  Diagnostics event log. This also helps slow stream starts.
 
 ## Realistic floor
 

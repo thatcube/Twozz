@@ -368,6 +368,8 @@ extension PlayerView {
     liveStallWaitingSince = nil
     lastLiveEdgeSeconds = nil
     liveEdgeFrozenSince = nil
+    softStallSince = nil
+    lastSoftStallNudgeAt = Date.distantPast
     offlineProbeInFlight = false
     lastOfflineProbeAt = Date.distantPast
   }
@@ -469,6 +471,7 @@ extension PlayerView {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
       liveStallWaitingSince = nil
+      softStallSince = nil
       return
     }
     // An intentional viewer pause (DVR rewind) holds the playhead in place; that
@@ -478,6 +481,7 @@ extension PlayerView {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
       liveStallWaitingSince = nil
+      softStallSince = nil
       diagWasStalled = false
       diagIsFrozen = false
       diagFrozenSince = nil
@@ -590,6 +594,44 @@ extension PlayerView {
       Date().timeIntervalSince(frozenSince) >= hardStallRecoverySeconds
     {
       triggerRecoveryIfAllowed(reason: "hard stall")
+    }
+
+    // Soft-stall deadlock recovery. AVPlayer parks in
+    // `.waitingToPlayAtSpecifiedRate` while it actually holds a healthy forward
+    // buffer (it is "likely to keep up" and the buffer isn't empty) — the
+    // `evaluatingBufferingRate` / `toMinimizeStalls` pathology. Nothing restarts
+    // it on its own: the adaptive-rate controller only re-issues a play command
+    // when the target rate changes, and here it stays 1.0×, so the playhead creeps
+    // and behind-live grows without bound while no buffer-empty hard-stall path
+    // applies. Kick it with playImmediately (which bypasses AVPlayer's buffering-
+    // rate evaluation and plays the buffered media at once); escalate to a reload
+    // if the kicks won't take. Mutually exclusive with isHardStallSignal by
+    // construction (that requires an empty/not-likely-to-keep-up buffer).
+    let isSoftStallSignal =
+      player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+      && !item.isPlaybackBufferEmpty
+      && item.isPlaybackLikelyToKeepUp
+      && (bufferAheadSeconds(item) ?? 0) >= softStallBufferFloorSeconds
+    if isSoftStallSignal {
+      let now = Date()
+      if softStallSince == nil { softStallSince = now }
+      let stuckFor = now.timeIntervalSince(softStallSince ?? now)
+      if stuckFor >= softStallReloadSeconds {
+        triggerRecoveryIfAllowed(reason: "soft stall deadlock")
+        softStallSince = nil
+        lastSoftStallNudgeAt = Date.distantPast
+      } else if stuckFor >= softStallNudgeSeconds,
+        now.timeIntervalSince(lastSoftStallNudgeAt) >= playbackWatchdogIntervalSeconds
+      {
+        lastSoftStallNudgeAt = now
+        player.playImmediately(atRate: desiredLivePlaybackRate(policy: activeLivePlaybackPolicy))
+        if showLatencyDiagnostics {
+          let buf = bufferAheadSeconds(item).map { diagFormat($0, decimals: 1) } ?? "—"
+          logDiagnosticsEvent("soft-stall nudge (buf \(buf)s)")
+        }
+      }
+    } else {
+      softStallSince = nil
     }
 
     // Authoritative end-of-stream detection. The reload-recovery path above is

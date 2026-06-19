@@ -199,5 +199,7 @@ extension PlayerView {
     recentInstabilityEvents = []
     lastStallAt = nil
     streamPlaybackStartedAt = nil
+    softStallSince = nil
+    lastSoftStallNudgeAt = Date.distantPast
   }
 }

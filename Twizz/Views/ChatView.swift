@@ -175,12 +175,12 @@ struct ChatView: View {
 
       HStack(spacing: 8) {
         if let remaining = softPauseRemaining {
-          Text("Chat paused")
-            .font(.caption.weight(.semibold))
-          // Twitch-style countdown: a fixed-size ring that depletes each second
-          // with the small number animating inside it. Fixed width, so the pill
+          // Twitch-style countdown: a large ring on the left that depletes each
+          // second with the number animating inside it. Fixed width, so the pill
           // never resizes as the count ticks down.
           countdownRing(remaining: remaining)
+          Text("Chat paused")
+            .font(.caption.weight(.semibold))
         } else {
           Image(systemName: "arrow.up.and.down")
             .font(.caption.weight(.bold))
@@ -211,18 +211,18 @@ struct ChatView: View {
       : 0
     return ZStack {
       Circle()
-        .stroke(.black.opacity(0.16), lineWidth: 2.5)
+        .stroke(.black.opacity(0.16), lineWidth: 4)
       Circle()
         .trim(from: 0, to: progress)
-        .stroke(.black.opacity(0.7), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+        .stroke(.black.opacity(0.7), style: StrokeStyle(lineWidth: 4, lineCap: .round))
         .rotationEffect(.degrees(-90))
         .animation(.linear(duration: 1), value: remaining)
       Text("\(remaining)")
-        .font(.system(size: 14, weight: .bold))
+        .font(.system(size: 24, weight: .bold))
         .monospacedDigit()
         .contentTransition(.numericText())
     }
-    .frame(width: 28, height: 28)
+    .frame(width: 48, height: 48)
   }
 
   private func line(for message: ChatMessage) -> some View {

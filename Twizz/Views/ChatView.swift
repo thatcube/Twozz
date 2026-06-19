@@ -44,6 +44,8 @@ struct ChatView: View {
   var scrollTarget: ChatScrollTarget? = nil
   @Environment(\.themePalette) private var palette
   @State private var pendingScrollWork: DispatchWorkItem?
+  /// Drives a very subtle up/down drift on the swipe-up hint chevron.
+  @State private var hintDrift = false
 
   /// Side layout is the only non-glass, non-overlay mode; it follows the
   /// app theme so light mode paints a light chat panel with dark text.
@@ -147,16 +149,20 @@ struct ChatView: View {
   /// "swipe/press up" affordance) floating just above it; once you actually
   /// scroll it collapses to a minimal "Scrolling" tag.
   private var pausedPill: some View {
-    VStack(spacing: 2) {
+    VStack(spacing: 6) {
       // Wide, shallow chevron — the conventional "swipe up to go up" hint, like
-      // an iOS sheet grabber. Only on the read-pause state, where an up press is
-      // the next action; it bounces upward to read as an invitation.
+      // an iOS sheet grabber — in its own small glass chip. Only on the
+      // read-pause state, where an up press is the next action; it drifts gently
+      // upward to read as a subtle invitation.
       if softPauseRemaining != nil {
         Image(systemName: "chevron.compact.up")
-          .font(.system(size: 30, weight: .semibold))
-          .foregroundStyle(.white.opacity(0.9))
-          .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
-          .symbolEffect(.bounce.up, options: .repeating)
+          .font(.system(size: 26, weight: .semibold))
+          .foregroundStyle(.black.opacity(0.8))
+          .frame(width: 56, height: 34)
+          .modifier(PausedPillGlassStyle())
+          .offset(y: hintDrift ? -2.5 : 2.5)
+          .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: hintDrift)
+          .onAppear { hintDrift = true }
           .transition(.opacity)
       }
 

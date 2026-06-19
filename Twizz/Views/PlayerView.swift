@@ -1122,8 +1122,8 @@ struct PlayerView: View {
 
   private var bottomOverlay: some View {
     VStack(spacing: 18) {
-      HStack(alignment: .top, spacing: 24) {
-      HStack(alignment: .top, spacing: 12) {
+      HStack(alignment: .center, spacing: 24) {
+      HStack(alignment: .center, spacing: 12) {
         Button {
           presentChannelPage()
         } label: {
@@ -1174,7 +1174,10 @@ struct PlayerView: View {
           .truncationMode(.tail)
           .fixedSize(horizontal: false, vertical: true)
           .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
-          .frame(maxWidth: .infinity, alignment: .leading)
+          // Cap the title to the buttons' height so a tall title centers against
+          // the buttons instead of growing the bottom-pinned row and pushing the
+          // buttons upward off their fixed position.
+          .frame(maxWidth: .infinity, maxHeight: controlButtonsHeight > 0 ? controlButtonsHeight : nil, alignment: .leading)
       }
 
       Spacer(minLength: 18)
@@ -1296,9 +1299,20 @@ struct PlayerView: View {
       }
       .fixedSize(horizontal: true, vertical: false)
       .TwizzControlButtonStyle()
+      .background(
+        GeometryReader { proxy in
+          Color.clear.preference(
+            key: ControlButtonsHeightKey.self,
+            value: proxy.size.height
+          )
+        }
+      )
       .focusSection()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    .onPreferenceChange(ControlButtonsHeightKey.self) { height in
+      controlButtonsHeight = height
+    }
     // Treat the whole control row (avatar, quality, settings, chat toggle) as one
     // focus section so tvOS keeps focus within it during fast trackpad swipes.
     // Without this, when chat is open the adjacent chat pane (composer, message
@@ -1858,6 +1872,11 @@ struct PlayerView: View {
   /// generous so the row (and the chat composer it aligns with) clears typical TV
   /// overscan instead of hugging the very bottom.
   private let controlsBottomPadding: CGFloat = 8
+  /// Measured height of the right-side control buttons row. The stream title is
+  /// capped to this so a long (2-line) title can't grow the row and shove the
+  /// buttons up off their fixed position — instead the title stays vertically
+  /// centered against the buttons.
+  @State private var controlButtonsHeight: CGFloat = 0
   /// How far above the screen bottom the floating settings panel must start so it
   /// floats *above* the control row rather than behind/under it. Control row
   /// bottom inset plus its approximate height plus a small gap. When the rewind
@@ -1865,7 +1884,7 @@ struct PlayerView: View {
   /// the panel has to clear that extra element too (bar height + the VStack's
   /// 18pt spacing) or it overlaps the seek bar and the buttons beneath it.
   private var chatSettingsBottomClearance: CGFloat {
-    let base = controlsBottomPadding + 88
+    let base = controlsBottomPadding + 104
     return streamRewindEnabled ? base + scrubBarClusterHeight : base
   }
   /// Approximate on-screen height the rewind scrub bar adds beneath the control
@@ -4298,6 +4317,16 @@ extension View {
 /// Reports the natural height of the chat-settings content so the floating panel
 /// can size itself to fit (and animate) rather than always filling the pane.
 private struct ChatSettingsHeightKey: PreferenceKey {
+  static var defaultValue: CGFloat { 0 }
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = max(value, nextValue())
+  }
+}
+
+/// Reports the measured height of the player's right-side control buttons row so
+/// the stream title can be capped to it (keeping the buttons at a fixed position
+/// regardless of title length).
+private struct ControlButtonsHeightKey: PreferenceKey {
   static var defaultValue: CGFloat { 0 }
   static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
     value = max(value, nextValue())

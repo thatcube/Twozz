@@ -44,8 +44,9 @@ struct ChatView: View {
   var scrollTarget: ChatScrollTarget? = nil
   @Environment(\.themePalette) private var palette
   @State private var pendingScrollWork: DispatchWorkItem?
-  /// Drives a very subtle up/down drift on the swipe-up hint chevron.
-  @State private var hintDrift = false
+  /// Drives the swipe-up hint chevron: it fades + drifts up once, slightly after
+  /// the pill animates in. Reset to false on disappear so it replays on reopen.
+  @State private var hintShown = false
 
   /// Side layout is the only non-glass, non-overlay mode; it follows the
   /// app theme so light mode paints a light chat panel with dark text.
@@ -152,17 +153,21 @@ struct ChatView: View {
     VStack(spacing: 6) {
       // Wide, shallow chevron — the conventional "swipe up to go up" hint, like
       // an iOS sheet grabber — floating bare above the pill. Only on the
-      // read-pause state, where an up press is the next action; it drifts gently
-      // upward to read as a subtle invitation.
+      // read-pause state, where an up press is the next action. It fades in and
+      // performs a single subtle upward drift a beat *after* the pill arrives,
+      // and is reset on disappear so it replays on every reopen.
       if softPauseRemaining != nil {
         Image(systemName: "chevron.compact.up")
           .font(.system(size: 30, weight: .semibold))
           .foregroundStyle(.white.opacity(0.9))
           .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
-          .offset(y: hintDrift ? -2.5 : 2.5)
-          .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: hintDrift)
-          .onAppear { hintDrift = true }
-          .transition(.opacity)
+          .opacity(hintShown ? 1 : 0)
+          .offset(y: hintShown ? -3 : 7)
+          .onAppear {
+            hintShown = false
+            withAnimation(.easeOut(duration: 0.7).delay(0.35)) { hintShown = true }
+          }
+          .onDisappear { hintShown = false }
       }
 
       HStack(spacing: 8) {

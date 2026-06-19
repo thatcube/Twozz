@@ -26,6 +26,7 @@ struct HomeView: View {
   /// Categories opened from the Home tab are pushed one level deep here, so the
   /// category view is genuinely L2 of Home rather than a tab switch into Browse.
   @State private var homePath: [TwitchCategory] = []
+  @State private var showingFollowingDirectory = false
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
   @State private var refreshToast: RefreshToastState?
@@ -93,6 +94,14 @@ struct HomeView: View {
             .navigationDestination(for: TwitchCategory.self) { category in
               CategoryStreamsView(
                 category: category,
+                selectedChannel: $selectedChannel,
+                channelPageTarget: $channelPageTarget
+              )
+            }
+            .navigationDestination(isPresented: $showingFollowingDirectory) {
+              FollowingDirectoryView(
+                follows: follows,
+                auth: auth,
                 selectedChannel: $selectedChannel,
                 channelPageTarget: $channelPageTarget
               )
@@ -299,6 +308,16 @@ struct HomeView: View {
         }
 
         Spacer()
+
+        if !follows.isUsingDemoData {
+          Button {
+            showingFollowingDirectory = true
+          } label: {
+            Text("See All")
+              .font(.system(size: 24, weight: .semibold))
+          }
+          .accessibilityLabel("See all followed channels")
+        }
 
         Button {
           performManualRefresh()

@@ -308,6 +308,18 @@ struct PlayerView: View {
     get { mon.lastRecoveryAttemptAt }
     nonmutating set { mon.lastRecoveryAttemptAt = newValue }
   }
+  private var liveStallWaitingSince: Date? {
+    get { mon.liveStallWaitingSince }
+    nonmutating set { mon.liveStallWaitingSince = newValue }
+  }
+  private var offlineProbeInFlight: Bool {
+    get { mon.offlineProbeInFlight }
+    nonmutating set { mon.offlineProbeInFlight = newValue }
+  }
+  private var lastOfflineProbeAt: Date {
+    get { mon.lastOfflineProbeAt }
+    nonmutating set { mon.lastOfflineProbeAt = newValue }
+  }
   @State private var lastStallNotificationAt = Date.distantPast
   @State private var suppressLowLatencyToggleReload = false
   @State private var consecutiveLoadFailures = 0
@@ -442,6 +454,13 @@ struct PlayerView: View {
   private let hardStallRecoverySeconds: Double = 10
   private let recoveryCooldownSeconds: Double = 15
   private let stallNotificationDebounceSeconds: Double = 2.5
+  /// How long the player may sit unable to play (waiting on a starved buffer)
+  /// before we authoritatively ask Twitch whether the channel is still live.
+  /// Short enough to surface an ended broadcast promptly, long enough that a
+  /// brief transient buffer dip won't trigger a needless GraphQL probe.
+  private let offlineProbeStallSeconds: Double = 6
+  /// Minimum spacing between authoritative offline probes while still stuck.
+  private let offlineProbeCooldownSeconds: Double = 8
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
@@ -716,6 +735,17 @@ struct PlayerView: View {
       else { return }
       lastStallNotificationAt = now
       markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) {
+      notification in
+      guard let endedItem = notification.object as? AVPlayerItem else { return }
+      guard endedItem == player.currentItem else { return }
+      // Ignore while intentionally paused or scrubbing for DVR rewind.
+      guard !isUserPaused, !isScrubbing else { return }
+      // A live HLS that ends with #EXT-X-ENDLIST plays to the very end and then
+      // pauses here on a frozen final frame. Confirm with Twitch and surface the
+      // offline empty state instead of leaving the viewer on a dead frame.
+      probeOfflineIfStreamEnded()
     }
     .onDisappear {
       hideTask?.cancel()
@@ -3745,6 +3775,9 @@ struct PlayerView: View {
     isRecoveringPlayback = false
     lastRecoveryAttemptAt = Date.distantPast
     lastStallNotificationAt = Date.distantPast
+    liveStallWaitingSince = nil
+    offlineProbeInFlight = false
+    lastOfflineProbeAt = Date.distantPast
   }
 
   private func triggerRecoveryIfAllowed(reason: String) {
@@ -3762,6 +3795,7 @@ struct PlayerView: View {
     else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
+      liveStallWaitingSince = nil
       return
     }
     // An intentional viewer pause (DVR rewind) holds the playhead in place; that
@@ -3770,6 +3804,7 @@ struct PlayerView: View {
     guard !isUserPaused, !isScrubbing else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
+      liveStallWaitingSince = nil
       diagWasStalled = false
       diagIsFrozen = false
       diagFrozenSince = nil
@@ -3821,6 +3856,53 @@ struct PlayerView: View {
       Date().timeIntervalSince(frozenSince) >= hardStallRecoverySeconds
     {
       triggerRecoveryIfAllowed(reason: "hard stall")
+    }
+
+    // Authoritative end-of-stream detection. The reload-recovery path above is
+    // slow and tied to a frozen-playhead heuristic that the once-per-second
+    // diagnostics sampler can reset, so an ended broadcast could sit on a frozen
+    // last frame indefinitely. Independently, once the player has been unable to
+    // play (waiting on a starved buffer) for a few seconds, ask Twitch whether
+    // the channel is still live and switch to the offline empty state if not.
+    // `.live`/`.unknown` are no-ops, so a transient buffer dip never trips it.
+    if isHardStallSignal {
+      let now = Date()
+      if liveStallWaitingSince == nil { liveStallWaitingSince = now }
+      if let since = liveStallWaitingSince,
+        now.timeIntervalSince(since) >= offlineProbeStallSeconds
+      {
+        probeOfflineIfStreamEnded()
+      }
+    } else {
+      liveStallWaitingSince = nil
+    }
+  }
+
+  /// Authoritatively checks whether the channel is still live and, if it has
+  /// gone offline, switches into the offline empty state. Rate-limited and
+  /// single-flight so the 2s watchdog (or a play-to-end notification) can call
+  /// it freely. Only a definitive `.offline` acts; `.live`/`.unknown` are
+  /// ignored so transient network hiccups never surface a false offline screen.
+  private func probeOfflineIfStreamEnded() {
+    let now = Date()
+    guard !offlineProbeInFlight,
+      now.timeIntervalSince(lastOfflineProbeAt) >= offlineProbeCooldownSeconds
+    else { return }
+    offlineProbeInFlight = true
+    lastOfflineProbeAt = now
+    let channel = activeChannel
+    Task {
+      let status = await PlaybackService.streamLiveStatus(for: channel)
+      await MainActor.run {
+        offlineProbeInFlight = false
+        guard !isOffline, !isUserPaused, !isScrubbing,
+          channel == activeChannel
+        else { return }
+        if status == .offline {
+          if showLatencyDiagnostics { logDiagnosticsEvent("offline confirmed (stream ended)") }
+          presentOfflineState()
+        }
+      }
     }
   }
 
@@ -4814,6 +4896,12 @@ private final class PlaybackMonitorBox {
   var stalledPlaybackSamples = 0
   var isRecoveringPlayback = false
   var lastRecoveryAttemptAt = Date.distantPast
+  /// When the player first entered a sustained "waiting with a starved buffer"
+  /// state. Drives the authoritative end-of-stream (offline) probe.
+  var liveStallWaitingSince: Date?
+  /// Guards against overlapping offline probes and rate-limits them.
+  var offlineProbeInFlight = false
+  var lastOfflineProbeAt = Date.distantPast
 }
 
 /// The only latency state SwiftUI observes for the on-screen badge. Updated once

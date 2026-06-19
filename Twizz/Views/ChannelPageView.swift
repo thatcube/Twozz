@@ -729,16 +729,32 @@ private struct FocusableTile<Content: View>: View {
   let onSelect: () -> Void
   @ViewBuilder let content: (Bool) -> Content
 
-  @Environment(\.isFocused) private var isFocused
-
   var body: some View {
-    content(isFocused)
+    FocusAwareTile(cornerRadius: cornerRadius, focusedScale: focusedScale, content: content)
       .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
       .focusable(true)
       .focusEffectDisabled()
       .onTapGesture(perform: onSelect)
-      .scaleEffect(isFocused ? focusedScale : 1)
-      .animation(.easeOut(duration: 0.14), value: isFocused)
-      .zIndex(isFocused ? 2 : 0)
+  }
+
+  /// `isFocused` is provided to descendants of a focusable view. Keep the visual
+  /// treatment in this child view so the environment value updates correctly.
+  private struct FocusAwareTile: View {
+    let cornerRadius: CGFloat
+    let focusedScale: CGFloat
+    @ViewBuilder let content: (Bool) -> Content
+
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+      content(isFocused)
+        .overlay {
+          RoundedRectangle(cornerRadius: cornerRadius)
+            .strokeBorder(.white.opacity(isFocused ? 0.75 : 0), lineWidth: 4)
+        }
+        .scaleEffect(isFocused ? focusedScale : 1)
+        .animation(.easeOut(duration: 0.14), value: isFocused)
+        .zIndex(isFocused ? 2 : 0)
+    }
   }
 }

@@ -1,5 +1,6 @@
 import AVKit
 import SwiftUI
+import UIKit
 
 /// A piece of on-demand content opened from the channel page.
 enum OnDemandItem: Identifiable, Hashable {
@@ -33,15 +34,18 @@ enum OnDemandItem: Identifiable, Hashable {
   }
 }
 
-/// Full-screen player for clips and VODs. Unlike the live `PlayerView` (which
-/// suppresses native transport for its side-by-side chat layout), this uses
-/// SwiftUI's `VideoPlayer` so the Siri Remote gets Apple's native scrub / skip /
-/// play-pause controls for free — exactly what on-demand content wants.
+/// Full-screen player for clips and VODs.
+///
+/// It hosts a native `AVPlayerViewController` so the Siri Remote gets Apple's
+/// full transport UI for free — scrub/seek, skip, play-pause, and the native
+/// playback-speed control — which is exactly what on-demand content wants.
 ///
 /// VODs additionally get a Twitch-style **chat replay**: the live player's
-/// `ChatView` docked beside / over the video, fed by `VODChatReplayService` and
-/// kept in sync with the playback offset. It reuses the same global chat
-/// appearance settings as the live player, and is read-only.
+/// `ChatView` is rendered into the player's `contentOverlayView` (above the
+/// video, below the controls) as a non-interactive, auto-scrolling panel kept in
+/// sync with the playback offset by `VODChatReplayService`. It reuses the same
+/// global chat appearance settings as the live player. Show/hide chat and
+/// playback speed live in the transport-bar menu.
 struct OnDemandPlayerView: View {
   let item: OnDemandItem
   /// Login of the channel that owns this content, used to resolve the right
@@ -78,7 +82,6 @@ struct OnDemandPlayerView: View {
   private enum Phase { case loading, playing, failed }
 
   private var isVOD: Bool { item.vodID != nil }
-  private var chatActive: Bool { isVOD && showChat && phase == .playing }
 
   var body: some View {
     ZStack {
@@ -102,7 +105,14 @@ struct OnDemandPlayerView: View {
         }
         .padding(40)
       case .playing:
-        playingLayout
+        VODPlayerSurface(
+          player: player,
+          replay: replay,
+          isVOD: isVOD,
+          showChat: $showChat,
+          appearance: overlayAppearance
+        )
+        .ignoresSafeArea()
       }
     }
     .onExitCommand { dismiss() }
@@ -118,37 +128,9 @@ struct OnDemandPlayerView: View {
     }
   }
 
-  @ViewBuilder
-  private var playingLayout: some View {
-    if chatActive {
-      switch chatLayoutMode {
-      case .side:
-        HStack(spacing: 0) {
-          VideoPlayer(player: player)
-          chatPane
-            .frame(width: chatWidth)
-        }
-        .ignoresSafeArea()
-      case .overlay, .glass:
-        ZStack(alignment: .topTrailing) {
-          VideoPlayer(player: player)
-            .ignoresSafeArea()
-          chatPane
-            .frame(width: chatWidth)
-            .frame(maxHeight: .infinity)
-            .modifier(VODChatGlassStyle(enabled: chatLayoutMode == .glass))
-        }
-      }
-    } else {
-      VideoPlayer(player: player)
-        .ignoresSafeArea()
-    }
-  }
-
-  private var chatPane: some View {
-    ChatView(
+  private var overlayAppearance: ChatOverlayAppearance {
+    ChatOverlayAppearance(
       channel: channelLogin ?? "",
-      messages: replay.messages,
       textSize: chatTextSize,
       emoteSize: chatEmoteSize,
       messageSpacing: chatMessageSpacing,
@@ -156,13 +138,9 @@ struct OnDemandPlayerView: View {
       animatedEmotes: chatAnimatedEmotes,
       fontDesign: chatFontStyle.design,
       showBadges: chatShowBadges,
-      isConnected: replay.isReady,
-      emoteURLs: replay.emoteURLs,
-      badgeURLs: replay.badgeURLs,
-      useGlassBackground: chatLayoutMode == .glass,
-      useLighterOverlayBackground: chatLayoutMode == .overlay
+      layout: chatLayoutMode,
+      width: chatWidth
     )
-    .frame(maxHeight: .infinity)
   }
 
   // MARK: - Chat appearance (mirrors the live player's global settings)
@@ -232,6 +210,185 @@ struct OnDemandPlayerView: View {
   }
 }
 
+/// Snapshot of the global chat appearance settings, passed into the overlay.
+struct ChatOverlayAppearance {
+  let channel: String
+  let textSize: CGFloat
+  let emoteSize: CGFloat
+  let messageSpacing: CGFloat
+  let lineHeight: CGFloat
+  let animatedEmotes: Bool
+  let fontDesign: Font.Design
+  let showBadges: Bool
+  let layout: ChatLayoutMode
+  let width: CGFloat
+}
+
+/// Hosts a native `AVPlayerViewController` (full transport controls + speed) and
+/// renders the VOD chat replay into its `contentOverlayView`. The chat overlay
+/// is non-interactive so the player keeps full remote focus; show/hide chat and
+/// playback speed are exposed as transport-bar menu items.
+struct VODPlayerSurface: UIViewControllerRepresentable {
+  let player: AVPlayer
+  let replay: VODChatReplayService
+  let isVOD: Bool
+  @Binding var showChat: Bool
+  let appearance: ChatOverlayAppearance
+
+  func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+  func makeUIViewController(context: Context) -> AVPlayerViewController {
+    let controller = AVPlayerViewController()
+    controller.player = player
+    controller.allowsPictureInPicturePlayback = false
+    controller.videoGravity = .resizeAspect
+    controller.loadViewIfNeeded()
+
+    context.coordinator.playerVC = controller
+
+    if isVOD {
+      let host = UIHostingController(rootView: context.coordinator.makeOverlay())
+      host.view.backgroundColor = .clear
+      host.view.isUserInteractionEnabled = false
+      controller.addChild(host)
+      if let overlay = controller.contentOverlayView {
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(host.view)
+        NSLayoutConstraint.activate([
+          host.view.topAnchor.constraint(equalTo: overlay.topAnchor),
+          host.view.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+          host.view.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
+          host.view.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
+        ])
+      }
+      host.didMove(toParent: controller)
+      context.coordinator.chatHost = host
+    }
+
+    context.coordinator.apply()
+    return controller
+  }
+
+  func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+    context.coordinator.parent = self
+    if controller.player !== player {
+      controller.player = player
+    }
+    context.coordinator.apply()
+  }
+
+  @MainActor
+  final class Coordinator {
+    var parent: VODPlayerSurface
+    weak var playerVC: AVPlayerViewController?
+    var chatHost: UIHostingController<AnyView>?
+
+    private let speeds: [Float] = [0.5, 1.0, 1.25, 1.5, 2.0]
+
+    init(_ parent: VODPlayerSurface) {
+      self.parent = parent
+    }
+
+    func makeOverlay() -> AnyView {
+      AnyView(
+        VODChatOverlay(
+          replay: parent.replay,
+          appearance: parent.appearance,
+          visible: parent.showChat
+        )
+      )
+    }
+
+    /// Push the latest state into the live controller: overlay visibility +
+    /// content, and the transport-bar menu items.
+    func apply() {
+      chatHost?.view.isHidden = !(parent.isVOD && parent.showChat)
+      chatHost?.rootView = makeOverlay()
+      refreshMenus()
+    }
+
+    private func refreshMenus() {
+      guard parent.isVOD, let controller = playerVC else { return }
+      controller.transportBarCustomMenuItems = [chatToggleItem(), speedMenu()]
+    }
+
+    private func chatToggleItem() -> UIMenuElement {
+      let on = parent.showChat
+      let action = UIAction(
+        title: on ? "Hide Chat" : "Show Chat",
+        image: UIImage(systemName: on ? "bubble.left.fill" : "bubble.left")
+      ) { [weak self] _ in
+        guard let self else { return }
+        self.parent.showChat.toggle()
+        self.apply()
+      }
+      action.state = on ? .on : .off
+      return action
+    }
+
+    private func speedMenu() -> UIMenu {
+      let current = parent.player.defaultRate == 0 ? 1.0 : parent.player.defaultRate
+      let actions = speeds.map { speed in
+        UIAction(
+          title: speedTitle(speed),
+          state: abs(current - speed) < 0.01 ? .on : .off
+        ) { [weak self] _ in
+          guard let self else { return }
+          let player = self.parent.player
+          player.defaultRate = speed
+          if player.timeControlStatus != .paused {
+            player.rate = speed
+          }
+          self.refreshMenus()
+        }
+      }
+      return UIMenu(
+        title: "Playback Speed",
+        image: UIImage(systemName: "speedometer"),
+        children: actions
+      )
+    }
+
+    private func speedTitle(_ speed: Float) -> String {
+      speed == 1.0 ? "Normal" : String(format: "%g×", speed)
+    }
+  }
+}
+
+/// The chat-replay panel rendered inside the player's content overlay. Reads
+/// `replay` (which is `@Observable`) directly, so it re-renders as new messages
+/// surface without the host controller pushing updates each tick.
+private struct VODChatOverlay: View {
+  let replay: VODChatReplayService
+  let appearance: ChatOverlayAppearance
+  let visible: Bool
+
+  var body: some View {
+    if visible {
+      ChatView(
+        channel: appearance.channel,
+        messages: replay.messages,
+        textSize: appearance.textSize,
+        emoteSize: appearance.emoteSize,
+        messageSpacing: appearance.messageSpacing,
+        lineHeight: appearance.lineHeight,
+        animatedEmotes: appearance.animatedEmotes,
+        fontDesign: appearance.fontDesign,
+        showBadges: appearance.showBadges,
+        isConnected: replay.isReady,
+        emoteURLs: replay.emoteURLs,
+        badgeURLs: replay.badgeURLs,
+        useGlassBackground: appearance.layout == .glass,
+        useLighterOverlayBackground: appearance.layout != .glass
+      )
+      .frame(width: appearance.width)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+      .modifier(VODChatGlassStyle(enabled: appearance.layout == .glass))
+      .allowsHitTesting(false)
+    }
+  }
+}
+
 /// Lightweight rounded "glass" container for the VOD chat overlay so the glass
 /// layout mode reads similarly to the live player without depending on that
 /// file's private styling.
@@ -243,15 +400,6 @@ private struct VODChatGlassStyle: ViewModifier {
   func body(content: Content) -> some View {
     if enabled {
       content
-        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-        .background(
-          RoundedRectangle(cornerRadius: corner, style: .continuous)
-            .fill(.ultraThinMaterial)
-        )
-        .overlay(
-          RoundedRectangle(cornerRadius: corner, style: .continuous)
-            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-        )
         .padding(.vertical, edgeInset)
         .padding(.trailing, edgeInset)
     } else {

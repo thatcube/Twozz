@@ -69,15 +69,23 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     }
 
     uiImage = nil
-    do {
-      var request = URLRequest(url: url)
-      request.cachePolicy = .returnCacheDataElseLoad
-      let (data, _) = try await URLSession.shared.data(for: request)
-      guard !Task.isCancelled, let image = UIImage(data: data) else { return }
-      ImageMemoryCache.shared.insert(image, for: url)
-      uiImage = image
-    } catch {
-      // Leave the placeholder in place on failure, mirroring AsyncImage.
-    }
+    guard let prepared = await Self.fetchAndDecode(url) else { return }
+    guard !Task.isCancelled else { return }
+    ImageMemoryCache.shared.insert(prepared, for: url)
+    uiImage = prepared
+  }
+
+  /// Fetches and *fully decodes* the image off the main thread. `UIImage(data:)`
+  /// alone defers decoding until the image is first drawn — which lands on the
+  /// main thread mid-scroll and stutters as each new tile appears. Forcing the
+  /// decode here with `preparingForDisplay()` (and being `nonisolated` so it runs
+  /// on the cooperative pool, not the MainActor) hands SwiftUI a ready-to-blit
+  /// bitmap, so painting a recycled card costs nothing on the main thread.
+  nonisolated private static func fetchAndDecode(_ url: URL) async -> UIImage? {
+    var request = URLRequest(url: url)
+    request.cachePolicy = .returnCacheDataElseLoad
+    guard let (data, _) = try? await URLSession.shared.data(for: request),
+          let image = UIImage(data: data) else { return nil }
+    return image.preparingForDisplay() ?? image
   }
 }

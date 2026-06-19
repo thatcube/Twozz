@@ -156,6 +156,12 @@ struct ChannelPageView: View {
           )
         )
         .opacity(0.6)
+        // Flatten the mirror + 70pt blur + mask + opacity into a single Metal
+        // texture that's rasterized when the banner loads, rather than being
+        // re-evaluated by the compositor on every dirty region during scroll and
+        // focus animations. The additive blend below then runs on the cached
+        // texture instead of re-running the blur.
+        .drawingGroup()
         // Add the reflection's light to the dark background instead of averaging
         // toward it, so a bright/white banner glows in its own color rather than
         // washing out to gray.

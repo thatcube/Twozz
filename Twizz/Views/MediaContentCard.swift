@@ -46,7 +46,8 @@ struct MediaContentCard: View {
     .twizzLiquidGlassCard(
       cornerRadius: cardCornerRadius,
       isFocused: isFocused,
-      palette: palette
+      palette: palette,
+      glassWhenUnfocused: false
     )
     .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
   }

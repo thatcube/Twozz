@@ -5,15 +5,19 @@ import SwiftUI
 ///
 /// Opt-out model — every followed channel alerts by default, and the viewer
 /// toggles off the ones they don't want. tvOS has no system notifications, so
-/// the explanatory copy makes clear these alerts are *in-app on this Apple TV*
-/// only and don't change the viewer's Twitch notifications on other devices.
+/// these alerts are *in-app on this Apple TV* only and don't change the viewer's
+/// Twitch notifications on other devices (explained on the parent Settings row).
+///
+/// This is a second-level detail page, so it hides the top tab bar and presents
+/// as a focused full-screen list. The master Go Live Alerts on/off lives on the
+/// parent Settings row, not here — this page is just the per-channel picker.
 struct GoLiveAlertsSettingsView: View {
   var follows: FollowedChannelsService
   let settings: GoLiveNotificationSettings
   let auth: TwitchAuthSession
 
   @Environment(\.themePalette) private var palette
-  @AppStorage(GoLiveNotificationPreferences.enabledKey) private var alertsEnabled = true
+  @State private var searchText = ""
 
   /// The full follow list (live + offline) from the shared Following directory,
   /// sorted by name so the picker is easy to scan. Reuses `loadDirectory` rather
@@ -21,6 +25,17 @@ struct GoLiveAlertsSettingsView: View {
   private var broadcasters: [FollowedChannel] {
     follows.directory.sorted {
       $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+    }
+  }
+
+  /// `broadcasters` narrowed by the search field — matches display name or login,
+  /// case-insensitively — so ~100 follows stay findable.
+  private var filteredBroadcasters: [FollowedChannel] {
+    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !query.isEmpty else { return broadcasters }
+    return broadcasters.filter {
+      $0.displayName.localizedCaseInsensitiveContains(query)
+        || $0.login.localizedCaseInsensitiveContains(query)
     }
   }
 
@@ -34,34 +49,17 @@ struct GoLiveAlertsSettingsView: View {
       .ignoresSafeArea()
 
       List {
-        masterSection
         channelsSection
       }
     }
     .navigationTitle("Go Live Alerts")
+    .toolbar(.hidden, for: .tabBar)
+    .searchable(
+      text: $searchText,
+      placement: .automatic,
+      prompt: "Search channels"
+    )
     .task { await follows.loadDirectory(using: auth) }
-  }
-
-  private var masterSection: some View {
-    Section {
-      Toggle(isOn: $alertsEnabled) {
-        Label {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Go Live Alerts")
-              .font(.headline)
-            Text("Show an in-app pop-up when a followed channel goes live.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        } icon: {
-          Icon(glyph: .broadcast, size: 30)
-        }
-      }
-    } footer: {
-      Text("These alerts appear only in Twizz on this Apple TV. They don't change your Twitch notifications on your phone or computer.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
   }
 
   @ViewBuilder
@@ -73,14 +71,13 @@ struct GoLiveAlertsSettingsView: View {
         } else {
           emptyState
         }
+      } else if filteredBroadcasters.isEmpty {
+        noMatchesState
       } else {
-        ForEach(broadcasters) { channel in
+        ForEach(filteredBroadcasters) { channel in
           Toggle(isOn: binding(for: channel)) {
-            Text(channel.displayName)
-              .font(.headline)
-              .lineLimit(1)
+            channelLabel(channel)
           }
-          .disabled(!alertsEnabled)
         }
       }
     } header: {
@@ -92,7 +89,37 @@ struct GoLiveAlertsSettingsView: View {
           .foregroundStyle(.secondary)
       }
     }
-    .opacity(alertsEnabled ? 1 : 0.4)
+  }
+
+  private func channelLabel(_ channel: FollowedChannel) -> some View {
+    HStack(spacing: 16) {
+      avatar(for: channel)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(channel.displayName)
+          .font(.headline)
+          .lineLimit(1)
+        if channel.login.caseInsensitiveCompare(channel.displayName) != .orderedSame {
+          Text("@\(channel.login)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+      }
+    }
+  }
+
+  private func avatar(for channel: FollowedChannel) -> some View {
+    CachedAsyncImage(url: channel.profileImageURL) { image in
+      image.resizable().scaledToFill()
+    } placeholder: {
+      ZStack {
+        Circle().fill(.ultraThinMaterial)
+        Icon(glyph: .userCircle, size: 24)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .frame(width: 44, height: 44)
+    .clipShape(Circle())
   }
 
   private var loadingState: some View {
@@ -115,6 +142,13 @@ struct GoLiveAlertsSettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
     .padding(.vertical, 8)
+  }
+
+  private var noMatchesState: some View {
+    Text("No channels match “\(searchText)”.")
+      .font(.callout)
+      .foregroundStyle(.secondary)
+      .padding(.vertical, 8)
   }
 
   /// Per-channel switch. Reading `settings.isMuted` registers an observation so

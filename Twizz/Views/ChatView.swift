@@ -113,17 +113,23 @@ struct ChatView: View {
   }
 
   /// Shown while the list is focused and auto-scroll is paused, so the viewer
-  /// knows new messages are still arriving below and how to get back to live.
+  /// knows they're scrolling history and how to get back to live.
   private var pausedPill: some View {
-    Label("Scrolling · scroll down or press Back to resume", systemImage: "pause.fill")
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(.white)
-      .padding(.horizontal, 16)
-      .padding(.vertical, 9)
-      .background(.black.opacity(0.65), in: Capsule())
-      .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
-      .padding(.bottom, 12)
-      .transition(.move(edge: .bottom).combined(with: .opacity))
+    HStack(spacing: 7) {
+      Image(systemName: "pause.fill")
+        .font(.caption2.weight(.bold))
+      Text("Scrolling · Back to resume")
+        .font(.caption.weight(.semibold))
+    }
+    .lineLimit(1)
+    .fixedSize()
+    .foregroundStyle(.white)
+    .padding(.horizontal, 22)
+    .padding(.vertical, 10)
+    .background(.black.opacity(0.65), in: Capsule())
+    .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+    .padding(.bottom, 12)
+    .transition(.move(edge: .bottom).combined(with: .opacity))
   }
 
   private func line(for message: ChatMessage) -> some View {

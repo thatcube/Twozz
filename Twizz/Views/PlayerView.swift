@@ -545,9 +545,13 @@ struct PlayerView: View {
         // Directional movement should immediately surface controls. Pressing
         // right with chat open means the user wants the composer, so land
         // there directly instead of bouncing focus to the chat toggle first.
+        // Pressing up with chat open means the user wants to scroll history, so
+        // enter the scroller directly instead of landing on the control bar.
         switch direction {
         case .right where showChat:
           revealControls(preferredFocus: .chatInput)
+        case .up where showChat:
+          enterChatScroll()
         default:
           revealControls(preferredFocus: .chatToggle)
         }
@@ -566,6 +570,7 @@ struct PlayerView: View {
         } else if lastMoveDirection == .down {
           // Pressing down out of the list means "I'm done scrolling" — drop to
           // the composer and resume live instead of leaking to a control.
+          lastMoveDirection = nil
           focus = .chatInput
           scheduleHide()
           return
@@ -1335,6 +1340,18 @@ struct PlayerView: View {
       chatReplayStartMessageID = nil
       showChatSettings = false
     }
+  }
+
+  /// Move focus into the chat scroller. Clears the cached move direction so a
+  /// programmatic entry (or a momentary focus-engine bounce right after) can't
+  /// be mistaken for a downward exit by the focus trap.
+  private func enterChatScroll() {
+    lastMoveDirection = nil
+    if !showControls {
+      showControls = true
+    }
+    focus = .chatScroll
+    scheduleHide()
   }
 
   /// Leave the chat scroller (Back button): resume live auto-scroll and drop the
@@ -2143,7 +2160,7 @@ struct PlayerView: View {
             case .left:
               revealControls(preferredFocus: .chatToggle)
             case .up:
-              focus = .chatScroll
+              enterChatScroll()
             case .right:
               if hasChatDraft { focus = .chatSend }
             default:
@@ -2207,7 +2224,7 @@ struct PlayerView: View {
           case .left:
             revealControls(preferredFocus: .chatToggle)
           case .up:
-            focus = .chatScroll
+            enterChatScroll()
           default:
             break
           }

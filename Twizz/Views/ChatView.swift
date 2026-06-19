@@ -193,7 +193,10 @@ struct ChatView: View {
       // Dark content to read against the white-tinted "focused" glass, mirroring
       // the chat composer field when it is the focused element.
       .foregroundStyle(.black.opacity(0.8))
-      .padding(.horizontal, 22)
+      // Tuck the countdown ring into the capsule's left cap so its gap from the
+      // left edge matches its (small) gap from the top/bottom.
+      .padding(.leading, softPauseRemaining != nil ? 5 : 22)
+      .padding(.trailing, 22)
       .padding(.vertical, 10)
       .modifier(PausedPillGlassStyle())
     }
@@ -218,11 +221,15 @@ struct ChatView: View {
         .rotationEffect(.degrees(-90))
         .animation(.linear(duration: 1), value: remaining)
       Text("\(remaining)")
-        .font(.system(size: 24, weight: .bold))
+        .font(.system(size: 20, weight: .bold))
         .monospacedDigit()
         .contentTransition(.numericText())
     }
-    .frame(width: 48, height: 48)
+    .frame(width: 40, height: 40)
+    // Let the ring read larger than the label without making the pill taller:
+    // the extra height overlaps the pill's own vertical padding instead of
+    // pushing the capsule open.
+    .padding(.vertical, -8)
   }
 
   private func line(for message: ChatMessage) -> some View {

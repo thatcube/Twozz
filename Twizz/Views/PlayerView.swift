@@ -206,6 +206,34 @@ struct PlayerView: View {
   @State private var suppressLowLatencyToggleReload = false
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
+  /// Non-nil while chat is "soft paused" (Twitch-style): the list is frozen so
+  /// the viewer can read, with a countdown that auto-resumes. A second Up press
+  /// promotes it to manual scroll mode.
+  @State private var chatSoftPauseRemaining: Int?
+  @State private var softPauseTask: Task<Void, Never>?
+  private let softPauseSeconds = 10
+  /// True once the viewer has promoted the pause into manual scroll mode. Focus
+  /// stays on the composer; up/down swipes drive `chatScrollTarget` directly,
+  /// because tvOS will not reliably hand (and keep) focus on the chat ScrollView.
+  @State private var isChatScrolling = false
+  /// The message currently pinned near the top of the viewport while scrolling,
+  /// tracked by id so incoming messages don't shift our place.
+  @State private var chatScrollAnchorID: ChatMessage.ID?
+  /// Latest scroll instruction handed to ChatView. The nonce makes repeated
+  /// scrolls to the same id still register as a change.
+  @State private var chatScrollTarget: ChatScrollTarget?
+  @State private var chatScrollNonce = 0
+  /// Messages to advance per up/down swipe while scrolling.
+  private let chatScrollStep = 3
+  /// When the composer last became focused, used to ignore a stray up-swipe that
+  /// rides in on a diagonal move from the chat-toggle button (accidental pause).
+  @State private var chatInputFocusedAt = Date.distantPast
+  /// True while chat is held for reading — either the soft pause or full scroll
+  /// mode. The composer keeps real focus throughout, but it should *look*
+  /// unfocused so the held chat reads as the thing being interacted with.
+  private var chatIsFrozen: Bool {
+    isChatScrolling || chatSoftPauseRemaining != nil
+  }
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
@@ -281,7 +309,7 @@ struct PlayerView: View {
   private let chatComposerRowHeight: CGFloat = 62
 
   @FocusState private var focus: Focusable?
-  private enum Focusable: Hashable {
+  enum Focusable: Hashable {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case offlineViewChannel, offlineTryAgain
     case chatSend
@@ -506,6 +534,7 @@ struct PlayerView: View {
       focusRecoveryTask?.cancel()
       chatSyncSendClearTask?.cancel()
       outgoingRaidFollowTask?.cancel()
+      softPauseTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
       audioLevelMonitor.stop()
@@ -515,7 +544,9 @@ struct PlayerView: View {
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
-      if showChatSettings {
+      if isChatScrolling || chatSoftPauseRemaining != nil {
+        resumeChatLive()
+      } else if showChatSettings {
         if chatSettingsPage != .main {
           closeSubpage()
         } else {
@@ -530,14 +561,39 @@ struct PlayerView: View {
     }
     .onMoveCommand { direction in
       if !showControls {
-        // Directional movement should immediately surface controls and
-        // land on chat toggle so moving off chat feels instant.
-        revealControls(preferredFocus: .chatToggle)
+        // Directional movement should immediately surface controls. Pressing
+        // right with chat open means the user wants the composer, so land
+        // there directly instead of bouncing focus to the chat toggle first.
+        // Up/down with chat open drive the soft-pause / scroll flow even while
+        // the chrome is hidden (scrolling doesn't depend on focus).
+        switch direction {
+        case .right where showChat:
+          revealControls(preferredFocus: .chatInput)
+        case .up where showChat:
+          handleChatUpPress()
+        case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
+          handleChatDownPress()
+        default:
+          revealControls(preferredFocus: .chatToggle)
+        }
       } else {
         scheduleHide()
       }
     }
-    .onChange(of: focus) { _, newFocus in
+    .onChange(of: focus) { oldFocus, newFocus in
+      // Track when the composer becomes focused so an up-swipe that rides in on
+      // a diagonal move from the chat-toggle button can't accidentally pause.
+      if newFocus == .chatInput, oldFocus != .chatInput {
+        chatInputFocusedAt = Date()
+      }
+      // If chat is frozen (soft pause or scroll) and the viewer navigates away
+      // to a real control, resume live so the frozen state can't get stranded.
+      if isChatScrolling || chatSoftPauseRemaining != nil {
+        if let newFocus, newFocus != .chatInput, isControlFocus(newFocus) {
+          resumeChatLive()
+        }
+      }
+
       if showChatSettings {
         guard let newFocus else {
           focus = lastChatSettingsFocus
@@ -937,6 +993,24 @@ struct PlayerView: View {
           case .left:
             focus = .streamInfo
           case .right:
+            focus = .chatSettingsButton
+          default:
+            break
+          }
+        }
+
+        Button {
+          openChatSettingsFromControlBar()
+        } label: {
+          Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
+            .accessibilityLabel("Chat Settings")
+        }
+        .focused($focus, equals: .chatSettingsButton)
+        .onMoveCommand { direction in
+          switch direction {
+          case .left:
+            focus = .quality
+          case .right:
             focus = .chatToggle
           default:
             break
@@ -957,7 +1031,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .quality
+            focus = .chatSettingsButton
           case .right:
             if showChat {
               focus = .chatInput
@@ -972,10 +1046,16 @@ struct PlayerView: View {
       .focusSection()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    // Treat the whole control row (avatar, quality, settings, chat toggle) as one
+    // focus section so tvOS keeps focus within it during fast trackpad swipes.
+    // Without this, when chat is open the adjacent chat pane (composer, message
+    // list) offers competing focus targets and a quick swipe can fling focus out of
+    // the row or drop it entirely — which never happens with chat closed.
+    .focusSection()
     .padding(.leading, 48)
     .padding(.trailing, controlsTrailingInset)
     .padding(.top, 12)
-    .padding(.bottom, 42)
+    .padding(.bottom, controlsBottomPadding)
     .background(
       LinearGradient(
         stops: [
@@ -1206,6 +1286,19 @@ struct PlayerView: View {
           scheduleHide()
           return
         }
+        // Keep the controls (and the chat composer beneath them) on screen while
+        // chat is frozen for reading or scrolling, so focus stays on the composer
+        // and up/down swipes keep driving the scroll instead of hiding the chrome.
+        if isChatScrolling || chatSoftPauseRemaining != nil {
+          scheduleHide()
+          return
+        }
+        // The settings button now lives in the control bar, so keep the bar up
+        // while its panel is open — closing the panel returns focus to it.
+        if showChatSettings {
+          scheduleHide()
+          return
+        }
         hideControls()
       }
     }
@@ -1261,7 +1354,110 @@ struct PlayerView: View {
     } else {
       chatReplayStartMessageID = nil
       showChatSettings = false
+      cancelSoftPause()
     }
+  }
+
+  /// Up press while chat is open. First press soft-pauses (read mode with a
+  /// countdown). A second press promotes to manual scroll mode and scrolls up;
+  /// further up presses keep scrolling toward older messages.
+  private func handleChatUpPress() {
+    if isChatScrolling {
+      stepChatScroll(up: true)
+    } else if chatSoftPauseRemaining != nil {
+      beginChatScrolling()
+      stepChatScroll(up: true)
+    } else {
+      // Ignore an up-swipe that arrives right as focus lands on the composer —
+      // that's a diagonal move off the chat-toggle button, not a deliberate
+      // pause.
+      guard Date().timeIntervalSince(chatInputFocusedAt) > 0.3 else { return }
+      startSoftPause()
+    }
+  }
+
+  /// Down press while chat is open. Scrolls toward newer messages, resuming live
+  /// once it reaches the bottom; from a plain soft pause it resumes immediately.
+  private func handleChatDownPress() {
+    if isChatScrolling {
+      stepChatScroll(up: false)
+    } else if chatSoftPauseRemaining != nil {
+      resumeChatLive()
+    }
+  }
+
+  /// Freeze chat for `softPauseSeconds`, counting down then auto-resuming.
+  /// Focus is left untouched — this is a lightweight "let me read" pause.
+  private func startSoftPause() {
+    softPauseTask?.cancel()
+    chatSoftPauseRemaining = softPauseSeconds
+    softPauseTask = Task {
+      var remaining = softPauseSeconds
+      while remaining > 0 {
+        try? await Task.sleep(for: .seconds(1))
+        if Task.isCancelled { return }
+        remaining -= 1
+        await MainActor.run {
+          chatSoftPauseRemaining = remaining > 0 ? remaining : nil
+        }
+      }
+    }
+  }
+
+  private func cancelSoftPause() {
+    softPauseTask?.cancel()
+    softPauseTask = nil
+    chatSoftPauseRemaining = nil
+  }
+
+  /// Promote a soft pause into manual scroll mode, anchored at the newest message.
+  private func beginChatScrolling() {
+    cancelSoftPause()
+    isChatScrolling = true
+    chatScrollAnchorID = visibleChatMessages.last?.id
+    scheduleHide()
+  }
+
+  /// Advance the scroll anchor by `chatScrollStep` messages and tell ChatView to
+  /// scroll there. Scrolling past the newest message resumes the live feed.
+  private func stepChatScroll(up: Bool) {
+    let msgs = visibleChatMessages
+    guard !msgs.isEmpty else { return }
+    let lastIndex = msgs.count - 1
+    let currentIndex: Int = {
+      if let id = chatScrollAnchorID, let i = msgs.firstIndex(where: { $0.id == id }) {
+        return i
+      }
+      return lastIndex
+    }()
+
+    if up {
+      let target = max(0, currentIndex - chatScrollStep)
+      chatScrollAnchorID = msgs[target].id
+      sendChatScroll(to: msgs[target].id)
+    } else {
+      let target = currentIndex + chatScrollStep
+      if target >= lastIndex {
+        resumeChatLive()
+      } else {
+        chatScrollAnchorID = msgs[target].id
+        sendChatScroll(to: msgs[target].id)
+      }
+    }
+    scheduleHide()
+  }
+
+  private func sendChatScroll(to id: ChatMessage.ID) {
+    chatScrollNonce += 1
+    chatScrollTarget = ChatScrollTarget(id: id, anchor: .top, nonce: chatScrollNonce)
+  }
+
+  /// Leave any frozen state and let chat snap back to the live, newest message.
+  private func resumeChatLive() {
+    cancelSoftPause()
+    isChatScrolling = false
+    chatScrollAnchorID = nil
+    scheduleHide()
   }
 
   private func isControlFocus(_ focus: Focusable) -> Bool {
@@ -1320,7 +1516,10 @@ struct PlayerView: View {
         emoteURLs: chat.emoteURLs,
         badgeURLs: chat.badgeURLs,
         useGlassBackground: isGlass,
-        useLighterOverlayBackground: useLighterOverlayBackground
+        useLighterOverlayBackground: useLighterOverlayBackground,
+        autoScroll: !(isChatScrolling || chatSoftPauseRemaining != nil),
+        softPauseRemaining: chatSoftPauseRemaining,
+        scrollTarget: chatScrollTarget
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -1332,57 +1531,40 @@ struct PlayerView: View {
     // elements inside (e.g. the chat input) receive focus.
     .focusEffectDisabled()
     // The settings panel floats to the LEFT of the chat so the whole chat stays
-    // visible while you adjust it. It is attached *outside* GlassChatPaneStyle so
-    // the glass pane's rounded clip never hides it in glass layout mode.
-    .overlay(alignment: .topLeading) {
+    // visible while you adjust it, anchored toward the BOTTOM so it sits near the
+    // settings button (now in the bottom control row) instead of way up top. It
+    // is attached *outside* GlassChatPaneStyle so the glass pane's rounded clip
+    // never hides it in glass layout mode.
+    .overlay(alignment: .bottomLeading) {
       if showChatSettings {
-        let inset: CGFloat = isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16
+        let topInset: CGFloat = isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16
         GeometryReader { geo in
-          chatSettingsPanel(maxHeight: max(geo.size.height - inset * 2, 0))
+          chatSettingsPanel(maxHeight: max(geo.size.height - topInset - chatSettingsBottomClearance, 0))
             .frame(width: chatSettingsPanelWidth)
-            .padding(.vertical, inset)
+            .padding(.top, topInset)
+            .padding(.bottom, chatSettingsBottomClearance)
             .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
         .frame(width: chatSettingsPanelWidth)
-        .transition(.move(edge: .trailing).combined(with: .opacity))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
       }
-    }
-    // Keep the settings button pinned to the top-right of the chat. It stays put
-    // while the panel opens to the left — intentionally disconnected so the chat
-    // is never covered.
-    .overlay(alignment: .topTrailing) {
-      chatSettingsButton
-        .padding(.top, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
-        .padding(.trailing, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
     }
     .animation(.easeOut(duration: 0.18), value: showChatSettings)
   }
 
   private let chatSettingsPanelWidth: CGFloat = 560
   private let chatSettingsPanelGap: CGFloat = 16
+  /// Distance the bottom control row sits above the screen's bottom edge. Kept
+  /// generous so the row (and the chat composer it aligns with) clears typical TV
+  /// overscan instead of hugging the very bottom.
+  private let controlsBottomPadding: CGFloat = 8
+  /// How far above the screen bottom the floating settings panel must start so it
+  /// floats *above* the control row rather than behind/under it. Control row
+  /// bottom inset plus its approximate height plus a small gap.
+  private var chatSettingsBottomClearance: CGFloat { controlsBottomPadding + 88 }
 
   // MARK: - Floating chat settings
-
-  /// The compact button that toggles the settings panel. It is only reachable by
-  /// pressing up from the chat input, so it never steals focus while the user is
-  /// scrolling or typing.
-  private var chatSettingsButton: some View {
-    Button {
-      toggleChatSettings()
-    } label: {
-      Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
-        .frame(width: Icon.controlButtonSize, height: Icon.controlButtonSize)
-    }
-    .TwizzControlButtonStyle()
-    .focused($focus, equals: .chatSettingsButton)
-    .onMoveCommand { direction in
-      if direction == .down, showChatSettings {
-        focus = firstChatSettingsFocus
-      } else if direction == .down {
-        focus = .chatInput
-      }
-    }
-  }
 
   /// The focus target for the first control on whichever settings page is shown.
   private var firstChatSettingsFocus: Focusable {
@@ -2009,6 +2191,15 @@ struct PlayerView: View {
     }
   }
 
+  /// Settings button lives in the control bar, so it must work even when chat is
+  /// hidden: open chat first, then reveal the panel.
+  private func openChatSettingsFromControlBar() {
+    if !showChat {
+      toggleChatVisibility()
+    }
+    toggleChatSettings()
+  }
+
   private func toggleChatSettings() {
     showChatSettings.toggle()
     if showChatSettings {
@@ -2046,7 +2237,7 @@ struct PlayerView: View {
           } label: {
             Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
               .font(.subheadline)
-              .foregroundStyle(focus == .chatInput
+              .foregroundStyle(focus == .chatInput && !chatIsFrozen
                 ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
                 : .white.opacity(chatDraft.isEmpty ? 0.5 : 1.0))
               .lineLimit(1)
@@ -2055,7 +2246,7 @@ struct PlayerView: View {
               .padding(.horizontal, 28)
               .frame(maxWidth: .infinity)
               .frame(height: chatComposerRowHeight)
-              .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
+              .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput && !chatIsFrozen))
               // The keyboard host sits *behind* the glass capsule as a full-size,
               // visually clear field. Keeping it out of the styled content (and at
               // full size) avoids a second nested background blob and stops tvOS
@@ -2073,13 +2264,15 @@ struct PlayerView: View {
           .buttonStyle(ChatInputButtonStyle())
           .focusEffectDisabled()
           .focused($focus, equals: .chatInput)
-          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+          .animation(.easeOut(duration: 0.18), value: focus == .chatInput && !chatIsFrozen)
           .onMoveCommand { direction in
             switch direction {
             case .left:
               revealControls(preferredFocus: .chatToggle)
             case .up:
-              focus = .chatSettingsButton
+              handleChatUpPress()
+            case .down:
+              handleChatDownPress()
             case .right:
               if hasChatDraft { focus = .chatSend }
             default:
@@ -2125,15 +2318,15 @@ struct PlayerView: View {
         } label: {
           Text("Sign in to send messages")
             .font(.subheadline)
-            .foregroundStyle(focus == .chatInput
+            .foregroundStyle(focus == .chatInput && !chatIsFrozen
               ? .black.opacity(0.7)
               : .white.opacity(0.45))
             .lineLimit(1)
             .padding(.horizontal, 28)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: chatComposerRowHeight)
-            .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput))
-            .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+            .modifier(ChatGlassFieldStyle(isFocused: focus == .chatInput && !chatIsFrozen))
+            .animation(.easeOut(duration: 0.18), value: focus == .chatInput && !chatIsFrozen)
         }
         .buttonStyle(ChatInputButtonStyle())
         .focusEffectDisabled()
@@ -2143,7 +2336,9 @@ struct PlayerView: View {
           case .left:
             revealControls(preferredFocus: .chatToggle)
           case .up:
-            focus = .chatSettingsButton
+            handleChatUpPress()
+          case .down:
+            handleChatDownPress()
           default:
             break
           }

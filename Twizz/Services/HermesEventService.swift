@@ -76,7 +76,10 @@ struct LiveHypeTrain: Equatable, Identifiable {
   enum Phase: Equatable { case approaching, active, completed }
 
   let id: String
-  let level: Int
+  /// The train's level, when known. Nil when an event (notably the end event)
+  /// arrives without a level and we never saw one — we'd rather show no level
+  /// than a misleading "Level 1".
+  let level: Int?
   /// Points toward the *current* level's goal (not the cumulative train total).
   let progress: Int
   let goal: Int
@@ -439,7 +442,11 @@ final class HermesEventService {
       (data["progress"] as? [String: Any]) ?? (data["hype_train"] as? [String: Any]) ?? data
     let levelDict = progressDict["level"] as? [String: Any]
 
-    let level = Self.intValue(progressDict["level"]) ?? Self.intValue(levelDict?["value"]) ?? 0
+    // The end event doesn't carry the progress/level block that progression
+    // events do, so fall back to the level we last saw. Stays nil if we never
+    // saw one, so a completed train reads plainly "ended" rather than a
+    // misleading "Level 1".
+    let level = Self.intValue(progressDict["level"]) ?? Self.intValue(levelDict?["value"]) ?? hypeTrain?.level
     // Progress toward the *current level* — `value` (v2 nested) or `progress`
     // (v1 flat). Deliberately NOT `total`, which is the cumulative train score
     // and would peg the bar at 100% once past level one.
@@ -461,7 +468,7 @@ final class HermesEventService {
     let phase: LiveHypeTrain.Phase = ended ? .completed : (approaching ? .approaching : .active)
     hypeTrain = LiveHypeTrain(
       id: id,
-      level: max(level, 1),
+      level: level,
       progress: levelProgress,
       goal: max(goalValue, levelProgress),
       phase: phase,

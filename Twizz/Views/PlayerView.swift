@@ -2452,7 +2452,13 @@ struct PlayerView: View {
             focusTag: .simulateGoLiveButton
           ) {
             showChatSettings = false
-            goLive?.simulateGoLive()
+            // Let the settings sheet finish dismissing before the toast appears,
+            // otherwise it surfaces mid-transition and the focus engine can't
+            // reliably hand focus to its "Watch" button.
+            Task {
+              try? await Task.sleep(for: .milliseconds(600))
+              goLive?.simulateGoLive()
+            }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }

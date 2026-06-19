@@ -109,19 +109,6 @@ final class GoLiveWatcher {
     enqueue(GoLiveEvent(login: "monstercat", displayName: "Monstercat", gameName: "Music"))
   }
 
-  /// Freeze the auto-dismiss countdown — called while the toast's button holds
-  /// focus, so the toast can't vanish out from under the viewer.
-  func pauseAutoDismiss() {
-    dismissTask?.cancel()
-    dismissTask = nil
-  }
-
-  /// Resume the countdown from whatever time is left after a focus pause.
-  func resumeAutoDismiss() {
-    guard pending != nil, dismissTask == nil else { return }
-    startDismissCountdown()
-  }
-
   // MARK: - Polling
 
   private func poll(using auth: TwitchAuthSession) async {

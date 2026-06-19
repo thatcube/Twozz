@@ -12,10 +12,7 @@ extension PlayerView {
         Spacer()
         GoLiveToastView(
           event: event,
-          onWatch: { watchGoLive(watcher) },
-          onFocusChange: { focused in
-            focused ? watcher.pauseAutoDismiss() : watcher.resumeAutoDismiss()
-          }
+          onWatch: { watchGoLive(watcher) }
         )
       }
       Spacer()

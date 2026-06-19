@@ -160,10 +160,7 @@ struct HomeView: View {
       if let event = goLive.pending {
         GoLiveToastView(
           event: event,
-          onWatch: { watchGoLive() },
-          onFocusChange: { focused in
-            focused ? goLive.pauseAutoDismiss() : goLive.resumeAutoDismiss()
-          }
+          onWatch: { watchGoLive() }
         )
         .padding(.top, 48)
         .padding(.trailing, 48)

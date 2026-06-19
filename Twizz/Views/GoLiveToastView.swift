@@ -1,20 +1,17 @@
 import SwiftUI
 
 /// Interactive "just went live" toast. Presentational only: the caller positions
-/// it (top-trailing) and wires the closures, so the same view serves both Home
-/// and the player without depending on either's focus model.
+/// it (top-trailing), so the same view serves both Home and the player without
+/// depending on either's focus model.
 ///
-/// The toast never steals focus (it shouldn't interrupt what you're doing), but
-/// its `Watch` button is reachable by the focus engine. Focusing it pauses the
-/// auto-dismiss countdown via `onFocusChange`, so the toast can't disappear while
-/// you're deciding whether to jump in.
+/// The toast takes focus on its `Watch` button when it appears — mirroring the
+/// raid banner — so the viewer can act with a single press instead of hunting
+/// for it. The owner's auto-dismiss countdown keeps running regardless, so an
+/// ignored toast still clears itself.
 struct GoLiveToastView: View {
   let event: GoLiveEvent
   /// Invoked when the viewer presses `Watch`.
   let onWatch: () -> Void
-  /// Reports the `Watch` button's focus state so the owner can pause/resume the
-  /// auto-dismiss countdown.
-  var onFocusChange: (Bool) -> Void = { _ in }
 
   @FocusState private var watchFocused: Bool
 
@@ -56,8 +53,11 @@ struct GoLiveToastView: View {
       }
     }
     .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-    .onChange(of: watchFocused) { _, focused in
-      onFocusChange(focused)
+    .task {
+      // Let the move/opacity transition settle before claiming focus, so tvOS
+      // reliably lands on the button instead of dropping the request mid-animation.
+      try? await Task.sleep(for: .milliseconds(350))
+      watchFocused = true
     }
   }
 }

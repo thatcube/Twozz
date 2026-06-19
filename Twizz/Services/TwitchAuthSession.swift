@@ -35,6 +35,11 @@ final class TwitchAuthSession {
     }()
     private var pollTask: Task<Void, Never>?
     private var broadcasterIDCache: [String: String] = [:]
+    /// Coalesces concurrent token refreshes into a single in-flight request.
+    /// Twitch refresh tokens are single-use, so two callers refreshing at once
+    /// would each spend the same token and the loser would be rejected with
+    /// `invalid_grant`, needlessly tearing down the session.
+    private var refreshInFlight: Task<String, Error>?
 
     private var clientID: String? {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: "TWITCH_CLIENT_ID") as? String else {
@@ -194,32 +199,88 @@ final class TwitchAuthSession {
             return accessToken
         }
 
+        // Join an already-running refresh instead of starting a second one.
+        // This is what stops the in-app services (followed channels, playback,
+        // chat) from racing each other onto the same single-use refresh token.
+        if let refreshInFlight {
+            return try await refreshInFlight.value
+        }
+
+        let task = Task { () throws -> String in
+            try await performTokenRefresh()
+        }
+        refreshInFlight = task
+        defer { refreshInFlight = nil }
+        return try await task.value
+    }
+
+    private func performTokenRefresh() async throws -> String {
         guard let clientID else {
             throw TwitchAuthRefreshError.missingClientID
         }
-        guard let refreshToken else {
+
+        // The Top Shelf extension shares — and independently rotates — this same
+        // refresh token via the App Group store, so always start from the
+        // freshest persisted value rather than a possibly-stale in-memory copy.
+        reloadTokensFromStore()
+        guard let currentRefreshToken = refreshToken else {
             throw TwitchAuthRefreshError.missingRefreshToken
         }
 
         do {
-            let token = try await requestRefreshToken(clientID: clientID, refreshToken: refreshToken)
-            accessToken = token.accessToken
-            userDefaults.set(token.accessToken, forKey: StorageKey.accessToken)
-
-            if let nextRefreshToken = token.refreshToken,
-               !nextRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                self.refreshToken = nextRefreshToken
-                userDefaults.set(nextRefreshToken, forKey: StorageKey.refreshToken)
+            let token = try await requestRefreshToken(
+                clientID: clientID, refreshToken: currentRefreshToken)
+            return applyRefreshedTokens(token)
+        } catch let error as TwitchAuthHTTPError where isInvalidRefreshError(error) {
+            // Another process (typically the Top Shelf extension) may have just
+            // rotated the token out from under us. Reload the shared store and,
+            // if it now holds a *different* refresh token, retry once before
+            // declaring the session dead.
+            reloadTokensFromStore()
+            if let reloaded = refreshToken, reloaded != currentRefreshToken {
+                do {
+                    let token = try await requestRefreshToken(
+                        clientID: clientID, refreshToken: reloaded)
+                    return applyRefreshedTokens(token)
+                } catch let retryError as TwitchAuthHTTPError
+                    where isInvalidRefreshError(retryError) {
+                    // Both tokens are genuinely invalid — fall through to sign-out.
+                }
+                // A transient (e.g. network) failure on the retry propagates
+                // without wiping the session.
             }
+            clearStoredAuthState()
+            errorMessage = "Session expired. Sign in again to reconnect Twitch."
+            throw TwitchAuthRefreshError.sessionExpired
+        }
+    }
 
-            return token.accessToken
-        } catch let error as TwitchAuthHTTPError {
-            if isInvalidRefreshError(error) {
-                clearStoredAuthState()
-                errorMessage = "Session expired. Sign in again to reconnect Twitch."
-                throw TwitchAuthRefreshError.sessionExpired
-            }
-            throw error
+    /// Persists a freshly-issued token pair to memory and the shared App Group
+    /// store (which the Top Shelf extension also reads), returning the new
+    /// access token.
+    @discardableResult
+    private func applyRefreshedTokens(_ token: DeviceTokenResponse) -> String {
+        accessToken = token.accessToken
+        userDefaults.set(token.accessToken, forKey: StorageKey.accessToken)
+
+        if let nextRefreshToken = token.refreshToken,
+           !nextRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            self.refreshToken = nextRefreshToken
+            userDefaults.set(nextRefreshToken, forKey: StorageKey.refreshToken)
+        }
+
+        return token.accessToken
+    }
+
+    /// Pulls the latest persisted tokens from the shared App Group store. Used
+    /// before refreshing so we don't spend a refresh token the Top Shelf
+    /// extension has already rotated.
+    private func reloadTokensFromStore() {
+        if let storedAccess = userDefaults.string(forKey: StorageKey.accessToken) {
+            accessToken = storedAccess
+        }
+        if let storedRefresh = userDefaults.string(forKey: StorageKey.refreshToken) {
+            refreshToken = storedRefresh
         }
     }
 

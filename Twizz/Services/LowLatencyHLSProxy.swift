@@ -35,10 +35,30 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     /// `@AppStorage`/`UserDefaults` key for the experimental toggle.
     static let settingsKey = "lowLatencyProxyEnabled"
 
+    /// `@AppStorage`/`UserDefaults` key for the Stream Rewind (DVR) toggle.
+    static let rewindSettingsKey = "streamRewindEnabled"
+
     private static let prefetchTag = "#EXT-X-TWITCH-PREFETCH:"
     private static let streamInfTag = "#EXT-X-STREAM-INF"
     private static let extinfTag = "#EXTINF:"
     private static let targetDurationTag = "#EXT-X-TARGETDURATION:"
+    private static let mediaSequenceTag = "#EXT-X-MEDIA-SEQUENCE:"
+    private static let discontinuitySequenceTag = "#EXT-X-DISCONTINUITY-SEQUENCE:"
+    private static let discontinuityTag = "#EXT-X-DISCONTINUITY"
+    /// Tags whose appearance marks the end of the playlist header and the start
+    /// of the segment list. `#EXT-X-DISCONTINUITY-SEQUENCE` is intentionally NOT
+    /// here (it is a header tag even though it shares a prefix with the
+    /// per-segment `#EXT-X-DISCONTINUITY`).
+    private static let segmentStartTags = [
+        extinfTag,
+        "#EXT-X-PROGRAM-DATE-TIME",
+        discontinuityTag,
+        "#EXT-X-BYTERANGE",
+        "#EXT-X-KEY",
+        "#EXT-X-MAP",
+        "#EXT-X-DATERANGE",
+        prefetchTag,
+    ]
 
     /// UTI for an HLS playlist on Apple platforms (both `.m3u8` and the Apple
     /// mpegurl MIME type resolve to this). Required on the content-information
@@ -61,6 +81,48 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
 
     private var tasks: [ObjectIdentifier: URLSessionDataTask] = [:]
 
+    // MARK: - DVR (Stream Rewind) configuration & state
+
+    /// When true, promote Twitch `#EXT-X-TWITCH-PREFETCH` segments at the live
+    /// tail (the low-latency win). Independent of `retainHistory`.
+    private var promotePrefetch = true
+    /// When true, retain every real segment seen so AVPlayer's seekable window
+    /// grows to match watch time — the Stream Rewind DVR.
+    private var retainHistory = true
+    /// Cap on retained history, in seconds. Twitch's segment URLs eventually age
+    /// off its CDN, so retaining past this just risks 404s on a deep rewind.
+    private var dvrWindowSeconds: Double = 1800
+    /// Per-media-playlist retained-segment buffers, keyed by the real (https)
+    /// media-playlist URL. Mutated only on `delegateQueue`.
+    private var dvrBuffers: [String: DVRBuffer] = [:]
+
+    /// One parsed HLS segment (a real `#EXTINF` segment or a promoted prefetch),
+    /// kept as its full text block so per-segment tags (PROGRAM-DATE-TIME,
+    /// DISCONTINUITY, …) survive into the rewritten playlist verbatim.
+    private struct MediaSegment {
+        let url: String
+        let lines: [String]
+        let duration: Double
+        let isDiscontinuity: Bool
+    }
+
+    private struct ParsedMediaPlaylist {
+        var header: [String]
+        var mediaSequence: Int
+        var discontinuitySequence: Int
+        var segments: [MediaSegment]
+        var prefetch: [MediaSegment]
+    }
+
+    /// Growing, deduplicated history of real segments for one media playlist.
+    private final class DVRBuffer {
+        var segments: [MediaSegment] = []
+        var seenURLs: Set<String> = []
+        var firstSequence = 0
+        var discontinuitySequence = 0
+        var initialized = false
+    }
+
     init(headers: [String: String]) {
         self.upstreamHeaders = headers
         super.init()
@@ -68,6 +130,29 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
 
     /// Serial queue AVFoundation should deliver resource-loader callbacks on.
     var callbackQueue: DispatchQueue { delegateQueue }
+
+    /// Updates the proxy's behavior. Dispatched onto the delegate queue so the
+    /// flags are always read consistently with playlist rewriting. Switching
+    /// `retainHistory` clears any accumulated DVR history.
+    func configure(promotePrefetch: Bool, retainHistory: Bool, windowSeconds: Double) {
+        delegateQueue.async { [weak self] in
+            guard let self else { return }
+            self.promotePrefetch = promotePrefetch
+            if self.retainHistory != retainHistory {
+                self.dvrBuffers.removeAll()
+            }
+            self.retainHistory = retainHistory
+            self.dvrWindowSeconds = windowSeconds
+        }
+    }
+
+    /// Drops all retained DVR history (e.g. on a channel switch / raid) so the
+    /// rewind window starts fresh for the new stream.
+    func resetDVR() {
+        delegateQueue.async { [weak self] in
+            self?.dvrBuffers.removeAll()
+        }
+    }
 
     /// Rewrites an `https` master-playlist URL onto the custom scheme so AVPlayer
     /// routes it (and, after rewriting, its child media playlists) through this
@@ -114,7 +199,7 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
                 }
 
                 let text = String(decoding: data, as: UTF8.self)
-                let rewritten = self.rewrite(playlist: text)
+                let rewritten = self.rewrite(playlist: text, sourceURL: realURL)
                 self.fulfill(loadingRequest, with: rewritten)
             }
         }
@@ -139,11 +224,11 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     // MARK: - Playlist rewriting
 
     /// Dispatches to the master- or media-playlist rewriter based on content.
-    private func rewrite(playlist text: String) -> Data {
+    private func rewrite(playlist text: String, sourceURL: URL) -> Data {
         if text.contains(Self.streamInfTag) {
             return rewriteMasterPlaylist(text)
         }
-        return rewriteMediaPlaylist(text)
+        return rewriteMediaPlaylist(text, sourceURL: sourceURL)
     }
 
     /// Reroutes variant + alternate-media (`URI="..."`) playlist URLs onto the
@@ -167,34 +252,215 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         return Data(out.joined(separator: "\n").utf8)
     }
 
-    /// Promotes each `#EXT-X-TWITCH-PREFETCH:<url>` line into a real
-    /// `#EXTINF:<dur>,` + `<url>` segment so AVPlayer fetches it. Prefetch
-    /// segment duration is taken from the most recent regular `#EXTINF` (falling
-    /// back to `#EXT-X-TARGETDURATION`, then 2s) — matching Streamlink's heuristic
-    /// closely enough for stable playback.
-    private func rewriteMediaPlaylist(_ text: String) -> Data {
-        let lines = text.components(separatedBy: "\n")
-        var out: [String] = []
-        out.reserveCapacity(lines.count + 8)
+    /// Rewrites a Twitch live media playlist.
+    ///
+    /// Two independent behaviors, combined:
+    /// - **Prefetch promotion** (`promotePrefetch`): each
+    ///   `#EXT-X-TWITCH-PREFETCH:<url>` is turned into a real `#EXTINF` segment at
+    ///   the live tail so AVPlayer fetches it (the low-latency win). Duration is
+    ///   taken from the most recent regular `#EXTINF` (falling back to
+    ///   `#EXT-X-TARGETDURATION`, then 2s) — Streamlink's heuristic.
+    /// - **DVR retention** (`retainHistory`): every real segment ever seen for
+    ///   this media playlist is retained (deduplicated by URL) and re-emitted, so
+    ///   the playlist — and therefore AVPlayer's seekable window — grows to match
+    ///   watch time. This is the Stream Rewind window. History is capped at
+    ///   `dvrWindowSeconds`; the `#EXT-X-MEDIA-SEQUENCE` /
+    ///   `#EXT-X-DISCONTINUITY-SEQUENCE` headers are rewritten to stay consistent
+    ///   as the window slides.
+    private func rewriteMediaPlaylist(_ text: String, sourceURL: URL) -> Data {
+        let parsed = parseMediaPlaylist(text)
 
-        var lastDuration = fallbackSegmentDuration(in: lines)
+        guard retainHistory else {
+            var out = parsed.header
+            for seg in parsed.segments { out.append(contentsOf: seg.lines) }
+            if promotePrefetch {
+                for seg in parsed.prefetch { out.append(contentsOf: seg.lines) }
+            }
+            return Data(out.joined(separator: "\n").utf8)
+        }
+
+        let key = sourceURL.absoluteString
+        let buf = dvrBuffers[key] ?? DVRBuffer()
+        if !buf.initialized {
+            buf.firstSequence = parsed.mediaSequence
+            buf.discontinuitySequence = parsed.discontinuitySequence
+            buf.initialized = true
+        }
+
+        for seg in parsed.segments where !buf.seenURLs.contains(seg.url) {
+            buf.seenURLs.insert(seg.url)
+            buf.segments.append(seg)
+        }
+
+        // Slide the retained window: drop oldest segments past the cap, advancing
+        // the media/discontinuity sequence counters so AVPlayer's accounting stays
+        // monotonic and correct.
+        var total = buf.segments.reduce(0.0) { $0 + $1.duration }
+        while total > dvrWindowSeconds, buf.segments.count > 1 {
+            let dropped = buf.segments.removeFirst()
+            buf.seenURLs.remove(dropped.url)
+            total -= dropped.duration
+            buf.firstSequence += 1
+            if dropped.isDiscontinuity { buf.discontinuitySequence += 1 }
+        }
+        dvrBuffers[key] = buf
+
+        var out = rebuildHeader(
+            parsed.header,
+            mediaSequence: buf.firstSequence,
+            discontinuitySequence: buf.discontinuitySequence
+        )
+        for seg in buf.segments { out.append(contentsOf: seg.lines) }
+        if promotePrefetch {
+            for seg in parsed.prefetch where !buf.seenURLs.contains(seg.url) {
+                out.append(contentsOf: seg.lines)
+            }
+        }
+        return Data(out.joined(separator: "\n").utf8)
+    }
+
+    /// Splits a media playlist into its header, sequence numbers, real segments
+    /// and (promoted) prefetch segments. Each segment keeps its full text block so
+    /// per-segment tags survive verbatim.
+    private func parseMediaPlaylist(_ text: String) -> ParsedMediaPlaylist {
+        let lines = text.components(separatedBy: "\n")
+        var header: [String] = []
+        var mediaSequence = 0
+        var discontinuitySequence = 0
+        var segments: [MediaSegment] = []
+        var prefetch: [MediaSegment] = []
+        var pending: [String] = []
+        var pendingHasDiscontinuity = false
+        var lastDuration = Double(fallbackSegmentDuration(in: lines)) ?? 2.0
+        var headerDone = false
 
         for raw in lines {
-            let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix(Self.extinfTag) {
-                if let dur = duration(fromExtinf: trimmed) { lastDuration = dur }
-                out.append(raw)
-            } else if trimmed.hasPrefix(Self.prefetchTag) {
-                let urlString = String(trimmed.dropFirst(Self.prefetchTag.count))
+            let t = raw.trimmingCharacters(in: .whitespaces)
+
+            if !headerDone {
+                if t.isEmpty {
+                    header.append(raw)
+                    continue
+                }
+                if t.hasPrefix("#"), !isSegmentStart(t) {
+                    if t.hasPrefix(Self.mediaSequenceTag) {
+                        mediaSequence =
+                            Int(t.dropFirst(Self.mediaSequenceTag.count)
+                                .trimmingCharacters(in: .whitespaces)) ?? 0
+                    } else if t.hasPrefix(Self.discontinuitySequenceTag) {
+                        discontinuitySequence =
+                            Int(t.dropFirst(Self.discontinuitySequenceTag.count)
+                                .trimmingCharacters(in: .whitespaces)) ?? 0
+                    }
+                    header.append(raw)
+                    continue
+                }
+                headerDone = true
+            }
+
+            if t.isEmpty { continue }
+
+            if t.hasPrefix(Self.prefetchTag) {
+                let urlString = String(t.dropFirst(Self.prefetchTag.count))
                     .trimmingCharacters(in: .whitespaces)
                 guard !urlString.isEmpty else { continue }
-                out.append("\(Self.extinfTag)\(lastDuration),")
-                out.append(urlString)
+                var block = pending
+                block.append("\(Self.extinfTag)\(String(format: "%.3f", lastDuration)),")
+                block.append(urlString)
+                prefetch.append(
+                    MediaSegment(
+                        url: urlString,
+                        lines: block,
+                        duration: lastDuration,
+                        isDiscontinuity: pendingHasDiscontinuity
+                    )
+                )
+                pending = []
+                pendingHasDiscontinuity = false
+            } else if t.hasPrefix("#") {
+                if t.hasPrefix(Self.extinfTag), let dur = duration(fromExtinf: t),
+                    let value = Double(dur)
+                {
+                    lastDuration = value
+                }
+                if t.hasPrefix(Self.discontinuityTag),
+                    !t.hasPrefix(Self.discontinuitySequenceTag)
+                {
+                    pendingHasDiscontinuity = true
+                }
+                pending.append(raw)
+            } else {
+                var block = pending
+                block.append(raw)
+                segments.append(
+                    MediaSegment(
+                        url: t,
+                        lines: block,
+                        duration: lastDuration,
+                        isDiscontinuity: pendingHasDiscontinuity
+                    )
+                )
+                pending = []
+                pendingHasDiscontinuity = false
+            }
+        }
+
+        return ParsedMediaPlaylist(
+            header: header,
+            mediaSequence: mediaSequence,
+            discontinuitySequence: discontinuitySequence,
+            segments: segments,
+            prefetch: prefetch
+        )
+    }
+
+    private func isSegmentStart(_ trimmed: String) -> Bool {
+        if trimmed.hasPrefix(Self.discontinuitySequenceTag) { return false }
+        return Self.segmentStartTags.contains { trimmed.hasPrefix($0) }
+    }
+
+    /// Rewrites the `#EXT-X-MEDIA-SEQUENCE` / `#EXT-X-DISCONTINUITY-SEQUENCE`
+    /// header values to match the retained window, inserting them if absent.
+    private func rebuildHeader(
+        _ header: [String],
+        mediaSequence: Int,
+        discontinuitySequence: Int
+    ) -> [String] {
+        var out: [String] = []
+        out.reserveCapacity(header.count + 2)
+        var replacedMedia = false
+        var replacedDisc = false
+
+        for raw in header {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix(Self.mediaSequenceTag) {
+                out.append("\(Self.mediaSequenceTag)\(mediaSequence)")
+                replacedMedia = true
+            } else if t.hasPrefix(Self.discontinuitySequenceTag) {
+                out.append("\(Self.discontinuitySequenceTag)\(discontinuitySequence)")
+                replacedDisc = true
             } else {
                 out.append(raw)
             }
         }
-        return Data(out.joined(separator: "\n").utf8)
+
+        if !replacedMedia {
+            insertHeaderTag(&out, "\(Self.mediaSequenceTag)\(mediaSequence)")
+        }
+        if !replacedDisc, discontinuitySequence > 0 {
+            insertHeaderTag(&out, "\(Self.discontinuitySequenceTag)\(discontinuitySequence)")
+        }
+        return out
+    }
+
+    private func insertHeaderTag(_ out: inout [String], _ tag: String) {
+        if let idx = out.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("#EXTM3U")
+        }) {
+            out.insert(tag, at: idx + 1)
+        } else {
+            out.insert(tag, at: 0)
+        }
     }
 
     // MARK: - Helpers

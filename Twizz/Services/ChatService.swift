@@ -310,6 +310,10 @@ final class ChatService {
         pendingRaid = raid
         continue
       }
+      if let subMessage = ChatMessage(subscriptionUSERNOTICE: piece) {
+        parsedMessages.append(subMessage)
+        continue
+      }
       if let message = ChatMessage(ircLine: piece) {
         parsedMessages.append(message)
       }

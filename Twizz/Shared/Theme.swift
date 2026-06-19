@@ -12,6 +12,11 @@ enum AppLayout {
   /// (channels, categories, search results, etc.) so the scale is consistent
   /// everywhere instead of varying per surface.
   static let focusedCardScale: CGFloat = 1.07
+
+  /// Shared focus/hover animation used by interactive cards.
+  static var focusScaleAnimation: Animation? {
+    return .easeOut(duration: 0.14)
+  }
 }
 
 // MARK: - AppTheme

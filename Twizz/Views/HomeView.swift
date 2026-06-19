@@ -318,7 +318,7 @@ struct HomeView: View {
             }
             .accessibilityAddTraits(.isButton)
             .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
+            .animation(AppLayout.focusScaleAnimation, value: isFocused)
             .zIndex(isFocused ? 2 : 0)
           }
         }
@@ -382,7 +382,7 @@ struct HomeView: View {
               }
               .accessibilityAddTraits(.isButton)
               .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(.easeOut(duration: 0.14), value: isFocused)
+              .animation(AppLayout.focusScaleAnimation, value: isFocused)
               .zIndex(isFocused ? 2 : 0)
             }
           }
@@ -446,7 +446,7 @@ struct HomeView: View {
               }
               .accessibilityAddTraits(.isButton)
               .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(.easeOut(duration: 0.14), value: isFocused)
+              .animation(AppLayout.focusScaleAnimation, value: isFocused)
               .zIndex(isFocused ? 2 : 0)
             }
           }
@@ -488,7 +488,7 @@ struct HomeView: View {
               }
               .accessibilityAddTraits(.isButton)
               .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(.easeOut(duration: 0.14), value: isFocused)
+              .animation(AppLayout.focusScaleAnimation, value: isFocused)
               .zIndex(isFocused ? 2 : 0)
             }
           }

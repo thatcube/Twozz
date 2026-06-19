@@ -12,10 +12,12 @@ struct RichChatLineView: View {
     var emoteSize: CGFloat = ChatAppearance.defaultEmoteSize
     /// Extra spacing applied within a wrapped message line.
     var lineHeight: CGFloat = ChatAppearance.defaultLineHeight
+    /// Extra tracking (spacing between characters) applied to all chat text.
+    var letterSpacing: CGFloat = ChatAppearance.defaultLetterSpacing
     /// When false, emotes render as a static first frame instead of animating.
     var animatedEmotes: Bool = true
-    /// Typeface design applied to all chat text.
-    var fontDesign: Font.Design = ChatAppearance.defaultFontStyle.design
+    /// Typeface applied to all chat text.
+    var fontStyle: ChatFontStyle = ChatAppearance.defaultFontStyle
     /// When false, per-user chat badges (mod/sub/etc.) are hidden.
     var showBadges: Bool = ChatAppearance.defaultShowBadges
     /// Overrides the default white body color (used by the light side-chat).
@@ -92,20 +94,19 @@ struct RichChatLineView: View {
         ChatFlowLayout(itemSpacing: 0, rowSpacing: rowSpacing) {
             if shouldShowSourceBadge {
                 sourceBadgeView
-                    .padding(.top, 4)
                     .padding(.trailing, 4)
             }
 
             if showBadges {
                 ForEach(Array(resolvedBadgeURLs.enumerated()), id: \.offset) { _, badgeURL in
                     badgeView(url: badgeURL)
-                        .padding(.top, 4)
                         .padding(.trailing, 4)
                 }
             }
 
             Text(message.isAction ? "\(message.username) " : "\(message.username): ")
-                .font(.system(size: nameFontSize, weight: .bold, design: fontDesign))
+                .font(fontStyle.font(size: nameFontSize, weight: .bold))
+                .tracking(letterSpacing)
                 .foregroundStyle(nameColor)
 
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
@@ -152,7 +153,8 @@ struct RichChatLineView: View {
         switch segment {
         case .text(let text):
             Text(text)
-                .font(.system(size: bodyFontSize, design: fontDesign))
+                .font(fontStyle.font(size: bodyFontSize))
+                .tracking(letterSpacing)
                 .foregroundStyle(bodyColor)
         case .emote(let name, let url):
             EmoteView(name: name, url: url, fallbackColor: bodyColor, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight, animated: animatedEmotes)
@@ -286,9 +288,11 @@ private struct EmoteView: View {
                     .frame(height: emoteHeight)
                     .fixedSize(horizontal: true, vertical: false)
             } else {
-                // Static path: WebImage decodes only the first frame, so animated
-                // WebP/GIF emotes hold still while keeping the same layout footprint.
-                WebImage(url: url) { image in
+                // Static path: WebImage's `isAnimating` defaults to `true`, so we
+                // must explicitly pin it off to hold the first frame. Animated
+                // WebP/GIF emotes then stay still while keeping the same layout
+                // footprint.
+                WebImage(url: url, isAnimating: .constant(false)) { image in
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -334,27 +338,47 @@ struct ChatFlowLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var rowHeight: CGFloat = 0
+        // Group subviews into rows first so each row's height is known before we
+        // place its items. Items are then centered on the row's vertical midline
+        // instead of pinned to the top — keeping emotes, badges and the YouTube
+        // glyph aligned with the text even when a typeface (e.g. OpenDyslexic) or
+        // a very large size gives the text line box extra height below the glyphs.
+        var rows: [[(subview: LayoutSubview, size: CGSize)]] = []
+        var currentRow: [(subview: LayoutSubview, size: CGSize)] = []
+        var x: CGFloat = 0
 
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
 
-            if x > bounds.minX && x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += rowHeight + rowSpacing
-                rowHeight = 0
+            if x > 0 && x + size.width > bounds.width {
+                rows.append(currentRow)
+                currentRow = []
+                x = 0
             }
 
-            subview.place(
-                at: CGPoint(x: x, y: y),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(size)
-            )
-
-            rowHeight = max(rowHeight, size.height)
+            currentRow.append((subview, size))
             x += size.width + itemSpacing
+        }
+        if !currentRow.isEmpty {
+            rows.append(currentRow)
+        }
+
+        var y = bounds.minY
+        for row in rows {
+            let rowHeight = row.map { $0.size.height }.max() ?? 0
+            var rowX = bounds.minX
+
+            for item in row {
+                let yOffset = (rowHeight - item.size.height) / 2
+                item.subview.place(
+                    at: CGPoint(x: rowX, y: y + yOffset),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(item.size)
+                )
+                rowX += item.size.width + itemSpacing
+            }
+
+            y += rowHeight + rowSpacing
         }
     }
 }

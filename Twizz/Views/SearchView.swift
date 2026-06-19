@@ -104,7 +104,7 @@ private struct SearchResultsView: View {
             .focusEffectDisabled()
             .onTapGesture { onSelectCategory(category) }
             .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
+            .animation(AppLayout.focusScaleAnimation, value: isFocused)
             .zIndex(isFocused ? 2 : 0)
         }
       }
@@ -134,7 +134,7 @@ private struct SearchResultsView: View {
           .focusEffectDisabled()
           .onTapGesture { onSelectChannel(channel) }
           .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-          .animation(.easeOut(duration: 0.14), value: isFocused)
+          .animation(AppLayout.focusScaleAnimation, value: isFocused)
           .zIndex(isFocused ? 2 : 0)
         }
       }

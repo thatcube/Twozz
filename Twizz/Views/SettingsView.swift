@@ -153,19 +153,14 @@ struct SettingsView: View {
       subtitle: "Only show streams in this language."
     ) {
       Menu {
-        ForEach(StreamLanguagePreference.options, id: \.value) { option in
-          Button {
-            streamLanguage = option.value
-          } label: {
-            if streamLanguage == option.value {
-              Label(option.name, systemImage: "checkmark")
-            } else {
-              Text(option.name)
-            }
+        Picker("Stream Language", selection: $streamLanguage) {
+          ForEach(StreamLanguagePreference.options, id: \.value) { option in
+            Text(option.name).tag(option.value)
           }
         }
+        .pickerStyle(.inline)
       } label: {
-        SettingPill(title: StreamLanguagePreference.displayName(streamLanguage), isSelected: false)
+        SettingPill(title: StreamLanguagePreference.displayName(streamLanguage), isSelected: false, showsMenuIndicator: true)
       }
       .prominentActionButtonStyle()
     }
@@ -489,6 +484,9 @@ private struct SettingPill: View {
   let title: String
   var subtitle: String? = nil
   let isSelected: Bool
+  /// When true the pill is a dropdown trigger (a `Menu` label), so it shows a
+  /// trailing up/down selector chevron instead of the selection checkmark slot.
+  var showsMenuIndicator: Bool = false
 
   var body: some View {
     HStack(spacing: 12) {
@@ -506,11 +504,13 @@ private struct SettingPill: View {
         }
       }
 
-      Icon(glyph: .check, size: 26)
-        .opacity(isSelected ? 1 : 0)
+      if showsMenuIndicator {
+        Icon(glyph: .selector, size: 40)
+      } else {
+        Icon(glyph: .check, size: 26)
+          .opacity(isSelected ? 1 : 0)
+      }
     }
-    .padding(.horizontal, 14)
-    .padding(.vertical, 8)
   }
 }
 
@@ -528,18 +528,21 @@ extension View {
     }
   }
 
-  /// Selectable option styling. The selected/unselected appearance is driven by
-  /// a custom `ButtonStyle` that takes `isSelected` as a stored property rather
-  /// than swapping between two different button-style modifiers. Swapping styles
-  /// (e.g. `.glass` ↔ `.glassProminent`) changes the view's identity, so toggling
-  /// an option destroys the focused pill and tvOS snaps focus back to the first
-  /// item. Keeping a single style preserves identity, so focus stays put.
+  /// Selectable option styling. Applies a single native button style
+  /// **unconditionally** (it ignores `isSelected` for styling), so the active
+  /// option is indicated only by `SettingPill`'s trailing checkmark — matching
+  /// the tvOS Settings idiom and giving the genuine native focus state.
+  ///
+  /// Why not vary the style by selection: swapping styles (e.g. `.glass` ↔
+  /// `.glassProminent`) changes the view's identity, so toggling an option
+  /// destroys the focused pill and tvOS snaps focus back to the first item.
+  /// Keeping one stable style preserves identity, so focus stays put.
   @ViewBuilder
-  fileprivate func settingPillStyle(isSelected: Bool) -> some View {
+  fileprivate func settingPillStyle(isSelected _: Bool) -> some View {
     if #available(tvOS 26.0, *) {
-      self.buttonStyle(GlassPillButtonStyle(isSelected: isSelected))
+      self.buttonStyle(.glass)
     } else {
-      self.buttonStyle(BorderedPillButtonStyle(isSelected: isSelected))
+      self.buttonStyle(.bordered)
     }
   }
 
@@ -551,72 +554,6 @@ extension View {
       self.buttonStyle(.glassProminent)
     } else {
       self.buttonStyle(.borderedProminent)
-    }
-  }
-}
-
-// MARK: - Selectable pill button styles
-
-/// Liquid Glass pill whose selected/focused appearance is rendered inside a
-/// single, stable `ButtonStyle`. Because `isSelected` is a stored property (not
-/// a structural `if` that swaps the whole style), flipping it doesn't change the
-/// button's identity — so toggling an option never tears down the focused pill,
-/// and tvOS keeps focus where it is.
-@available(tvOS 26.0, *)
-private struct GlassPillButtonStyle: ButtonStyle {
-  var isSelected: Bool
-
-  func makeBody(configuration: Configuration) -> some View {
-    PillBody(configuration: configuration, isSelected: isSelected)
-  }
-
-  private struct PillBody: View {
-    let configuration: ButtonStyleConfiguration
-    let isSelected: Bool
-    @Environment(\.isFocused) private var isFocused
-
-    var body: some View {
-      configuration.label
-        .glassEffect(
-          isSelected
-            ? .regular.tint(.white.opacity(0.85)).interactive()
-            : .regular.interactive(),
-          in: Capsule()
-        )
-        .overlay(
-          Capsule().strokeBorder(.white.opacity(isFocused ? 0.9 : 0), lineWidth: 4)
-        )
-        .scaleEffect(isFocused ? 1.1 : (configuration.isPressed ? 0.96 : 1))
-        .animation(.easeOut(duration: 0.18), value: isFocused)
-        .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-  }
-}
-
-/// Pre-tvOS 26 fallback with the same identity-stable structure.
-private struct BorderedPillButtonStyle: ButtonStyle {
-  var isSelected: Bool
-
-  func makeBody(configuration: Configuration) -> some View {
-    PillBody(configuration: configuration, isSelected: isSelected)
-  }
-
-  private struct PillBody: View {
-    let configuration: ButtonStyleConfiguration
-    let isSelected: Bool
-    @Environment(\.isFocused) private var isFocused
-
-    var body: some View {
-      configuration.label
-        .foregroundStyle(isSelected ? Color.black : Color.white)
-        .background(
-          Capsule().fill(isSelected ? Color.white.opacity(0.92) : Color.white.opacity(0.14))
-        )
-        .overlay(
-          Capsule().strokeBorder(.white.opacity(isFocused ? 0.9 : 0), lineWidth: 4)
-        )
-        .scaleEffect(isFocused ? 1.1 : 1)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
   }
 }

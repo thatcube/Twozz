@@ -72,7 +72,7 @@ actor LiveCaptionEngine {
     /// recognition latency so captions land near the spoken words instead of
     /// trailing them. Kept below typical recognition latency so captions never
     /// run ahead of the video.
-    private let recognitionLead: TimeInterval = 1.0
+    private let recognitionLead: TimeInterval = 0.5
     /// Player playhead (the on-screen frame's PROGRAM-DATE-TIME), pushed in from
     /// the MainActor. `AVPlayer` isn't Sendable, so the controller samples it on
     /// the main actor and forwards the plain `Date` here rather than us reaching

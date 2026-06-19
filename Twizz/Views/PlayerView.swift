@@ -228,6 +228,13 @@ struct PlayerView: View {
   /// seconds even when "at live"; this flag lets us pin the orb to the right edge
   /// and show LIVE deterministically until the viewer actually rewinds.
   @State private var pinnedToLive = true
+  /// Set for exactly one focus transition when the viewer presses up on the
+  /// scrubber — the only sanctioned way focus may leave the bar.
+  @State private var scrubberLeaveViaUp = false
+  /// Set while we are imperatively reverting focus back onto the scrubber after
+  /// the focus engine tried to fling it sideways, so the chat-redirect rule can
+  /// tell our own revert apart from a genuine left-press out of the chat pane.
+  @State private var revertingToScrubber = false
   /// Drives the analog (precision) trackpad scrubbing while the bar is focused.
   @State private var scrubInput = ScrubInputCoordinator()
 
@@ -773,15 +780,33 @@ struct PlayerView: View {
       }
     }
     .onChange(of: focus) { oldFocus, newFocus in
-      // The rewind bar must never be reachable from the chat pane. The focus
-      // engine treats the full-width bar as the chat composer's geometric left
-      // neighbor, so a left-press from chat can land on it. Redirect any such
-      // chat -> scrubber transition straight to the chat collapse button so the
-      // bar never even flashes focus when coming from chat.
-      if newFocus == .rewindScrubber, let oldFocus,
-         oldFocus == .chatInput || oldFocus == .chatSend {
-        focus = .chatToggle
-        return
+      // --- Rewind scrubber focus trap -------------------------------------
+      // The focus engine (both d-pad presses and raw trackpad swipes) will try
+      // to fling focus off the full-width bar into the adjacent chat pane. We
+      // can't stop the engine from *attempting* the move, but we can revert it:
+      // focus may only leave the bar via an explicit up-press.
+      if newFocus == .rewindScrubber {
+        // Arriving on the bar. If we got here from the chat composer (chat's
+        // geometric left neighbor is the full-width bar), bounce straight to the
+        // collapse button instead — unless this is our own revert landing back
+        // on the bar after an escape attempt.
+        let cameFromChat = oldFocus == .chatInput || oldFocus == .chatSend
+        let wasRevert = revertingToScrubber
+        revertingToScrubber = false
+        if cameFromChat && !wasRevert {
+          focus = .chatToggle
+          return
+        }
+      } else if oldFocus == .rewindScrubber {
+        // Leaving the bar. Only an up-press is allowed; revert anything else
+        // (sideways escape to chat) straight back onto the bar.
+        if scrubberLeaveViaUp {
+          scrubberLeaveViaUp = false
+        } else {
+          revertingToScrubber = true
+          focus = .rewindScrubber
+          return
+        }
       }
       // Start/stop precision trackpad scrubbing as the rewind bar gains/loses
       // focus. The analog jog (GameController + display link) only runs while the
@@ -1325,21 +1350,18 @@ struct PlayerView: View {
         .buttonStyle(ScrubBarButtonStyle())
         .focused($focus, equals: .rewindScrubber)
         .onMoveCommand { direction in
-          // This Button traps directional focus (same proven pattern as the top
-          // control cluster): every direction explicitly re-asserts focus on the
-          // scrubber so the tvOS focus engine can never fling focus out to the
-          // chat pane while scrubbing. Only an up-press is allowed to leave.
+          // Left/right seek; up exits to the controls. The actual focus trap is
+          // enforced in onChange(of: focus) because a raw trackpad swipe moves
+          // focus without ever firing this handler, and re-asserting the same
+          // focus value here is a no-op the engine ignores.
           switch direction {
           case .up:
+            scrubberLeaveViaUp = true
             focus = .quality
           case .left:
             if !isScrubbing { rewindStep(-rewindStepSeconds) }
-            focus = .rewindScrubber
           case .right:
             if !isScrubbing { rewindStep(rewindStepSeconds) }
-            focus = .rewindScrubber
-          case .down:
-            focus = .rewindScrubber
           default:
             break
           }

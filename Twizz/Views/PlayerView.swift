@@ -132,6 +132,13 @@ struct PlayerView: View {
     return focus != .chatInput && focus != .chatSend
   }
 
+  /// Selectable VOD playback rates, cycled by the speed control.
+  var vodSpeedOptions: [Float] { [0.5, 1.0, 1.25, 1.5, 2.0] }
+
+  /// Compact label for the current VOD rate, e.g. "1×", "1.5×", "0.5×".
+  var vodSpeedLabel: String { String(format: "%g×", Double(vodPlaybackRate)) }
+
+
   /// The currently-active channel, which can change if the user follows a raid.
   @State var activeChannel: String = ""
 
@@ -267,6 +274,9 @@ struct PlayerView: View {
   @State var pinnedToLive = true
   /// Drives the analog (precision) trackpad scrubbing while the bar is focused.
   @State var scrubInput = ScrubInputCoordinator()
+  /// Selected VOD playback rate. Applied whenever VOD playback (re)starts so it
+  /// survives pause/resume and seek. Ignored for live (always 1.0).
+  @State var vodPlaybackRate: Float = 1.0
 
   var wallClockLatencySeconds: Double? {
     get { mon.wallClockLatencySeconds }
@@ -1315,7 +1325,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .right:
-            focus = isVOD ? .chatSettingsButton : .quality
+            focus = .quality
           case .left:
             focus = .streamInfo
           case .down:
@@ -1413,6 +1423,34 @@ struct PlayerView: View {
         }
         }
 
+        // VODs have no adaptive quality; the same control slot becomes a playback
+        // speed cycler. Shares the `.quality` focus tag so existing left/right
+        // navigation around it is unchanged.
+        if isVOD {
+          Button {
+            cycleVODSpeed()
+          } label: {
+            Text(vodSpeedLabel)
+              .font(.headline.weight(.semibold))
+              .monospacedDigit()
+              .frame(minWidth: 52)
+              .accessibilityLabel("Playback Speed")
+          }
+          .focused($focus, equals: .quality)
+          .onMoveCommand { direction in
+            switch direction {
+            case .left:
+              focus = .streamInfo
+            case .right:
+              focus = .chatSettingsButton
+            case .down:
+              if rewindAvailable { focus = .rewindScrubber }
+            default:
+              break
+            }
+          }
+        }
+
         Button {
           openChatSettingsFromControlBar()
         } label: {
@@ -1423,7 +1461,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = isVOD ? .streamInfo : .quality
+            focus = .quality
           case .right:
             focus = .chatToggle
           case .down:

@@ -53,4 +53,19 @@ extension PlayerView {
     }
     vodTimeObserver = nil
   }
+
+  /// Advances to the next VOD playback speed and applies it immediately when the
+  /// recording is actively playing (not paused or mid-scrub).
+  func cycleVODSpeed() {
+    guard isVOD else { return }
+    let options = vodSpeedOptions
+    let current = options.firstIndex(of: vodPlaybackRate) ?? options.firstIndex(of: 1.0) ?? 0
+    let next = options[(current + 1) % options.count]
+    vodPlaybackRate = next
+    if !isUserPaused, !isScrubbing {
+      player.rate = next
+    }
+    updateRewindReadout()
+    scheduleHide()
+  }
 }

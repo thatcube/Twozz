@@ -100,6 +100,16 @@ extension PlayerView {
     scheduleHide()
   }
 
+  /// Resumes playback at the correct rate: the selected speed for VODs, normal
+  /// 1.0 for live. Centralizes resume so pause/seek/scrub all honor VOD speed.
+  func resumePlayback() {
+    if isVOD {
+      player.rate = vodPlaybackRate
+    } else {
+      player.play()
+    }
+  }
+
   /// Toggles between pausing in place (DVR window keeps growing) and resuming.
   func toggleRewindPlayPause() {
     if isUserPaused {
@@ -107,7 +117,7 @@ extension PlayerView {
       if !isVOD, let window = currentSeekWindow() {
         pinnedToLive = isNearLiveEdge(window.now, in: window)
       }
-      player.play()
+      resumePlayback()
     } else {
       if !isVOD { pinnedToLive = false }
       isUserPaused = true
@@ -163,7 +173,7 @@ extension PlayerView {
     if let target = scrubTargetSeconds {
       commitScrubSeek(to: target)
     } else if !isUserPaused {
-      player.play()
+      resumePlayback()
     }
     scheduleHide()
   }
@@ -219,7 +229,7 @@ extension PlayerView {
     let time = CMTime(seconds: seconds, preferredTimescale: 600)
     player.currentItem?.seek(to: time, completionHandler: { [self] _ in
       scrubTargetSeconds = nil
-      if !isUserPaused { player.play() }
+      if !isUserPaused { resumePlayback() }
       updateRewindReadout()
     })
   }

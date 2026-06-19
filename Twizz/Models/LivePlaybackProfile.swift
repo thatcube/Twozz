@@ -25,8 +25,8 @@ enum LivePlaybackProfile: String, CaseIterable, Identifiable {
   /// Short label used in the quality picker's two Auto rows and the button.
   var pickerLabel: String {
     switch self {
-    case .lowerLatency: return "Auto (Lower Latency)"
-    case .higherQuality: return "Auto (Higher Quality)"
+    case .lowerLatency: return "Auto · Low Latency"
+    case .higherQuality: return "Auto · High Quality"
     }
   }
 

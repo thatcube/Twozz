@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A scroll instruction for the chat list. The nonce ensures repeated scrolls to
 /// the same message still register as a change through `onChange`.
@@ -54,6 +55,22 @@ struct ChatView: View {
   /// app theme so light mode paints a light chat panel with dark text.
   private var isSideLayout: Bool {
     !useGlassBackground && !useLighterOverlayBackground
+  }
+
+  /// The nominal surface colored chat text is drawn on, used to keep name colors
+  /// and accents at a readable contrast. Overlay/glass modes sit on the dark,
+  /// translucent player; only the light-theme side panel is a light surface.
+  private var chatSurfaceColor: Color {
+    if isSideLayout { return palette.chatSideSurface }
+    if useLighterOverlayBackground { return Color(white: 0.13) }
+    return Color(white: 0.12)
+  }
+
+  private var isLightChatSurface: Bool {
+    var white: CGFloat = 0
+    var alpha: CGFloat = 0
+    UIColor(chatSurfaceColor).getWhite(&white, alpha: &alpha)
+    return white > 0.5
   }
 
   private var messageSpacingValue: CGFloat {
@@ -273,6 +290,18 @@ struct ChatView: View {
     firstMessageAccent
   }
 
+  /// The accent colors above are tuned for the dark overlay; on a light side
+  /// panel they wash out, so run them through the same readable-contrast
+  /// adjustment for any text drawn in them (the translucent tints/bars keep the
+  /// raw accent so the strip still reads as Twitch purple).
+  private var readableSubscriptionAccent: Color {
+    subscriptionAccent.chatReadable(onSurface: chatSurfaceColor)
+  }
+
+  private var readableFirstMessageAccent: Color {
+    firstMessageAccent.chatReadable(onSurface: chatSurfaceColor)
+  }
+
   /// Wraps a subscription USERNOTICE in a highlighted treatment: a tinted strip
   /// that bleeds to the panel edges, a left accent bar, a star glyph and the
   /// ready-made `system-msg` text, and — when the subscriber attached a resub
@@ -293,7 +322,7 @@ struct ChatView: View {
           .tracking(letterSpacing)
           .fixedSize(horizontal: false, vertical: true)
       }
-      .foregroundStyle(subscriptionAccent)
+      .foregroundStyle(readableSubscriptionAccent)
 
       if showUserLine {
         line
@@ -330,7 +359,7 @@ struct ChatView: View {
       Text("FIRST MESSAGE")
         .font(.system(size: labelSize, weight: .heavy))
         .tracking(0.6)
-        .foregroundStyle(firstMessageAccent)
+        .foregroundStyle(readableFirstMessageAccent)
         .frame(maxWidth: .infinity, alignment: .trailing)
       line
     }
@@ -350,23 +379,28 @@ struct ChatView: View {
 
   /// Use the user's Twitch color, or a stable color derived from their name.
   private func color(for message: ChatMessage) -> Color {
-    let key = message.colorHex ?? "name:\(message.username)"
+    let surfaceKey = isLightChatSurface ? "L" : "D"
+    let key = (message.colorHex ?? "name:\(message.username)") + "|" + surfaceKey
     if let cached = Self.colorCache[key] {
       return cached
     }
-    let resolved: Color
+    let base: Color
     if let hex = message.colorHex, let c = Color(twitchHex: hex) {
-      resolved = c
+      base = c
     } else {
-      resolved = Self.fallbackPalette[message.username.deterministicIndex(Self.fallbackPalette.count)]
+      base = Self.fallbackPalette[message.username.deterministicIndex(Self.fallbackPalette.count)]
     }
+    // Nudge dim/low-contrast colors so names (and the /me bodies that reuse this
+    // color) stay legible on whichever surface the chat is drawn on.
+    let resolved = base.chatReadable(onSurface: chatSurfaceColor)
     Self.colorCache[key] = resolved
     return resolved
   }
 
-  /// Resolved name colors keyed by the user's color hex (or username for the
-  /// deterministic fallback). Parsing the hex and building a Color on every line
-  /// render is pure repeated work, so memoize it across the session.
+  /// Resolved name colors keyed by the user's color hex (or username) plus the
+  /// surface they're drawn on. Parsing the hex, building a Color, and running the
+  /// readable-contrast adjustment on every line render is pure repeated work, so
+  /// memoize it across the session.
   private static var colorCache: [String: Color] = [:]
 
   /// Bright, readable defaults (Twitch-style) for users with no color set.
@@ -390,6 +424,55 @@ extension Color {
       green: Double((v >> 8) & 0xFF) / 255,
       blue: Double(v & 0xFF) / 255
     )
+  }
+
+  private static func chatLinearize(_ c: CGFloat) -> CGFloat {
+    c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+  }
+
+  private static func chatRelativeLuminance(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> CGFloat {
+    0.2126 * chatLinearize(r) + 0.7152 * chatLinearize(g) + 0.0722 * chatLinearize(b)
+  }
+
+  private static func chatContrastRatio(_ a: CGFloat, _ b: CGFloat) -> CGFloat {
+    let hi = max(a, b)
+    let lo = min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  /// Twitch-style "readable colors": nudges this color's lightness until it meets
+  /// at least `minRatio` WCAG contrast against `surface` — lightening toward white
+  /// on dark surfaces, darkening toward black on light ones — so colored names,
+  /// `/me` bodies and special-message accents stay legible whichever chat surface
+  /// they're drawn on. Hue is broadly preserved and colors that already pass the
+  /// ratio are returned unchanged. `minRatio` defaults to 3.0 (WCAG AA for the
+  /// large, bold text used in chat) to keep colors as vivid as Twitch's.
+  func chatReadable(onSurface surface: Color, minRatio: CGFloat = 3.0) -> Color {
+    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    guard UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a) else { return self }
+    var sr: CGFloat = 0, sg: CGFloat = 0, sb: CGFloat = 0, sa: CGFloat = 0
+    guard UIColor(surface).getRed(&sr, green: &sg, blue: &sb, alpha: &sa) else { return self }
+
+    let surfaceLum = Color.chatRelativeLuminance(sr, sg, sb)
+    if Color.chatContrastRatio(Color.chatRelativeLuminance(r, g, b), surfaceLum) >= minRatio {
+      return self
+    }
+
+    // Blend toward white on a dark surface, toward black on a light one.
+    let target: CGFloat = surfaceLum < 0.5 ? 1 : 0
+    var best = (r: r, g: g, b: b)
+    var step: CGFloat = 0
+    while step < 1 {
+      step += 0.04
+      let nr = r + (target - r) * step
+      let ng = g + (target - g) * step
+      let nb = b + (target - b) * step
+      best = (nr, ng, nb)
+      if Color.chatContrastRatio(Color.chatRelativeLuminance(nr, ng, nb), surfaceLum) >= minRatio {
+        break
+      }
+    }
+    return Color(.sRGB, red: Double(best.r), green: Double(best.g), blue: Double(best.b), opacity: Double(a))
   }
 }
 

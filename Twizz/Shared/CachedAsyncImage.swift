@@ -22,6 +22,16 @@ final class ImageMemoryCache: @unchecked Sendable {
   func insert(_ image: UIImage, for url: URL) {
     cache.setObject(image, forKey: url as NSURL)
   }
+
+  /// Decode `url` and insert it into the cache ahead of time, so a view that
+  /// later renders it (via `CachedAsyncImage`) paints the image on its first
+  /// frame instead of popping it in a frame or two later. Best-effort and
+  /// idempotent; a nil URL or an existing cache entry is a no-op.
+  func prewarm(_ url: URL?) async {
+    guard let url, image(for: url) == nil else { return }
+    guard let prepared = await CachedAsyncImage<Image, Image>.fetchAndDecode(url) else { return }
+    insert(prepared, for: url)
+  }
 }
 
 /// Drop-in replacement for the two-closure `AsyncImage` that adds a decoded-image
@@ -44,6 +54,11 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     self.url = url
     self.content = content
     self.placeholder = placeholder
+    // Seed from the decoded-image cache synchronously so an already-warmed image
+    // paints on the very first frame. Without this, `uiImage` starts nil and the
+    // real image swaps in a frame or two later — which makes it pop into place
+    // instead of animating in alongside whatever transition is presenting us.
+    _uiImage = State(initialValue: url.flatMap { ImageMemoryCache.shared.image(for: $0) })
   }
 
   var body: some View {
@@ -81,7 +96,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
   /// decode here with `preparingForDisplay()` (and being `nonisolated` so it runs
   /// on the cooperative pool, not the MainActor) hands SwiftUI a ready-to-blit
   /// bitmap, so painting a recycled card costs nothing on the main thread.
-  nonisolated private static func fetchAndDecode(_ url: URL) async -> UIImage? {
+  nonisolated static func fetchAndDecode(_ url: URL) async -> UIImage? {
     var request = URLRequest(url: url)
     request.cachePolicy = .returnCacheDataElseLoad
     guard let (data, _) = try? await URLSession.shared.data(for: request),

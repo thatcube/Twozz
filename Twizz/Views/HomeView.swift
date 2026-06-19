@@ -29,6 +29,7 @@ struct HomeView: View {
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
   @State private var refreshToast: RefreshToastState?
+  @State private var goLive = GoLiveWatcher()
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedEnabled = true
@@ -155,8 +156,21 @@ struct HomeView: View {
           .transition(.move(edge: .top).combined(with: .opacity))
       }
     }
+    .overlay(alignment: .topTrailing) {
+      if let event = goLive.pending {
+        GoLiveToastView(
+          event: event,
+          onWatch: { watchGoLive() }
+        )
+        .padding(.top, 48)
+        .padding(.trailing, 48)
+        .transition(.move(edge: .top).combined(with: .opacity))
+      }
+    }
+    .animation(.easeOut(duration: 0.25), value: goLive.pending)
     .task {
       auth.restore()
+      goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
       await refreshFollowedChannelsIfNeeded(force: true)
       await refreshRecommendationsIfNeeded(force: true)
@@ -168,6 +182,8 @@ struct HomeView: View {
       requestFocusIfPossible(force: false)
     }
     .onChange(of: auth.isAuthenticated) { _, _ in
+      // Re-seed the go-live baseline against the new account's follows.
+      goLive.start(using: auth)
       Task {
         await refreshFollowedChannelsIfNeeded(force: true)
         requestFocusIfPossible(force: true)
@@ -199,7 +215,7 @@ struct HomeView: View {
       }
     }
     .fullScreenCover(item: $selectedChannel) { channel in
-      PlayerView(channel: channel.login, auth: auth)
+      PlayerView(channel: channel.login, auth: auth, goLive: goLive)
         .environment(\.themePalette, resolvedPalette)
     }
     .fullScreenCover(item: $channelPageTarget, onDismiss: { presentPendingWatchIfNeeded() }) { target in
@@ -674,6 +690,29 @@ struct HomeView: View {
     guard let channel = pendingWatchChannel else { return }
     pendingWatchChannel = nil
     selectedChannel = channel
+  }
+
+  /// Acts on the current "just went live" toast: dismisses it and starts
+  /// playback for the channel. Reuses a loaded `FollowedChannel` when we already
+  /// have one, otherwise a minimal placeholder (the player only needs the login).
+  private func watchGoLive() {
+    guard let event = goLive.pending else { return }
+    goLive.watch()
+
+    let match = (follows.channels + recommendations.channels).first {
+      $0.login.caseInsensitiveCompare(event.login) == .orderedSame
+    }
+    selectedChannel = match ?? FollowedChannel(
+      id: event.login,
+      login: event.login,
+      displayName: event.displayName,
+      title: "",
+      gameName: event.gameName,
+      viewerCount: nil,
+      thumbnailURL: nil,
+      profileImageURL: nil,
+      isLive: true
+    )
   }
 
   private func shouldAutoRefreshFollowedChannels() -> Bool {

@@ -509,8 +509,6 @@ private struct SettingPill: View {
       Icon(glyph: .check, size: 26)
         .opacity(isSelected ? 1 : 0)
     }
-    .padding(.horizontal, 14)
-    .padding(.vertical, 8)
   }
 }
 
@@ -577,6 +575,8 @@ private struct GlassPillButtonStyle: ButtonStyle {
 
     var body: some View {
       configuration.label
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
         .glassEffect(
           isSelected
             ? .regular.tint(.white.opacity(0.85)).interactive()
@@ -608,6 +608,8 @@ private struct BorderedPillButtonStyle: ButtonStyle {
 
     var body: some View {
       configuration.label
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
         .foregroundStyle(isSelected ? Color.black : Color.white)
         .background(
           Capsule().fill(isSelected ? Color.white.opacity(0.92) : Color.white.opacity(0.14))

@@ -1258,6 +1258,9 @@ struct PlayerView: View {
           .buttonStyle(.borderedProminent)
           .tint(ThemePalette.brandPurple)
           .focused($focus, equals: .offlineViewChannel)
+          .onMoveCommand { direction in
+            if direction == .right { focus = .offlineTryAgain }
+          }
 
           Button {
             retryFromOffline()
@@ -1269,16 +1272,25 @@ struct PlayerView: View {
           .TwizzControlButtonStyle()
           .focused($focus, equals: .offlineTryAgain)
           .onMoveCommand { direction in
-            // Chat sits to the right of the offline buttons. Make the hop into
-            // it deterministic so it doesn't depend on focus-engine geometry
-            // (the composer is anchored to the bottom of the pane, well below
-            // these centered buttons).
-            if direction == .right, showChat {
-              focus = chatFocusAnchor
+            switch direction {
+            case .left:
+              focus = .offlineViewChannel
+            case .right:
+              // Deliberate exit out of the focus section into chat, mirroring
+              // the control row's chat-toggle button.
+              if showChat { focus = chatFocusAnchor }
+            default:
+              break
             }
           }
         }
         .padding(.top, 8)
+        // Group the two buttons as one focus section so the full-height chat
+        // pane (a strong geometric focus magnet) can't out-pull the adjacent
+        // Try Again button. Within the section the explicit move handlers above
+        // step View Channel -> Try Again, and only a right-press from Try Again
+        // exits into chat. Mirrors the bottom control row's focus corralling.
+        .focusSection()
       }
       .frame(maxWidth: 760)
       .padding(48)

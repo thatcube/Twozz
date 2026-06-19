@@ -4,6 +4,26 @@ import SwiftUI
 extension PlayerView {
   // MARK: - Floating chat settings
 
+  /// Foreground color for chat-settings popover text. When the popover surface is
+  /// opaque (glass disabled / reduce-transparency), this resolves to the theme's
+  /// on-opaque color — dark in the Light theme, light in dark/OLED — so text stays
+  /// legible once the panel is no longer translucent. With glass enabled the panel
+  /// is a dark scrim, so white is correct regardless of theme.
+  var chatSettingsForeground: Color {
+    glassDisabled ? palette.chromeOnOpaque : .white
+  }
+
+  /// Recessed "well" fill behind the stepper rows. Only the Light theme + opaque
+  /// path changes (a faint dark wash on the white panel reads as recessed);
+  /// dark/OLED keep the original dark track so they don't regress.
+  var chatSettingsWellFill: Color {
+    (glassDisabled && palette == .light) ? Color.black.opacity(0.06) : Color.black.opacity(0.22)
+  }
+
+  var chatSettingsWellBorder: Color {
+    (glassDisabled && palette == .light) ? Color.black.opacity(0.10) : Color.white.opacity(0.06)
+  }
+
   /// The focus target for the first control on whichever settings page is shown.
   var firstChatSettingsFocus: Focusable {
     switch chatSettingsPage {
@@ -171,7 +191,7 @@ extension PlayerView {
 
         Text(chatSyncStatusDescription)
           .font(.caption2)
-          .foregroundStyle(.white.opacity(0.6))
+          .foregroundStyle(chatSettingsForeground.opacity(0.6))
           .fixedSize(horizontal: false, vertical: true)
       }
       .focusSection()
@@ -294,7 +314,7 @@ extension PlayerView {
           "Choose Auto · Low Latency or Auto · High Quality from the quality picker to trade latency against quality. Stream Rewind keeps recent video buffered so you can pause and rewind live — focus the scrub bar, then swipe or press left/right to jump back or forward 10s and click or press play/pause to pause. Diagnostics shows live render/bitrate/buffer and freeze/jump events, plus an advanced prefetch-proxy switch."
         )
         .font(.caption2)
-        .foregroundStyle(.white.opacity(0.6))
+        .foregroundStyle(chatSettingsForeground.opacity(0.6))
         .fixedSize(horizontal: false, vertical: true)
       }
       .focusSection()
@@ -324,7 +344,7 @@ extension PlayerView {
         } label: {
           Text(youtubeMergeDisplayText)
             .font(.subheadline)
-            .foregroundStyle(focus == .youtubeMergeURL ? .black : .white)
+            .foregroundStyle(focus == .youtubeMergeURL ? .black : chatSettingsForeground)
             .lineLimit(1)
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -360,7 +380,7 @@ extension PlayerView {
 
             Text(status)
               .font(.caption2)
-              .foregroundStyle(.white.opacity(0.76))
+              .foregroundStyle(chatSettingsForeground.opacity(0.76))
               .fixedSize(horizontal: false, vertical: true)
           }
         }
@@ -439,7 +459,7 @@ extension PlayerView {
         "Choose which live moments appear while you watch. These banners are passive and read-only — turning one off just hides it."
       )
       .font(.caption2)
-      .foregroundStyle(.white.opacity(0.6))
+      .foregroundStyle(chatSettingsForeground.opacity(0.6))
       .fixedSize(horizontal: false, vertical: true)
     }
   }
@@ -492,7 +512,7 @@ extension PlayerView {
             : "Custom sets emote height independently of the text size."
         )
         .font(.caption2)
-        .foregroundStyle(.white.opacity(0.55))
+        .foregroundStyle(chatSettingsForeground.opacity(0.55))
         .fixedSize(horizontal: false, vertical: true)
       }
 
@@ -530,7 +550,7 @@ extension PlayerView {
 
         Text("Hides the small mod, sub, and other badges shown before each name.")
           .font(.caption2)
-          .foregroundStyle(.white.opacity(0.55))
+          .foregroundStyle(chatSettingsForeground.opacity(0.55))
           .fixedSize(horizontal: false, vertical: true)
       }
 
@@ -553,7 +573,7 @@ extension PlayerView {
           } label: {
             Text(highlightKeywordsDisplayText)
               .font(.subheadline)
-              .foregroundStyle(focus == .chatHighlightKeywords ? .black : .white)
+              .foregroundStyle(focus == .chatHighlightKeywords ? .black : chatSettingsForeground)
               .lineLimit(1)
               .truncationMode(.tail)
               .frame(maxWidth: .infinity, alignment: .leading)
@@ -587,7 +607,7 @@ extension PlayerView {
             : "Turn on to highlight lines that mention you or match your keywords."
         )
         .font(.caption2)
-        .foregroundStyle(.white.opacity(0.55))
+        .foregroundStyle(chatSettingsForeground.opacity(0.55))
         .fixedSize(horizontal: false, vertical: true)
       }
 
@@ -607,7 +627,7 @@ extension PlayerView {
   func settingsSectionHeader(_ title: String) -> some View {
     Text(title)
       .font(.caption.weight(.semibold))
-      .foregroundStyle(.white.opacity(0.84))
+      .foregroundStyle(chatSettingsForeground.opacity(0.84))
       .textCase(.uppercase)
   }
 
@@ -692,13 +712,13 @@ extension PlayerView {
       } label: {
         Icon(glyph: .chevronLeft, size: 24)
       }
-      .chatSettingsGlassButton()
+      .chatSettingsGlassButton(shape: .circle)
       .buttonBorderShape(.circle)
       .focused($focus, equals: .chatAdvancedBack)
 
       Text(title)
         .font(.headline)
-        .foregroundStyle(.white)
+        .foregroundStyle(chatSettingsForeground)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
 
@@ -715,7 +735,7 @@ extension PlayerView {
     return HStack(spacing: 12) {
       Text(config.title)
         .font(.subheadline)
-        .foregroundStyle(.white)
+        .foregroundStyle(chatSettingsForeground)
 
       Spacer(minLength: 12)
 
@@ -729,7 +749,7 @@ extension PlayerView {
 
       Text("\(Int(config.value.rounded()))")
         .font(.subheadline.weight(.semibold))
-        .foregroundStyle(.white)
+        .foregroundStyle(chatSettingsForeground)
         .frame(minWidth: 44)
         .monospacedDigit()
 
@@ -750,10 +770,10 @@ extension PlayerView {
     // that paradoxically looked lighter than its own dark buttons.
     .background(
       Capsule(style: .continuous)
-        .fill(.black.opacity(0.22))
+        .fill(chatSettingsWellFill)
         .overlay(
           Capsule(style: .continuous)
-            .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+            .strokeBorder(chatSettingsWellBorder, lineWidth: 1)
         )
     )
     .focusSection()
@@ -772,7 +792,7 @@ extension PlayerView {
       Icon(glyph: glyph, size: 22)
         .opacity(enabled ? 1.0 : 0.35)
     }
-    .chatSettingsGlassButton()
+    .chatSettingsGlassButton(shape: .circle)
     .buttonBorderShape(.circle)
     .focused($focus, equals: focusTag)
   }

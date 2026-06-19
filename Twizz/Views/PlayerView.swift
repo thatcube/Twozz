@@ -752,6 +752,10 @@ struct PlayerView: View {
   let chatComposerRowHeight: CGFloat = 62
 
   @FocusState var focus: Focusable?
+  // FOCUS CONTRACT: see `isChatSettingsFocus(_:)` below. Every focusable control
+  // in the player/chat-settings panel needs a unique case here, must pass it as
+  // its `focusTag`, and must be registered in that allow-list — otherwise tvOS
+  // can't land focus on it and traps on a neighbor.
   enum Focusable: Hashable {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case offlineViewChannel, offlineTryAgain
@@ -2097,6 +2101,14 @@ struct PlayerView: View {
     }
   }
 
+  // FOCUS CONTRACT (tvOS focus here is managed explicitly, not automatically):
+  // Every focusable control in the player/chat-settings panel must
+  //   (1) have a unique `Focusable` case,
+  //   (2) pass it as the control's `focusTag`, and
+  //   (3) be registered in this allow-list.
+  // A control missing from this switch is unreachable — the focus engine cannot
+  // land on it and traps focus on the nearest registered neighbor. When you add
+  // a new settings pill, update ALL THREE places (enum case, focusTag, here).
   func isChatSettingsFocus(_ focus: Focusable) -> Bool {
     switch focus {
     case .chatSettingsButton,

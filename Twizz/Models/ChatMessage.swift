@@ -6,6 +6,14 @@ enum ChatSource: String, Codable {
     case youtube
 }
 
+/// How a highlighted Twitch USERNOTICE line should be styled in chat.
+enum SystemNoticeStyle {
+    /// Subscription / resub / gift events (Twitch brand purple, star glyph).
+    case subscription
+    /// Shared watch-streak milestones (flame glyph, warm accent).
+    case watchStreak
+}
+
 /// A single chat line parsed from Twitch IRC or YouTube Live Chat.
 struct ChatMessage: Identifiable {
     let id = UUID()
@@ -37,6 +45,9 @@ struct ChatMessage: Identifiable {
     /// "So-and-so subscribed at Tier 1. They've subscribed for 6 months!".
     /// When set, the line is rendered with a highlighted subscription treatment.
     let systemMessage: String?
+    /// Styling for the highlighted notice when `systemMessage` is set. Ignored
+    /// for ordinary chat lines.
+    var systemNoticeStyle: SystemNoticeStyle = .subscription
     /// Timestamp when the message was received (for chronological merging).
     let timestamp: Date
     /// Render-ready tokens precomputed at ingest (`ChatService`) so the chat
@@ -166,10 +177,14 @@ extension ChatMessage {
         "giftpaidupgrade", "anongiftpaidupgrade", "primepaidupgrade",
     ]
 
-    /// Parse a Twitch USERNOTICE subscription event into a highlighted chat line.
-    /// Returns `nil` for non-USERNOTICE lines and for USERNOTICE msg-ids that are
-    /// not subscription events (e.g. `raid`, which is handled separately).
-    init?(subscriptionUSERNOTICE line: String) {
+    /// Parse a highlighted Twitch USERNOTICE (subscription events or shared
+    /// watch-streak milestones) into a highlighted chat line. Returns `nil` for
+    /// non-USERNOTICE lines and for msg-ids we don't surface (e.g. `raid`, which
+    /// is handled separately). Watch streaks arrive as `msg-id=viewermilestone`
+    /// with `msg-param-category=watch-streak`; the optional shared message (when
+    /// the viewer attaches one) rides in the trailing IRC param just like a resub
+    /// comment, so it renders as the user's own chat line beneath the notice.
+    init?(highlightedUSERNOTICE line: String) {
         guard line.contains(" USERNOTICE ") else { return nil }
 
         // Tags section: "@key=value;key=value ".
@@ -183,7 +198,15 @@ extension ChatMessage {
             }
         }
 
-        guard let msgID = tags["msg-id"], Self.subscriptionMsgIDs.contains(msgID) else { return nil }
+        guard let msgID = tags["msg-id"] else { return nil }
+        let noticeStyle: SystemNoticeStyle
+        if Self.subscriptionMsgIDs.contains(msgID) {
+            noticeStyle = .subscription
+        } else if msgID == "viewermilestone", tags["msg-param-category"] == "watch-streak" {
+            noticeStyle = .watchStreak
+        } else {
+            return nil
+        }
 
         let systemMsg = Self.unescapeIRCTagValue(tags["system-msg"] ?? "")
         guard !systemMsg.isEmpty else { return nil }
@@ -220,6 +243,7 @@ extension ChatMessage {
         self.bits = 0
         self.source = .twitch
         self.systemMessage = systemMsg
+        self.systemNoticeStyle = noticeStyle
         self.timestamp = Date()
     }
 

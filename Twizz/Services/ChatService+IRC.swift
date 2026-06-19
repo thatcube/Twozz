@@ -68,7 +68,7 @@ extension ChatService {
         pendingRaid = raid
         continue
       }
-      if let subMessage = ChatMessage(subscriptionUSERNOTICE: piece) {
+      if let subMessage = ChatMessage(highlightedUSERNOTICE: piece) {
         parsedMessages.append(subMessage)
         continue
       }

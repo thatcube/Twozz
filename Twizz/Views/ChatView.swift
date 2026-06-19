@@ -286,11 +286,31 @@ struct ChatView: View {
     )
 
     if let systemMessage = message.systemMessage {
-      subscriptionHighlight(
-        systemMessage: systemMessage,
-        showUserLine: !message.text.isEmpty,
-        line: richLine
-      )
+      switch message.systemNoticeStyle {
+      case .subscription:
+        eventNoticeHighlight(
+          systemMessage: systemMessage,
+          accent: subscriptionAccent,
+          readableAccent: readableSubscriptionAccent,
+          showUserLine: !message.text.isEmpty,
+          icon: {
+            Image(systemName: "star.fill")
+              .font(fontStyle.font(size: textSize * 0.7, weight: .bold))
+          },
+          line: richLine
+        )
+      case .watchStreak:
+        eventNoticeHighlight(
+          systemMessage: systemMessage,
+          accent: watchStreakAccent,
+          readableAccent: readableWatchStreakAccent,
+          showUserLine: !message.text.isEmpty,
+          icon: {
+            Icon(glyph: .flame, size: textSize * 0.9)
+          },
+          line: richLine
+        )
+      }
     } else if message.isFirstMessage {
       firstMessageHighlight(around: richLine)
     } else {
@@ -318,27 +338,39 @@ struct ChatView: View {
     firstMessageAccent.chatReadable(onSurface: chatSurfaceColor)
   }
 
-  /// Wraps a subscription USERNOTICE in a highlighted treatment: a tinted strip
-  /// that bleeds to the panel edges, a left accent bar, a star glyph and the
-  /// ready-made `system-msg` text, and — when the subscriber attached a resub
-  /// comment — their normal chat line beneath it.
-  private func subscriptionHighlight<Content: View>(
+  /// Warm "flame" accent for shared watch-streak milestones, distinguishing them
+  /// from the purple subscription treatment while echoing Twitch's streak flame.
+  private var watchStreakAccent: Color {
+    Color(twitchHex: "#FF6905") ?? .orange
+  }
+
+  private var readableWatchStreakAccent: Color {
+    watchStreakAccent.chatReadable(onSurface: chatSurfaceColor)
+  }
+
+  /// Wraps a highlighted USERNOTICE (subscription or watch-streak) in a tinted
+  /// strip that bleeds to the panel edges, a left accent bar, a leading glyph and
+  /// the ready-made `system-msg` text, and — when the viewer attached a comment —
+  /// their normal chat line beneath it.
+  private func eventNoticeHighlight<IconContent: View, Content: View>(
     systemMessage: String,
+    accent: Color,
+    readableAccent: Color,
     showUserLine: Bool,
+    @ViewBuilder icon: () -> IconContent,
     line: Content
   ) -> some View {
     let barWidth: CGFloat = 4
 
     return VStack(alignment: .leading, spacing: 4) {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Image(systemName: "star.fill")
-          .font(fontStyle.font(size: textSize * 0.7, weight: .bold))
+        icon()
         Text(systemMessage)
           .font(fontStyle.font(size: textSize, weight: .semibold))
           .tracking(letterSpacing)
           .fixedSize(horizontal: false, vertical: true)
       }
-      .foregroundStyle(readableSubscriptionAccent)
+      .foregroundStyle(readableAccent)
 
       if showUserLine {
         line
@@ -348,8 +380,8 @@ struct ChatView: View {
     .padding(.horizontal, horizontalPadding)
     .background(alignment: .leading) {
       ZStack(alignment: .leading) {
-        subscriptionAccent.opacity(isSideLayout ? 0.12 : 0.20)
-        subscriptionAccent.frame(width: barWidth)
+        accent.opacity(isSideLayout ? 0.12 : 0.20)
+        accent.frame(width: barWidth)
       }
     }
     // Bleed the tinted strip out past the list's horizontal inset so it spans

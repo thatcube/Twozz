@@ -210,6 +210,115 @@ final class LowLatencyHLSProxyTests: XCTestCase {
     XCTAssertTrue(proxy.predictedUnstable, "off-cadence segment durations signal a struggling encoder")
   }
 
+  /// Helper: a refresh whose body segments are off-cadence (a struggling encoder),
+  /// with an advancing media sequence so the *only* signal is irregular `#EXTINF`.
+  private func irregularRefresh(_ i: Int) -> String {
+    instabilityPlaylist(
+      mediaSequence: 100 + i,
+      segments: [
+        (name: "a\(i)", duration: 0.4, discontinuity: false),
+        (name: "b\(i)", duration: 3.6, discontinuity: false),
+        (name: "c\(i)", duration: 2, discontinuity: false),
+      ])
+  }
+
+  /// Helper: a clean, regular-cadence refresh with an advancing media sequence.
+  private func cleanRefresh(_ i: Int) -> String {
+    instabilityPlaylist(
+      mediaSequence: 100 + i,
+      segments: [
+        (name: "x\(i)", duration: 2, discontinuity: false),
+        (name: "y\(i)", duration: 2, discontinuity: false),
+        (name: "z\(i)", duration: 2, discontinuity: false),
+      ])
+  }
+
+  /// SUSTAINED irregular jitter escalates: the 2nd+ consecutive off-cadence
+  /// refresh scores `irregularStreakRefreshPoints` (2.0) rather than the base 1.0,
+  /// so three consecutive irregular refreshes total 1.0 + 2.0 + 2.0 = 5.0 and trip
+  /// with margin. The score reaching ≥4.5 proves escalation applied (flat 1.0×3
+  /// would total only 3.0).
+  func testSustainedIrregularEscalatesAndTrips() {
+    let proxy = makeProxy()
+    feedRefreshes(proxy, (0..<3).map(irregularRefresh))
+
+    let snap = proxy.instabilityDiagnostics
+    XCTAssertTrue(snap.predictedUnstable, "sustained off-cadence jitter should trip the predictor")
+    XCTAssertGreaterThanOrEqual(
+      snap.score, 4.5, "consecutive irregular refreshes should escalate past a flat 3.0")
+    XCTAssertEqual(snap.detail, "irregular EXTINF")
+  }
+
+  /// An ad break splices in and out — an irregular refresh here and there with a
+  /// clean run between — must NOT escalate or accumulate: a clean refresh decays
+  /// the streak, and the isolated-contribution bucket is capped at
+  /// `irregularIsolatedScoreCap` (1.0), so *two* isolated irregular refreshes
+  /// together still score only 1.0 (the second is capped out), nowhere near the
+  /// 3.0 that two *consecutive* ones reach via escalation. This is the
+  /// time-signature separation: same count of irregular refreshes, the spaced-out
+  /// ad-break shape can't accumulate while sustained jitter does.
+  func testIsolatedIrregularSplicesDoNotEscalate() {
+    let proxy = makeProxy()
+    // Two irregular refreshes separated by clean ones — splice-in, run, splice-out.
+    let playlists = [
+      cleanRefresh(0),
+      irregularRefresh(1),
+      cleanRefresh(2),
+      irregularRefresh(3),
+      cleanRefresh(4),
+      cleanRefresh(5),
+    ]
+    feedRefreshes(proxy, playlists)
+
+    let snap = proxy.instabilityDiagnostics
+    XCTAssertFalse(
+      snap.predictedUnstable,
+      "isolated splice refreshes must not escalate the way sustained jitter does")
+    XCTAssertEqual(
+      snap.score, LowLatencyHLSProxy.irregularIsolatedScoreCap, accuracy: 0.0001,
+      "two isolated irregular refreshes are capped at the isolated bucket (1.0), not 2.0 or 3.0")
+  }
+
+  /// The exact worst-case ad break: off-cadence segments AND a new discontinuity
+  /// at *both* the splice-in and splice-out boundaries, separated by a clean ad
+  /// run — the failure mode the isolated cap closes. Even with two disc + two
+  /// irregular boundary refreshes, the irregular bucket caps at 1.0 and the
+  /// discontinuity bucket caps at 1.5, so the total tops out at 2.5, safely below
+  /// the 3.0 threshold. (Without the isolated cap this would reach ~3.5 and trip.)
+  func testAdSpliceDiscAndIrregularStaysUnderThreshold() {
+    let proxy = makeProxy()
+    let spliceIn = instabilityPlaylist(
+      mediaSequence: 101, discontinuitySequence: 0,
+      segments: [
+        (name: "ad-a", duration: 0.4, discontinuity: true),
+        (name: "ad-b", duration: 3.6, discontinuity: false),
+        (name: "ad-c", duration: 2, discontinuity: false),
+      ])
+    let spliceOut = instabilityPlaylist(
+      mediaSequence: 105, discontinuitySequence: 1,
+      segments: [
+        (name: "ad-d", duration: 0.4, discontinuity: true),
+        (name: "ad-e", duration: 3.6, discontinuity: false),
+        (name: "ad-f", duration: 2, discontinuity: false),
+      ])
+    let playlists = [
+      cleanRefresh(0),
+      spliceIn,
+      cleanRefresh(2),
+      cleanRefresh(3),
+      spliceOut,
+      cleanRefresh(6),
+      cleanRefresh(7),
+    ]
+    feedRefreshes(proxy, playlists)
+
+    let snap = proxy.instabilityDiagnostics
+    XCTAssertFalse(
+      snap.predictedUnstable, "a two-boundary ad break must not trip the predictor")
+    XCTAssertLessThan(snap.score, LowLatencyHLSProxy.predictedUnstableScoreThreshold)
+    XCTAssertEqual(snap.score, 2.5, accuracy: 0.0001, "irregular cap 1.0 + disc cap 1.5 = 2.5")
+  }
+
   /// Discontinuities alone — as a normal ad break produces — are capped below the
   /// trip threshold, so an otherwise-healthy stream is NOT predicted unstable.
   func testDiscontinuitiesAloneDoNotFalseTrip() {

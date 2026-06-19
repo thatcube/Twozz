@@ -1323,22 +1323,27 @@ struct PlayerView: View {
               } placeholder: {
                 ZStack {
                   Circle().fill(.white.opacity(0.16))
-                  Icon(glyph: .userCircle, size: 36)
+                  Icon(glyph: .userCircle, size: 64)
                     .foregroundStyle(.white.opacity(0.85))
                 }
               }
             } else {
               ZStack {
                 Circle().fill(.white.opacity(0.16))
-                Icon(glyph: .userCircle, size: 36)
+                Icon(glyph: .userCircle, size: 64)
                   .foregroundStyle(.white.opacity(0.85))
               }
             }
           }
-          .frame(width: 36, height: 36)
+          .frame(width: 64, height: 64)
           .clipShape(Circle())
+          // Let the avatar fill more of the button: the larger frame is pulled
+          // back with negative padding so the glass button keeps its original
+          // footprint, just with less empty space around the image.
+          .padding(-6)
         }
         .TwizzControlButtonStyle()
+        .buttonBorderShape(.circle)
         .focused($focus, equals: .streamInfo)
         .onMoveCommand { direction in
           switch direction {

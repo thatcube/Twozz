@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// Full-bleed audio-only backdrop: a single liquid-glass orb that breathes and
-/// ripples with the audio, the streamer's avatar floating at its core.
+/// Full-bleed audio backdrop in the spirit of Apple Music's "now playing"
+/// screen: a slow, living `MeshGradient` that drifts and shifts through the
+/// brand's violet → azure → magenta range, with the streamer's avatar resting
+/// at center like album art. The audio `level` (0...1) gently nudges the motion
+/// and brightness so loud moments bloom without the gradient ever feeling jumpy.
 ///
-/// `level` (0...1) comes from `AudioLevelMonitor`. The decorative motion
-/// (rotation, shimmer drift, ripple emanation) is time-driven so it stays smooth
-/// regardless of the audio source; only the *amplitude* of breathing/ripples is
-/// scaled by `level`.
+/// `MeshGradient` is a single Metal-rendered pass, so this is dramatically
+/// cheaper than the previous stack of ~10 overlapping Gaussian blurs.
 struct AudioVisualizerView: View {
   let level: Double
   let avatarURL: URL?
@@ -17,34 +18,28 @@ struct AudioVisualizerView: View {
   var isReactive: Bool = false
   var debugInfo: String? = nil
 
-  // Audio-flavoured accent so the orb pops on the black player backdrop.
-  private let accentA = Color(red: 0.62, green: 0.42, blue: 1.00)  // violet
-  private let accentB = Color(red: 0.32, green: 0.72, blue: 1.00)  // azure
-
   var body: some View {
     GeometryReader { geo in
       let side = min(geo.size.width, geo.size.height)
-      let diameter = side * 0.42
 
       TimelineView(.animation) { timeline in
         let t = timeline.date.timeIntervalSinceReferenceDate
-        // Continuous gentle breath, then a big punch from the live audio level.
-        let breath = (sin(t * 1.6) * 0.5 + 0.5) * 0.02
         let amp = level
-        let scale = 1.0 + breath + amp * 0.26
 
         ZStack {
-          halo(diameter: diameter, amp: amp, t: t)
-          rippleRings(diameter: diameter, amp: amp, t: t)
+          MeshGradient(
+            width: 3,
+            height: 3,
+            points: meshPoints(t: t),
+            colors: meshColors(t: t),
+            smoothsColors: true
+          )
+          .ignoresSafeArea()
 
-          orb(diameter: diameter, amp: amp, t: t)
-            .scaleEffect(scale)
-
-          core(diameter: diameter, amp: amp)
-            .scaleEffect(scale)
+          if showAvatar, let avatarURL {
+            avatar(url: avatarURL, side: side, amp: amp, t: t)
+          }
         }
-        .frame(width: geo.size.width, height: geo.size.height)
-        .position(x: geo.size.width / 2, y: geo.size.height / 2)
         .overlay(alignment: .topLeading) {
           if let debugInfo {
             debugBadge(debugInfo)
@@ -56,6 +51,118 @@ struct AudioVisualizerView: View {
     .allowsHitTesting(false)
   }
 
+  // MARK: - Mesh geometry
+
+  /// Nine control points (row-major 3×3). Corners are pinned; the edge
+  /// midpoints and the center drift on gentle, out-of-phase sines so the
+  /// gradient morphs continuously. Motion is purely time-driven — the audio
+  /// level deliberately does *not* affect the background, only the avatar.
+  private func meshPoints(t: Double) -> [SIMD2<Float>] {
+    let d: Float = 0.11
+    func wob(_ freq: Double, _ phase: Double) -> Float { Float(sin(t * freq + phase)) }
+
+    // Layer a second, slower sine on the center so it traces a wandering
+    // figure-eight rather than a simple back-and-forth — more variable motion.
+    let cx = 0.5 + d * (wob(0.23, 0.0) * 0.7 + wob(0.11, 1.7) * 0.5)
+    let cy = 0.5 + d * (wob(0.19, 1.3) * 0.7 + wob(0.09, 0.4) * 0.5)
+
+    return [
+      SIMD2(0, 0),
+      SIMD2(0.5 + d * wob(0.27, 0.6), 0),
+      SIMD2(1, 0),
+      SIMD2(0, 0.5 + d * wob(0.31, 2.1)),
+      SIMD2(cx, cy),
+      SIMD2(1, 0.5 + d * wob(0.24, 3.4)),
+      SIMD2(0, 1),
+      SIMD2(0.5 + d * wob(0.29, 4.2), 1),
+      SIMD2(1, 1),
+    ]
+  }
+
+  // MARK: - Mesh color
+
+  /// Shared hue anchors spanning a soft blue → violet → magenta range. This is
+  /// clearly multi-color (like Apple Music's now-playing backdrop) yet stays
+  /// cohesive and muted. The ring around the avatar samples these *same* hues,
+  /// so it always matches whatever the background is currently showing. Hues
+  /// only sway on bounded sines, so they never drift into unrelated colors (the
+  /// old version accumulated hue over time and wandered into neon green).
+  private static let hueAnchors: [Double] = [
+    0.58, 0.70, 0.84,
+    0.62, 0.74, 0.90,
+    0.55, 0.80, 0.88,
+  ]
+
+  /// The hue anchors gently swaying over time — shared by the mesh and the ring.
+  private func swayedHues(_ t: Double) -> [Double] {
+    Self.hueAnchors.enumerated().map { i, h in
+      h + sin(t * (0.05 + Double(i) * 0.004) + Double(i) * 0.7) * 0.03
+    }
+  }
+
+  /// A soft, muted backdrop that morphs gently. Corners sit deep, edges mid, the
+  /// center brightest — and each point's brightness breathes slightly so it
+  /// feels alive. Saturation stays low for the soft, Apple-Music look. The
+  /// motion is purely time-driven and independent of the audio level.
+  private func meshColors(t: Double) -> [Color] {
+    let hues = swayedHues(t)
+    let sat: [Double] = [0.42, 0.40, 0.40, 0.44, 0.34, 0.42, 0.42, 0.40, 0.42]
+    let baseBri: [Double] = [0.17, 0.30, 0.17, 0.30, 0.42, 0.30, 0.17, 0.30, 0.17]
+    return hues.indices.map { i in
+      let bri = baseBri[i] + sin(t * 0.05 + Double(i)) * 0.035
+      return Color(hue: hues[i], saturation: sat[i], brightness: bri)
+    }
+  }
+
+  /// The same hues as the background mesh, but brighter and a touch more
+  /// saturated so the ring reads clearly on top while staying in-palette.
+  private func ringColors(t: Double) -> [Color] {
+    swayedHues(t).map { Color(hue: $0, saturation: 0.6, brightness: 0.78) }
+  }
+
+  // MARK: - Center avatar (album-art style)
+
+  /// The avatar rests at center like album art. This is the *only* element that
+  /// reacts to the audio: a soft glow blooms behind it, and a multi-color ring —
+  /// sampled from the background palette — grows *outward* from the avatar's rim
+  /// as a border, so the artwork itself pulses while the background keeps its
+  /// slow, independent morph.
+  private func avatar(url: URL, side: CGFloat, amp: Double, t: Double) -> some View {
+    let size = side * 0.24
+    let pulse = CGFloat(amp)
+    let ringWidth = 5 + pulse * 18
+    let ring = ringColors(t: t)
+    return ZStack {
+      // Audio-reactive soft glow behind the avatar — blooms with the level.
+      Circle()
+        .fill(.white.opacity(0.08 + amp * 0.20))
+        .frame(width: size * (1.5 + pulse * 0.6), height: size * (1.5 + pulse * 0.6))
+        .blur(radius: 44)
+
+      // Multi-color ring growing OUTWARD as a border. The stroke is centered on
+      // a circle of diameter `size + ringWidth`, so its inner edge stays pinned
+      // exactly to the avatar's rim while louder audio pushes the colored border
+      // outward. The conic gradient (closed by repeating the first color) slowly
+      // rotates and is sampled from the same hues as the background mesh.
+      Circle()
+        .stroke(
+          AngularGradient(colors: ring + [ring[0]], center: .center, angle: .degrees(t * 12)),
+          lineWidth: ringWidth
+        )
+        .frame(width: size + ringWidth, height: size + ringWidth)
+        .opacity(0.6 + amp * 0.4)
+
+      CachedAsyncImage(url: url) { image in
+        image.resizable().scaledToFill()
+      } placeholder: {
+        Circle().fill(.white.opacity(0.08))
+      }
+      .frame(width: size, height: size)
+      .clipShape(Circle())
+    }
+    .animation(.easeOut(duration: 0.12), value: amp)
+  }
+
   private func debugBadge(_ text: String) -> some View {
     Text(text)
       .font(.system(size: 22, weight: .semibold, design: .monospaced))
@@ -65,228 +172,5 @@ struct AudioVisualizerView: View {
       .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
       .padding(.top, 40)
       .padding(.leading, 48)
-  }
-
-  // MARK: - Glow halo + drifting caustics
-
-  private func halo(diameter: CGFloat, amp: Double, t: Double) -> some View {
-    // The glow swells outward with the audio so loud moments visibly bloom.
-    let haloSize = diameter * (2.0 + amp * 1.1)
-    return ZStack {
-      Circle()
-        .fill(
-          RadialGradient(
-            colors: [
-              accentA.opacity(0.35 + amp * 0.55),
-              accentB.opacity(0.18 + amp * 0.32),
-              .clear,
-            ],
-            center: .center,
-            startRadius: diameter * 0.18,
-            endRadius: haloSize * 0.5
-          )
-        )
-        .frame(width: haloSize, height: haloSize)
-        .blur(radius: 28)
-
-      // Two slow caustic blobs that drift around the orb for a liquid feel.
-      caustic(color: accentB, diameter: diameter, radius: diameter * 0.62,
-              speed: 0.23, phase: 0, amp: amp, t: t)
-      caustic(color: accentA, diameter: diameter, radius: diameter * 0.7,
-              speed: -0.17, phase: 2.4, amp: amp, t: t)
-    }
-  }
-
-  private func caustic(
-    color: Color, diameter: CGFloat, radius: CGFloat,
-    speed: Double, phase: Double, amp: Double, t: Double
-  ) -> some View {
-    let angle = t * speed + phase
-    let x = cos(angle) * radius
-    let y = sin(angle * 1.3) * radius * 0.7
-    return Circle()
-      .fill(color.opacity(0.30 + amp * 0.25))
-      .frame(width: diameter * 0.5, height: diameter * 0.5)
-      .blur(radius: 50)
-      .offset(x: x, y: y)
-  }
-
-  // MARK: - Sonar-style ripple rings
-
-  private func rippleRings(diameter: CGFloat, amp: Double, t: Double) -> some View {
-    let ringCount = 3
-    // Calm, slow concentric ripples that lift a little when the audio is loud.
-    let speed = 0.11 + amp * 0.14
-    return ZStack {
-      ForEach(0..<ringCount, id: \.self) { i in
-        let phase = ((t * speed) + Double(i) / Double(ringCount))
-          .truncatingRemainder(dividingBy: 1.0)
-        let ringDiameter = diameter * (1.0 + phase * (0.5 + amp * 0.7))
-        let fade = (1.0 - phase)
-        Circle()
-          .stroke(
-            LinearGradient(
-              colors: [accentA.opacity(0.85), accentB.opacity(0.6)],
-              startPoint: .topLeading,
-              endPoint: .bottomTrailing
-            ),
-            lineWidth: 1.5 + fade * (1.5 + amp * 3.5)
-          )
-          .frame(width: ringDiameter, height: ringDiameter)
-          .opacity(fade * (0.04 + amp * 0.7))
-      }
-    }
-  }
-
-  // MARK: - Glass orb body
-
-  private func orb(diameter: CGFloat, amp: Double, t: Double) -> some View {
-    ZStack {
-      // Translucent glass body.
-      Circle()
-        .fill(
-          RadialGradient(
-            colors: [
-              .white.opacity(0.24),
-              accentA.opacity(0.30),
-              accentB.opacity(0.18),
-              .black.opacity(0.32),
-            ],
-            center: UnitPoint(x: 0.36, y: 0.30),
-            startRadius: 0,
-            endRadius: diameter * 0.62
-          )
-        )
-
-      // Inner liquid shimmer — blurred accent blobs orbiting inside the glass.
-      shimmer(diameter: diameter, amp: amp, t: t)
-        .clipShape(Circle())
-
-      // Top-left specular highlight.
-      Ellipse()
-        .fill(
-          RadialGradient(
-            colors: [.white.opacity(0.55), .clear],
-            center: .center,
-            startRadius: 0,
-            endRadius: diameter * 0.26
-          )
-        )
-        .frame(width: diameter * 0.5, height: diameter * 0.34)
-        .blur(radius: 10)
-        .offset(x: -diameter * 0.16, y: -diameter * 0.2)
-        .clipShape(Circle())
-
-      // Glass rim.
-      Circle()
-        .strokeBorder(
-          LinearGradient(
-            colors: [.white.opacity(0.7), .white.opacity(0.05), accentB.opacity(0.4)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-          ),
-          lineWidth: 2
-        )
-    }
-    .frame(width: diameter, height: diameter)
-    .modifier(LiquidGlassOrbRim(diameter: diameter))
-    .shadow(color: accentB.opacity(0.25 + amp * 0.55), radius: 24 + amp * 55)
-    .overlay(
-      // A soft accent rim that brightens with the audio (no harsh flicker).
-      Circle()
-        .stroke(accentB.opacity(amp * 0.5), lineWidth: 2 + amp * 4)
-        .frame(width: diameter, height: diameter)
-        .blur(radius: 8)
-    )
-  }
-
-  private func shimmer(diameter: CGFloat, amp: Double, t: Double) -> some View {
-    ZStack {
-      blob(color: accentB, size: diameter * 0.7, radius: diameter * 0.18,
-           speed: 0.5, phase: 0.0, t: t)
-      blob(color: accentA, size: diameter * 0.6, radius: diameter * 0.22,
-           speed: -0.37, phase: 1.7, t: t)
-      blob(color: .white, size: diameter * 0.32, radius: diameter * 0.16,
-           speed: 0.8, phase: 3.1, t: t)
-        .opacity(0.25 + amp * 0.2)
-    }
-  }
-
-  private func blob(
-    color: Color, size: CGFloat, radius: CGFloat,
-    speed: Double, phase: Double, t: Double
-  ) -> some View {
-    let angle = t * speed + phase
-    return Circle()
-      .fill(color.opacity(0.4))
-      .frame(width: size, height: size)
-      .blur(radius: 26)
-      .offset(x: cos(angle) * radius, y: sin(angle * 1.2) * radius)
-  }
-
-  // MARK: - Center (avatar or glowing core)
-
-  @ViewBuilder
-  private func core(diameter: CGFloat, amp: Double) -> some View {
-    if showAvatar, let avatarURL {
-      let avatarSize = diameter * 0.56
-      CachedAsyncImage(url: avatarURL) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        glowCore(diameter: diameter, amp: amp)
-      }
-      .frame(width: avatarSize, height: avatarSize)
-      .clipShape(Circle())
-      .overlay(
-        Circle().strokeBorder(.white.opacity(0.35), lineWidth: 2)
-      )
-      .overlay(
-        // Subtle inner vignette so the avatar sits *inside* the glass.
-        Circle()
-          .fill(
-            RadialGradient(
-              colors: [.clear, .black.opacity(0.28)],
-              center: .center,
-              startRadius: avatarSize * 0.3,
-              endRadius: avatarSize * 0.52
-            )
-          )
-      )
-      .shadow(color: .black.opacity(0.4), radius: 12)
-    } else {
-      glowCore(diameter: diameter, amp: amp)
-    }
-  }
-
-  private func glowCore(diameter: CGFloat, amp: Double) -> some View {
-    Circle()
-      .fill(
-        RadialGradient(
-          colors: [
-            .white.opacity(0.9),
-            accentA.opacity(0.7 + amp * 0.3),
-            .clear,
-          ],
-          center: .center,
-          startRadius: 0,
-          endRadius: diameter * 0.3
-        )
-      )
-      .frame(width: diameter * 0.5, height: diameter * 0.5)
-      .blur(radius: 6)
-  }
-}
-
-/// Adds genuine Liquid Glass refraction to the orb rim on tvOS 26+, and is a
-/// no-op on earlier systems (the hand-built gradient glass carries the look).
-private struct LiquidGlassOrbRim: ViewModifier {
-  let diameter: CGFloat
-
-  func body(content: Content) -> some View {
-    if #available(tvOS 26.0, *) {
-      content.glassEffect(.regular, in: Circle())
-    } else {
-      content
-    }
   }
 }

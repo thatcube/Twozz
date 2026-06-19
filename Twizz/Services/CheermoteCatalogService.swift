@@ -5,6 +5,10 @@ import SwiftUI
 struct CheermoteTier: Hashable {
     /// Minimum bits this tier covers (1, 100, 1000, 5000, 10000, …).
     let minBits: Int
+    /// `#RRGGBB` color Twitch renders the bit amount in for this tier. Kept as a
+    /// string (alongside the resolved `Color`) so the SwiftUI-free chat
+    /// tokenizer can carry it onto precomputed segments.
+    let colorHex: String
     /// Color Twitch renders the bit amount in for this tier.
     let color: Color
     /// Animated tier image URL (jtvnw cloudfront).
@@ -99,7 +103,8 @@ actor CheermoteCatalogService {
                     guard let bits = tierNode["bits"] as? Int,
                           let url = Self.imageURL(template: template, prefix: prefix, bits: bits)
                     else { continue }
-                    tiers.append(CheermoteTier(minBits: bits, color: Self.tierColor(forMinBits: bits), imageURL: url))
+                    let hex = Self.tierColorHex(forMinBits: bits)
+                    tiers.append(CheermoteTier(minBits: bits, colorHex: hex, color: Color(twitchHex: hex) ?? .gray, imageURL: url))
                 }
                 guard !tiers.isEmpty else { continue }
                 tiers.sort { $0.minBits < $1.minBits }
@@ -127,16 +132,14 @@ actor CheermoteCatalogService {
 
     /// Standard Twitch bit-tier colors. The GQL `color` field is empty for the
     /// anonymous web client, so we bucket by the tier's bits threshold.
-    private static func tierColor(forMinBits bits: Int) -> Color {
-        let hex: String
+    private static func tierColorHex(forMinBits bits: Int) -> String {
         switch bits {
-        case ..<100: hex = "#979797"     // gray
-        case ..<1000: hex = "#9C3EE8"    // purple
-        case ..<5000: hex = "#1DB2A5"    // green/teal
-        case ..<10000: hex = "#0099FE"   // blue
-        default: hex = "#F43021"         // red
+        case ..<100: return "#979797"     // gray
+        case ..<1000: return "#9C3EE8"    // purple
+        case ..<5000: return "#1DB2A5"    // green/teal
+        case ..<10000: return "#0099FE"   // blue
+        default: return "#F43021"         // red
         }
-        return Color(twitchHex: hex) ?? .gray
     }
 
     private func fetchGQL(query: String, variables: [String: Any]? = nil) async -> Any? {

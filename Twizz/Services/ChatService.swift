@@ -220,6 +220,7 @@ final class ChatService {
       let catalog = await EmoteCatalogService.shared.catalog(for: normalized)
       guard self.channel == normalized else { return }
       self.emoteURLs = catalog
+      self.retokenizeVisibleBuffer()
     }
 
     Task { [weak self] in
@@ -234,6 +235,7 @@ final class ChatService {
       let catalog = await CheermoteCatalogService.shared.catalog(for: normalized)
       guard self.channel == normalized else { return }
       self.cheermotes = catalog
+      self.retokenizeVisibleBuffer()
     }
 
     receiveTask = Task { [weak self] in await self?.receiveLoop() }
@@ -1116,9 +1118,36 @@ final class ChatService {
 
   private func appendVisible(_ sorted: [ChatMessage]) {
     guard !sorted.isEmpty else { return }
-    messages.append(contentsOf: sorted)
+    var tokenized = sorted
+    for index in tokenized.indices {
+      tokenized[index].segments = computeSegments(for: tokenized[index])
+    }
+    messages.append(contentsOf: tokenized)
     if messages.count > maxBufferedMessages {
       messages.removeFirst(messages.count - maxBufferedMessages)
+    }
+  }
+
+  /// Tokenize a message against the currently-loaded emote/cheermote catalogs.
+  /// Live chat gates cheermote rendering on a real bits count.
+  private func computeSegments(for message: ChatMessage) -> [ChatLineSegment] {
+    let shouldRenderCheers = !cheermotes.isEmpty && message.bits > 0
+    return ChatLineTokenizer.segments(
+      text: message.text,
+      twitchEmoteURLs: message.twitchEmoteURLs,
+      youtubeEmoteURLs: message.youtubeEmoteURLs,
+      globalEmoteURLs: emoteURLs,
+      cheermotes: cheermotes,
+      shouldRenderCheers: shouldRenderCheers
+    )
+  }
+
+  /// Re-tokenize the visible buffer after an emote or cheermote catalog loads,
+  /// so messages that arrived before the catalog resolve their emotes/cheers.
+  private func retokenizeVisibleBuffer() {
+    guard !messages.isEmpty else { return }
+    for index in messages.indices {
+      messages[index].segments = computeSegments(for: messages[index])
     }
   }
 

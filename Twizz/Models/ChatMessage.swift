@@ -39,6 +39,10 @@ struct ChatMessage: Identifiable {
     let systemMessage: String?
     /// Timestamp when the message was received (for chronological merging).
     let timestamp: Date
+    /// Render-ready tokens precomputed at ingest (`ChatService`) so the chat
+    /// view doesn't re-tokenize text on every scroll/layout pass. `nil` until a
+    /// producer fills it in; the view falls back to computing on demand.
+    var segments: [ChatLineSegment]? = nil
 }
 
 extension ChatMessage {

@@ -187,9 +187,9 @@ extension PlayerView {
       asset.resourceLoader.setDelegate(lowLatencyProxy, queue: lowLatencyProxy.callbackQueue)
     }
     let item = AVPlayerItem(asset: asset)
-    // Favor smoothness over latency: extra buffer reduces native AVPlayer
-    // skip-ahead behavior and rebuffer risk on throughput dips.
-    item.preferredForwardBufferDuration = lowLatencyProxyEnabled ? 8 : 3
+    // Buffer depth comes from the active profile: shallower for lower latency,
+    // deeper to let ABR hold higher quality. (See LivePlaybackPolicy.)
+    item.preferredForwardBufferDuration = activeLivePlaybackPolicy.preferredForwardBufferDuration
     // Keep refreshing the live playlist while paused so the seekable (rewind)
     // window keeps growing and pause-then-resume stays inside the DVR window.
     item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
@@ -729,13 +729,25 @@ extension PlayerView {
     }
   }
 
-  /// Keeps live playback running at 1.0× without fighting an intentional pause or
-  /// an in-progress scrub. Per-mode catch-up/seek behavior is layered on by the
-  /// active `LivePlaybackPolicy`; the stability-first baseline performs no
-  /// automatic seeks (those can look like user-visible jumps).
+  /// Keeps live playback running at the policy's target rate without fighting an
+  /// intentional pause or an in-progress scrub. When the active profile enables
+  /// gentle catch-up and the live-edge gap exceeds its threshold, nudges the rate
+  /// slightly above 1.0 to drift back toward the edge (imperceptible, and it never
+  /// reduces quality). Otherwise it normalizes the rate to 1.0×.
   func applyLiveLatencyCorrection() {
     guard isPlaybackActive else { return }
     guard !isUserPaused, !isScrubbing, !isVOD else { return }
+
+    let policy = activeLivePlaybackPolicy
+    if policy.enablesGentleCatchUp,
+      let gap = liveEdgeLatencySeconds,
+      gap > policy.catchUpThresholdSeconds {
+      if abs(player.rate - policy.catchUpRate) > 0.01 {
+        player.playImmediately(atRate: policy.catchUpRate)
+      }
+      return
+    }
+
     if abs(player.rate - 1.0) > 0.01 {
       player.playImmediately(atRate: 1.0)
     }

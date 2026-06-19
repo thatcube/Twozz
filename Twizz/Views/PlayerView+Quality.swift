@@ -4,8 +4,36 @@ import SwiftUI
 // Quality picker: the option list and button label, plus resolving the active
 // variant name on the adaptive master playlist and applying a selection.
 extension PlayerView {
+  /// The active latency-vs-quality profile, decoded from its stored raw value.
+  var livePlaybackProfile: LivePlaybackProfile {
+    get { LivePlaybackProfile(rawValue: livePlaybackProfileRaw) ?? .default }
+    nonmutating set { livePlaybackProfileRaw = newValue.rawValue }
+  }
+
+  /// Concrete buffer / catch-up tuning for the current profile and pin state.
+  var activeLivePlaybackPolicy: LivePlaybackPolicy {
+    LivePlaybackPolicy.live(profile: livePlaybackProfile, isPinned: preferredQuality != "Auto")
+  }
+
+  /// Applies the active policy to the live item without swapping the source —
+  /// used when only the profile changes (the master URL stays the same).
+  func applyActiveLivePlaybackPolicy() {
+    player.currentItem?.preferredForwardBufferDuration =
+      activeLivePlaybackPolicy.preferredForwardBufferDuration
+    applyLiveLatencyCorrection()
+  }
+
   var qualityOptions: [String] {
-    ["Auto"] + (playback?.qualities.map(\.name) ?? [])
+    [LivePlaybackProfile.lowerLatency.pickerLabel,
+     LivePlaybackProfile.higherQuality.pickerLabel]
+      + (playback?.qualities.map(\.name) ?? [])
+  }
+
+  /// The option string the picker should show a checkmark against. While on the
+  /// adaptive master ("Auto") that's whichever profile row is active; a pinned
+  /// rendition selects itself.
+  var selectedQualityOption: String {
+    preferredQuality == "Auto" ? livePlaybackProfile.pickerLabel : preferredQuality
   }
 
   /// Text shown on the player's quality button: the selected variant (e.g.
@@ -97,20 +125,30 @@ extension PlayerView {
     return resolvedQualityName
   }
 
-  /// Display label for a quality option. "Auto" is the adaptive-bitrate choice;
-  /// when the low-latency proxy is on it's also the low-latency choice (and,
-  /// because ABR can step down instead of stalling, the smoothest one), so we
-  /// surface that in the picker. The stored/compared value stays plain "Auto".
+  /// Display label for a quality option. The two Auto rows already carry their
+  /// full labels ("Auto (Lower Latency)" / "Auto (Higher Quality)"), and a pinned
+  /// rendition shows its own name, so options are surfaced verbatim.
   func qualityDisplayLabel(_ option: String) -> String {
-    guard option == "Auto" else { return option }
-    return lowLatencyProxyEnabled ? "Auto (Low Latency)" : "Auto"
+    option
   }
 
   func selectQuality(at index: Int) {
     guard qualityOptions.indices.contains(index) else { return }
     let option = qualityOptions[index]
-    preferredQuality = option
-    applyQualityPreference(option)
+    if let profile = LivePlaybackProfile.allCases.first(where: { $0.pickerLabel == option }) {
+      // One of the two Auto rows: stay on the adaptive master, just switch the
+      // latency-vs-quality profile and re-apply its buffer/catch-up policy.
+      livePlaybackProfile = profile
+      if preferredQuality != "Auto" {
+        preferredQuality = "Auto"
+        applyQualityPreference("Auto")
+      } else {
+        applyActiveLivePlaybackPolicy()
+      }
+    } else {
+      preferredQuality = option
+      applyQualityPreference(option)
+    }
     updateResolvedQuality()
     focus = .quality
     scheduleHide()

@@ -149,6 +149,11 @@ struct PlayerView: View {
   @Environment(\.dismiss) var dismiss
   @Environment(\.themePalette) var palette
   @AppStorage("preferredQuality") var preferredQuality = "Auto"
+  /// Latency-vs-quality profile for the adaptive ("Auto") stream, surfaced as the
+  /// two Auto rows in the quality picker. Stored as the enum raw value; read it
+  /// through `livePlaybackProfile`.
+  @AppStorage("livePlaybackProfile") var livePlaybackProfileRaw = LivePlaybackProfile.default
+    .rawValue
   @AppStorage("chatTextSizeValue") var chatTextSizeValue = Double(
     ChatAppearance.defaultTextSize)
   @AppStorage("chatEmoteAuto") var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
@@ -1443,7 +1448,7 @@ struct PlayerView: View {
         if !isVOD {
         QualityMenu(
           options: qualityOptions,
-          selectedOption: preferredQuality,
+          selectedOption: selectedQualityOption,
           buttonLabel: qualityButtonLabel,
           reservedWidthLabels: qualityButtonLabelCandidates,
           displayLabel: { qualityDisplayLabel($0) },

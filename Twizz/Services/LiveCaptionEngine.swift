@@ -68,6 +68,11 @@ actor LiveCaptionEngine {
     /// Cap on buffered-but-unfed audio (decoded segments) so a paused/rewound
     /// playhead can't grow the queue without bound. 16 kHz mono is tiny per second.
     private let maxPending = 30
+    /// How far ahead of the playhead to release audio, compensating for speech
+    /// recognition latency so captions land near the spoken words instead of
+    /// trailing them. Kept below typical recognition latency so captions never
+    /// run ahead of the video.
+    private let recognitionLead: TimeInterval = 1.0
     /// Player playhead (the on-screen frame's PROGRAM-DATE-TIME), pushed in from
     /// the MainActor. `AVPlayer` isn't Sendable, so the controller samples it on
     /// the main actor and forwards the plain `Date` here rather than us reaching
@@ -257,7 +262,10 @@ actor LiveCaptionEngine {
         while let first = pending.first {
             let due: Bool
             if let date = first.date, let playhead {
-                due = date <= playhead
+                // Feed a touch before the playhead literally reaches the audio so
+                // that, after recognition latency (~1–1.5s), the caption surfaces
+                // roughly as the words are heard rather than lagging behind.
+                due = date <= playhead.addingTimeInterval(recognitionLead)
             } else {
                 // Undated segment or no playhead clock — no basis to hold it.
                 due = true

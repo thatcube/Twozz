@@ -21,6 +21,15 @@ final class CaptionController {
     /// locale). Surfaced so the UI can explain rather than silently show nothing.
     private(set) var failed = false
 
+    /// The single rolling caption to display: the most recent settled phrase
+    /// continued by the phrase currently forming. One evolving line rather than a
+    /// growing stack, so it reads like live broadcast captions.
+    var displayText: String {
+        [finalizedLines.last, volatileLine.isEmpty ? nil : volatileLine]
+            .compactMap { $0 }
+            .joined(separator: " ")
+    }
+
     private var engine: Any?
     private var startTask: Task<Void, Never>?
     /// Samples the player playhead on the main actor and forwards it into the
@@ -32,7 +41,7 @@ final class CaptionController {
     /// with unchanged inputs don't tear down and restart the engine.
     private var activeKey: String?
 
-    private let maxLines = 2
+    private let maxLines = 1
 
     /// Whether on-device caption generation is even possible on this OS. Hardware
     /// capability (model availability) is confirmed asynchronously once started.
@@ -157,38 +166,37 @@ struct CaptionOverlayView: View {
     @Environment(\.glassDisabled) private var glassDisabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var lines: [String] {
-        var all = controller.finalizedLines
-        if !controller.volatileLine.isEmpty { all.append(controller.volatileLine) }
-        return all
-    }
+    private var text: String { controller.displayText }
 
     var body: some View {
         Group {
-            if !lines.isEmpty {
-                Text(lines.joined(separator: "\n"))
-                  .font(.system(.title3, design: .rounded).weight(.semibold))
+            if !text.isEmpty {
+                Text(text)
+                  .font(.system(.title2, weight: .semibold))
                   .multilineTextAlignment(.center)
                   .foregroundStyle(.white)
-                  .lineLimit(3)
+                  .lineLimit(2)
+                  // Keep the most recent words visible; drop older ones off the
+                  // front rather than hiding what was just said.
+                  .truncationMode(.head)
                   .fixedSize(horizontal: false, vertical: true)
                   .padding(.horizontal, 28)
-                  .padding(.vertical, 16)
+                  .padding(.vertical, 14)
                   .background(captionBackground)
-                  .frame(maxWidth: 1100)
-                  .padding(.bottom, controlsVisible ? 260 : 80)
+                  .frame(maxWidth: 1200)
+                  .padding(.bottom, controlsVisible ? 260 : 96)
                   .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
                   .accessibilityLabel("Live captions")
-                  .accessibilityValue(lines.joined(separator: ". "))
+                  .accessibilityValue(text)
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: lines)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: text)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .allowsHitTesting(false)
     }
 
     private var captionBackground: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
             .fill(
                 glassDisabled
                     ? AnyShapeStyle(Color.black.opacity(0.82))

@@ -235,6 +235,7 @@ struct ChatView: View {
     .padding(.vertical, -8)
   }
 
+  @ViewBuilder
   private func line(for message: ChatMessage) -> some View {
     let richLine = RichChatLineView(
       message: message,
@@ -252,18 +253,16 @@ struct ChatView: View {
     )
 
     if let systemMessage = message.systemMessage {
-      return AnyView(
-        subscriptionHighlight(
-          systemMessage: systemMessage,
-          showUserLine: !message.text.isEmpty,
-          line: richLine
-        )
+      subscriptionHighlight(
+        systemMessage: systemMessage,
+        showUserLine: !message.text.isEmpty,
+        line: richLine
       )
+    } else if message.isFirstMessage {
+      firstMessageHighlight(around: richLine)
+    } else {
+      richLine
     }
-    if message.isFirstMessage {
-      return AnyView(firstMessageHighlight(around: richLine))
-    }
-    return AnyView(richLine)
   }
 
   // MARK: - Subscription highlight

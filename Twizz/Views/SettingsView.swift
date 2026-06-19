@@ -165,7 +165,7 @@ struct SettingsView: View {
           }
         }
       } label: {
-        SettingPill(title: StreamLanguagePreference.displayName(streamLanguage), isSelected: false)
+        SettingPill(title: StreamLanguagePreference.displayName(streamLanguage), isSelected: false, showsMenuIndicator: true)
       }
       .prominentActionButtonStyle()
     }
@@ -489,6 +489,9 @@ private struct SettingPill: View {
   let title: String
   var subtitle: String? = nil
   let isSelected: Bool
+  /// When true the pill is a dropdown trigger (a `Menu` label), so it shows a
+  /// trailing up/down selector chevron instead of the selection checkmark slot.
+  var showsMenuIndicator: Bool = false
 
   var body: some View {
     HStack(spacing: 12) {
@@ -506,8 +509,12 @@ private struct SettingPill: View {
         }
       }
 
-      Icon(glyph: .check, size: 26)
-        .opacity(isSelected ? 1 : 0)
+      if showsMenuIndicator {
+        Icon(glyph: .selector, size: 26)
+      } else {
+        Icon(glyph: .check, size: 26)
+          .opacity(isSelected ? 1 : 0)
+      }
     }
   }
 }

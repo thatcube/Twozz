@@ -204,9 +204,10 @@ struct ChatView: View {
 
   // MARK: - Subscription highlight
 
-  /// Twitch-style teal/green accent used for subscription event lines.
+  /// Twitch highlights subscription notices with its brand purple — the same
+  /// accent used for the first-message treatment above and on Twitch itself.
   private var subscriptionAccent: Color {
-    Color(twitchHex: "#00D6A1") ?? .green
+    firstMessageAccent
   }
 
   /// Wraps a subscription USERNOTICE in a highlighted treatment: a tinted strip

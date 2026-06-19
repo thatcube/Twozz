@@ -329,6 +329,7 @@ extension PlayerView {
     isRecoveringPlayback = false
     lastRecoveryAttemptAt = Date.distantPast
     lastLiveResyncAt = Date.distantPast
+    lastLiveEdgeSnapAt = Date.distantPast
     liveResyncAttempts = 0
     lastStallNotificationAt = Date.distantPast
     liveStallWaitingSince = nil
@@ -383,6 +384,48 @@ extension PlayerView {
     ) { [self] _ in
       player.playImmediately(atRate: 1.0)
     }
+  }
+
+  /// How far the seekable window AVPlayer currently holds trails the *true*
+  /// broadcast edge, in seconds: wall-clock behind-live (`now − PROGRAM-DATE-TIME`)
+  /// minus the in-window gap to the seekable tail. When this is large the cached
+  /// media playlist is stale — seeking to the seekable edge lands well behind real
+  /// live, and only a fresh load can reach the true edge. Returns `nil` when either
+  /// signal is unavailable.
+  func liveWindowStalenessSeconds(_ item: AVPlayerItem) -> Double? {
+    guard let date = item.currentDate() else { return nil }
+    let wallClock = Date().timeIntervalSince(date)
+    guard wallClock.isFinite, wallClock >= 0 else { return nil }
+    guard let range = item.seekableTimeRanges.last?.timeRangeValue else { return nil }
+    let edge = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+    let current = CMTimeGetSeconds(item.currentTime())
+    guard edge.isFinite, current.isFinite, edge > 0 else { return nil }
+    let edgeGap = max(0, edge - current)
+    return wallClock - edgeGap
+  }
+
+  /// When the viewer returns to the live edge but AVPlayer's seekable window is
+  /// stale (trailing true live), a same-window seek can't reach the real edge.
+  /// Recreate the item so it fetches a fresh playlist and lands at the true
+  /// broadcast tail. Stream Rewind history survives because the proxy only clears
+  /// its DVR buffers when `retainHistory` actually changes — so this preserves the
+  /// ability to rewind while snapping playback back to real live.
+  func snapToTrueLiveIfStale() {
+    guard !isVOD, pinnedToLive, !isUserPaused, !isScrubbing, !isRecoveringPlayback else {
+      return
+    }
+    guard let item = player.currentItem, let source = currentSourceURL else { return }
+    guard let staleness = liveWindowStalenessSeconds(item),
+      staleness > staleLiveWindowSnapThresholdSeconds
+    else { return }
+    let now = Date()
+    guard now.timeIntervalSince(lastLiveEdgeSnapAt) >= liveEdgeSnapCooldownSeconds else { return }
+    lastLiveEdgeSnapAt = now
+    if showLatencyDiagnostics {
+      logDiagnosticsEvent("snap to true live (stale \(Int(staleness))s)")
+    }
+    player.replaceCurrentItem(with: makeItem(url: source))
+    startPlayback()
   }
 
   func samplePlaybackHealth() {

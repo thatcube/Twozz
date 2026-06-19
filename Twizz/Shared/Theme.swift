@@ -105,6 +105,16 @@ struct ThemePalette: Equatable {
   /// Hairline border drawn around an unfocused opaque card so it reads against
   /// a same-colored background (e.g. white card on a white light-mode page).
   let cardOpaqueBorder: Color
+  /// Opaque fill for *player-chrome* surfaces (HUD chips, scrub bar, diagnostics)
+  /// when glass is disabled. Theme-aware so Light mode paints them white with
+  /// dark content instead of the shared near-black `twizzOpaqueGlass`.
+  let chromeOpaqueSurface: Color
+  /// Hairline border for opaque player-chrome surfaces.
+  let chromeOpaqueBorder: Color
+  /// Foreground (text/icons) drawn on an opaque player-chrome surface: dark in
+  /// Light mode, white in dark/oled. Falls back to plain white on the
+  /// translucent-glass path (over video) where white reads correctly.
+  let chromeOnOpaque: Color
   /// Primary text drawn on top of `liftSurface`.
   let liftPrimaryText: Color
   /// Secondary text drawn on top of `liftSurface`.
@@ -124,6 +134,9 @@ struct ThemePalette: Equatable {
     liftSurface: .white,
     cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
     cardOpaqueBorder: Color.white.opacity(0.16),
+    chromeOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
+    chromeOpaqueBorder: Color.white.opacity(0.16),
+    chromeOnOpaque: .white,
     liftPrimaryText: .black.opacity(0.92),
     liftSecondaryText: .black.opacity(0.62),
     playerBackdrop: .black,
@@ -140,6 +153,9 @@ struct ThemePalette: Equatable {
     liftSurface: .white,
     cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
     cardOpaqueBorder: Color.white.opacity(0.16),
+    chromeOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
+    chromeOpaqueBorder: Color.white.opacity(0.16),
+    chromeOnOpaque: .white,
     liftPrimaryText: .black.opacity(0.92),
     liftSecondaryText: .black.opacity(0.62),
     playerBackdrop: .black,
@@ -156,6 +172,9 @@ struct ThemePalette: Equatable {
     liftSurface: .white,
     cardOpaqueSurface: .white,
     cardOpaqueBorder: Color.black.opacity(0.12),
+    chromeOpaqueSurface: Color(white: 0.97),
+    chromeOpaqueBorder: Color.black.opacity(0.12),
+    chromeOnOpaque: .black.opacity(0.88),
     liftPrimaryText: .black.opacity(0.90),
     liftSecondaryText: .black.opacity(0.60),
     playerBackdrop: .white,

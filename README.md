@@ -16,33 +16,55 @@
 
 ## Features
 
-Home & browse:
+Sign in & navigation:
 
-- Sign in with Twitch (Device Code flow) with automatic token refresh.
-- Followed channels on Home, auto-refreshed when stale.
-- Browse tab for top categories and live streams.
+- Sign in with Twitch using the Device Code flow (approve on your phone or browser); tokens are stored securely and refresh automatically.
+- Four tabs: Home, Browse, Search, and Settings.
+
+Home & discovery:
+
+- Home shows the channels you follow that are live now, plus recommendations.
+- Optional personalized recommendations built from on-device watch history and your followed categories — or anonymous trending when you're signed out or have it turned off.
+- Browse top categories and the live streams within them.
+- Search channels and categories with live results.
+- Channel pages with top clips, past broadcasts (VODs), and similar channels.
+- Apple TV Top Shelf surfaces your live follows and recommendations on the tvOS home screen.
 
 Playback:
 
-- Live playback on real Apple TV hardware.
-- Side-by-side layout: video on the left, chat pane on the right.
+- Live playback on real Apple TV hardware, with a side-by-side layout: video on the left, chat pane on the right.
 - Quality picker with persistence (`Auto` + explicit qualities), ordered highest-to-lowest.
-- Custom bottom overlay controls with tvOS focus navigation.
+- Low-latency mode (on by default) that closes most of the gap to the live edge.
+- Stream rewind (DVR): seek back within the live window.
+- Audio-only mode with a reactive audio visualizer — handy for music, just-chatting, or background listening.
+- Custom bottom overlay controls built for the tvOS focus engine.
 - Sleep timer tucked inside the quality menu (timed or "end of stream") with a "still watching?" check, an animated starry "Sleeping" screen, and one-press resume that snaps back to the live edge.
+- VOD and clip playback from channel pages; VODs include synced chat replay and variable speed (0.5×–2×).
+- Optional diagnostics overlay for latency and buffer stats.
 
 Chat:
 
 - Anonymous read via Twitch IRC over WebSocket, with auto-reconnect.
-- Send messages when signed in (`user:write:chat`).
-- Twitch badges (global + channel-specific).
-- Emotes: Twitch native (incl. channel/sub), 7TV, BTTV, and FFZ (global + channel).
-- Incoming raid detection with a passive banner (no "follow" — you're already on the channel being raided).
+- Send messages when signed in.
+- Twitch badges (global + channel-specific) and cheermotes (bits).
+- Emotes: Twitch native (incl. channel/sub), 7TV, BTTV, and FFZ (global + channel), including animated emotes.
+- Extensive chat appearance controls: text and emote size, font (including OpenDyslexic), spacing, width, and layout (side / overlay / glass).
+- Incoming and outgoing raid banners.
+- Live polls, predictions, hype trains, and creator goals surfaced as passive, display-only overlays.
+- "Just went live" toast for followed channels, with one tap to switch over.
 - Experimental: merge a YouTube live chat into the Twitch chat pane.
+
+Appearance:
+
+- Themes: System, Dark, OLED, and Light.
+- Adjustable stream-card sizes and a stream-language filter.
 
 ## Tech Stack
 
 - Swift / SwiftUI targeting tvOS.
-- AVPlayer-backed playback with custom overlay controls.
+- AVPlayer-backed playback with custom overlay controls and an in-process low-latency HLS proxy.
+- Twitch EventSub / Hermes for real-time raids, polls, predictions, and live events.
+- A Top Shelf app extension for the tvOS home screen.
 - XcodeGen project generation (`project.yml` is source of truth).
 
 ## Build & Run
@@ -125,36 +147,16 @@ Twizz can show who you follow, but Twitch now blocks follow/unfollow mutations f
 
 ## Ideas & Improvements
 
-A running list of features we're considering, roughly ordered by effort.
+A running list of things we're considering but haven't built yet:
 
-### Quick wins (low effort, high delight)
-
-| Feature | Why people want it | Why it's quick here |
-|---|---|---|
-| **"Go Live" button + latency indicator** | Web/mobile have it; viewers hate drifting behind | We already have `LowLatencyHLSProxy`; just expose seek-to-live edge + a delay badge in the overlay. |
-| **"Just went live" toast for follows** | Discovery — catch a stream the moment it starts | We already run `EventSubService` (`stream.online`). Surface it as a banner like the raid banner. |
-| **Chat keyword highlights + mention ping** | Chatterino's most-loved feature; makes big chats usable | Client-side string match in `RichChatLineView` + a settings list. |
-| **Freeze-chat-on-focus** | Power users want to read without autoscroll fighting them | Pause the rolling buffer's autoscroll while the chat pane is focused. |
-| **Audio-only / "screen off" mode** | Background-listening (music / just-chatting / podcasts), saves bandwidth | We already have `AudioOnlyLevelDecoder` + `AudioVisualizerView` — wrap it as a deliberate mode. |
-
-### Bigger bets (features that make Twizz exceptional)
-
-Researched against what Twitch power-users (the Chatterino / Frosty / Streamlink crowds) and Apple TV viewers consistently ask for — and what the official tvOS app does poorly:
-
-- **Multi-view & Picture-in-Picture** — watch two streams at once, or shrink the player to a corner while you browse for the next channel. tvOS supports PiP via `AVPlayer`; the official app can't. Great for events, IRL, and GDQ-style marathons.
-- **VOD & clip playback with synced chat replay** — build on `OnDemandPlayerView` to scrub VODs with the original chat replayed in time. Even Twitch's own TV experience handles this badly.
-- **SharePlay watch-together** — sync playback (and a shared reaction layer) over FaceTime. A social differentiator unique to the Apple ecosystem.
-- **Live polls / predictions / hype-train overlay** — passively surface active polls, predictions, and goals via `EventSubService` so couch viewers don't miss interactive moments (display-only — no channel-point redemption, see the section above).
-- **Moderator mode** — timeout / ban / delete and a mod-action log from the couch for users who mod. Niche but beloved by the power-user crowd.
-- **Chat ambience layer** — messages-per-minute, top-emotes-right-now, and raid / hype-train celebrations rendered as lightweight native moments. Leans into Twizz's chat-first identity.
-- **Smarter discovery** — lean on `SimilarChannelsEngine` + `PersonalizedRecommendationsService` for "Because you watched" rails, a "live now from channels you watch" row, and richer category browsing.
-- **Siri & universal search deep-linking** — "Play _channel_ on Twizz" and system-Search results that jump straight into playback, building on `DeepLinkRouter` and the existing Top Shelf.
+- **Multi-view & Picture-in-Picture** — watch two streams at once, or shrink the player to a corner while you browse for the next channel.
+- **SharePlay watch-together** — sync playback (and a shared reaction layer) over FaceTime; a social differentiator unique to the Apple ecosystem.
+- **Moderator mode** — timeout / ban / delete and a mod-action log from the couch for users who mod.
+- **Chat keyword highlights + mention ping** — client-side highlighting for keywords and your username in busy chats.
+- **Freeze-chat-on-focus** — pause autoscroll while you're reading so it doesn't fight you.
+- **Siri & deep search** — "Play _channel_ on Twizz" and system-Search results that jump straight into playback.
 - **Per-channel memory** — remember preferred quality, chat width, and audio-only state per channel.
-- **Accessibility & readability** — VoiceOver labels for chat lines and cards, Dynamic Type chat scaling (via `ChatAppearance`), high-contrast / colorblind-friendly username and emote rendering, and a captions toggle where available.
-
-## Roadmap
-
-See [Twizz-plan.md](Twizz-plan.md) for detailed phased planning.
+- **Deeper accessibility** — VoiceOver labels for chat lines and cards, and a captions toggle where available.
 
 ## Donate
 

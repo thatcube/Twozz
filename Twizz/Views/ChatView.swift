@@ -162,6 +162,7 @@ struct ChatView: View {
           .foregroundStyle(.white.opacity(0.9))
           .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
           .opacity(hintShown ? 1 : 0)
+          .blur(radius: hintShown ? 0 : 6)
           .offset(y: hintShown ? -3 : 7)
           .onAppear {
             hintShown = false
@@ -172,9 +173,21 @@ struct ChatView: View {
 
       HStack(spacing: 8) {
         if let remaining = softPauseRemaining {
-          Text("Chat paused · \(remaining)s")
-            .font(.caption.weight(.semibold))
-            .contentTransition(.numericText())
+          HStack(spacing: 0) {
+            Text("Chat paused · ")
+            // Reserve a fixed two-digit slot (sized by a hidden "00") and
+            // trailing-align the live number inside it, with monospaced digits,
+            // so the pill width never jitters as the countdown ticks 10 → 1.
+            Text("00")
+              .hidden()
+              .overlay(alignment: .trailing) {
+                Text("\(remaining)")
+                  .contentTransition(.numericText())
+              }
+            Text("s")
+          }
+          .font(.caption.weight(.semibold))
+          .monospacedDigit()
         } else {
           Image(systemName: "arrow.up.and.down")
             .font(.caption.weight(.bold))

@@ -165,6 +165,7 @@ struct PlayerView: View {
 
   @Environment(\.dismiss) var dismiss
   @Environment(\.themePalette) var palette
+  @Environment(\.accessibilityReduceMotion) var reduceMotion
   @AppStorage("preferredQuality") var preferredQuality = "Auto"
   /// Latency-vs-quality profile for the adaptive ("Auto") stream, surfaced as the
   /// two Auto rows in the quality picker. Stored as the enum raw value; read it
@@ -955,19 +956,19 @@ struct PlayerView: View {
 
       if showRaidEvents, let raid = chat.pendingRaid {
         raidBanner(raid)
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .bottom).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(10)
       }
 
       if let raid = outgoingRaid {
         outgoingRaidBanner(raid)
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .bottom).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(11)
       }
 
       if showStillWatching, !isSleeping {
         stillWatchingBanner()
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .bottom).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(12)
       }
 
@@ -978,7 +979,7 @@ struct PlayerView: View {
 
       if let goLive, let event = goLive.pending {
         goLiveToast(goLive, event: event)
-          .transition(.move(edge: .top).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(13)
       }
 
@@ -987,8 +988,8 @@ struct PlayerView: View {
           .transition(.opacity)
       }
     }
-    .animation(.easeInOut(duration: 0.35), value: hermes.currentMoment)
-    .animation(.easeOut(duration: 0.25), value: goLive?.pending)
+    .animation(.motionAware(.easeInOut(duration: 0.35), reduceMotion: reduceMotion), value: hermes.currentMoment)
+    .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive?.pending)
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
       // informational: show a passive banner and auto-dismiss it. We never steal
@@ -2186,7 +2187,7 @@ struct PlayerView: View {
       .overlay(alignment: .top) {
         if let moment = hermes.currentMoment, !isSleeping, isEventEnabled(moment) {
           dockedInteractiveMoment(moment, style: momentDockStyle(isGlass: isGlass))
-            .transition(.move(edge: .top).combined(with: .opacity))
+            .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
         }
       }
 
@@ -3089,34 +3090,51 @@ struct ChatKeyboardHostField: UIViewRepresentable {
 private struct ChatSyncSendIndicator: View {
   let deadline: Date
   let total: Double
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    TimelineView(.animation) { context in
-      let remaining = max(0, deadline.timeIntervalSince(context.date))
-      let progress = total > 0 ? min(1, max(0, 1 - remaining / total)) : 1
-      HStack(spacing: 10) {
-        Icon(glyph: .clock, size: 16)
-          .foregroundStyle(.white.opacity(0.7))
-          .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 4) {
-          Text(
-            remaining > 0.5
-              ? "Sent — appears in \(Int(remaining.rounded()))s"
-              : "Appearing now…"
-          )
-          .font(.caption2)
-          .foregroundStyle(.white.opacity(0.82))
+    Group {
+      if reduceMotion {
+        // Reduce Motion: step the countdown once a second (no smooth 60fps
+        // progress fill) and drop the animated bar.
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          indicator(now: context.date)
+        }
+      } else {
+        TimelineView(.animation) { context in
+          indicator(now: context.date)
+        }
+      }
+    }
+  }
+
+  private func indicator(now: Date) -> some View {
+    let remaining = max(0, deadline.timeIntervalSince(now))
+    let progress = total > 0 ? min(1, max(0, 1 - remaining / total)) : 1
+    return HStack(spacing: 10) {
+      Icon(glyph: .clock, size: 16)
+        .foregroundStyle(.white.opacity(0.7))
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(
+          remaining > 0.5
+            ? "Sent — appears in \(Int(remaining.rounded()))s"
+            : "Appearing now…"
+        )
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.82))
+        if !reduceMotion {
           ProgressView(value: progress)
             .progressViewStyle(.linear)
             .tint(.purple)
             .accessibilityHidden(true)
         }
       }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
   }
 }
 
@@ -3800,15 +3818,30 @@ struct SleepingScreen: View {
     return Color(red: c.r, green: c.g, blue: c.b).opacity(opacity)
   }
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
-    TimelineView(.animation) { timeline in
-      let t = timeline.date.timeIntervalSinceReferenceDate
-      // Slowly drifting glow centers give the scene a gentle, living motion.
-      let driftA = UnitPoint(x: 0.30 + 0.14 * sin(t * 0.043),
-                             y: 0.34 + 0.10 * cos(t * 0.037))
-      let driftB = UnitPoint(x: 0.72 + 0.12 * cos(t * 0.031),
-                             y: 0.64 + 0.13 * sin(t * 0.049))
-      ZStack {
+    Group {
+      if reduceMotion {
+        // Reduce Motion: render a single static frame — no twinkle, drift,
+        // shooting stars, or logo pulse.
+        scene(t: 0)
+      } else {
+        TimelineView(.animation) { timeline in
+          scene(t: timeline.date.timeIntervalSinceReferenceDate)
+        }
+      }
+    }
+    .environment(\.colorScheme, .dark)
+  }
+
+  private func scene(t: Double) -> some View {
+    // Slowly drifting glow centers give the scene a gentle, living motion.
+    let driftA = UnitPoint(x: 0.30 + 0.14 * sin(t * 0.043),
+                           y: 0.34 + 0.10 * cos(t * 0.037))
+    let driftB = UnitPoint(x: 0.72 + 0.12 * cos(t * 0.031),
+                           y: 0.64 + 0.13 * sin(t * 0.049))
+    return ZStack {
         // Blur whatever is paused behind (stream frame + chat), then bank it
         // way down into a dark, warm night so it stays easy on the eyes.
         Rectangle()
@@ -3889,8 +3922,6 @@ struct SleepingScreen: View {
         centerContent(pulse: 0.5 + 0.5 * sin(t * 0.6))
       }
       .ignoresSafeArea()
-    }
-    .environment(\.colorScheme, .dark)
   }
 
   private func centerContent(pulse: Double) -> some View {

@@ -43,6 +43,7 @@ struct HomeView: View {
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
 
   @Environment(\.colorScheme) private var systemColorScheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @FocusState private var focusedItemID: String?
 
   private let firstLaunchSignInPromptKey = "hasPromptedFirstLaunchSignIn"
@@ -170,7 +171,7 @@ struct HomeView: View {
       if let refreshToast {
         RefreshToastView(state: refreshToast)
           .padding(.top, 48)
-          .transition(.move(edge: .top).combined(with: .opacity))
+          .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
       }
     }
     .overlay(alignment: .topTrailing) {
@@ -181,10 +182,10 @@ struct HomeView: View {
         )
         .padding(.top, 48)
         .padding(.trailing, 48)
-        .transition(.move(edge: .top).combined(with: .opacity))
+        .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
       }
     }
-    .animation(.easeOut(duration: 0.25), value: goLive.pending)
+    .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive.pending)
     .task {
       auth.restore()
       goLive.notificationSettings = goLiveSettings

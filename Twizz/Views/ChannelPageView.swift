@@ -27,15 +27,7 @@ struct ChannelPageView: View {
   @State private var isLoadingRecs = true
 
   @State private var onDemandItem: OnDemandItem?
-  /// Drives focus with the same stable pattern the rest of the app uses
-  /// (BrowseView/SearchView): a single `@FocusState` the focus engine owns, plus
-  /// a `@Namespace` so `.prefersDefaultFocus` can anchor the first tile (live
-  /// card, else first clip/VOD) when the page loads. Reading `focusedID == id`
-  /// per card is cheap; the expensive parts of the page (banner reflection, image
-  /// decode) are cached so a focus move stays smooth. Avoid per-card programmatic
-  /// `@FocusState` writes here — they thrash SwiftUI's focus store and, on a
-  /// dense first load, can blow the scene-update watchdog.
-  @FocusState private var focusedID: String?
+  /// Namespace for default-focus anchoring in this page's focus scope.
   @Namespace private var focusNamespace
 
   /// Measured height of the identity hero card, so it can straddle the banner's
@@ -99,7 +91,7 @@ struct ChannelPageView: View {
         bannerBackdrop(fullHeight: fullHeight)
 
         ScrollView(.vertical, showsIndicators: false) {
-          VStack(alignment: .leading, spacing: 30) {
+          LazyVStack(alignment: .leading, spacing: 30) {
             heroCard
             liveOrLastCard
             clipsRow
@@ -292,56 +284,53 @@ struct ChannelPageView: View {
   /// stream (open the player, or return to it when opened from the player).
   private func liveCard(_ profile: ChannelProfile) -> some View {
     let id = "live"
-    let isFocused = focusedID == id
-    return HStack(spacing: 20) {
-      liveThumbnail
+    return FocusableTile(
+      cornerRadius: heroCorner,
+      focusedScale: 1.01,
+      onSelect: { onWatchChannel?(followedChannel(from: profile)) }
+    ) { isFocused in
+      HStack(spacing: 20) {
+        liveThumbnail
 
-      VStack(alignment: .leading, spacing: 8) {
-        HStack(spacing: 10) {
-          liveBadge
-          if let uptime = Self.uptime(since: profile.liveStartedAt) {
-            metaDot
-            Text("Live for \(uptime)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+          HStack(spacing: 10) {
+            liveBadge
+            if let uptime = Self.uptime(since: profile.liveStartedAt) {
+              metaDot
+              Text("Live for \(uptime)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+            }
+            if let viewers = profile.liveViewerCount {
+              metaDot
+              Text("\(Self.plainCount(viewers)) viewers").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+            }
           }
-          if let viewers = profile.liveViewerCount {
-            metaDot
-            Text("\(Self.plainCount(viewers)) viewers").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+
+          if let title = profile.liveTitle, !title.isEmpty {
+            Text(title)
+              .font(.headline)
+              .foregroundStyle(.primary)
+              .lineLimit(2)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+
+          if let game = profile.liveGame, !game.isEmpty {
+            Label(game, systemImage: "gamecontroller.fill")
+              .font(.subheadline).foregroundStyle(.secondary)
           }
         }
 
-        if let title = profile.liveTitle, !title.isEmpty {
-          Text(title)
-            .font(.headline)
-            .foregroundStyle(.primary)
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        Spacer(minLength: 0)
 
-        if let game = profile.liveGame, !game.isEmpty {
-          Label(game, systemImage: "gamecontroller.fill")
-            .font(.subheadline).foregroundStyle(.secondary)
-        }
+        Image(systemName: "play.circle.fill")
+          .font(.system(size: 40))
+          .foregroundStyle(.primary.opacity(0.9))
       }
-
-      Spacer(minLength: 0)
-
-      Image(systemName: "play.circle.fill")
-        .font(.system(size: 40))
-        .foregroundStyle(.primary.opacity(0.9))
+      .padding(18)
+      .frame(maxWidth: .infinity)
+      .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: isFocused, palette: palette)
+      .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 22, y: 12)
     }
-    .padding(18)
-    .frame(maxWidth: .infinity)
-    .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: isFocused, palette: palette)
-    .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 22, y: 12)
-    .contentShape(RoundedRectangle(cornerRadius: heroCorner))
-    .focusable(true)
-    .focused($focusedID, equals: id)
     .prefersDefaultFocus(defaultFocusID == id, in: focusNamespace)
-    .focusEffectDisabled()
-    .onTapGesture { onWatchChannel?(followedChannel(from: profile)) }
-    .scaleEffect(isFocused ? 1.01 : 1)
-    .animation(.easeOut(duration: 0.14), value: isFocused)
-    .zIndex(isFocused ? 2 : 0)
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
@@ -394,29 +383,26 @@ struct ChannelPageView: View {
       contentRow(title: "Clips") {
         ForEach(clips) { clip in
           let itemID = "clip-\(clip.slug)"
-          let isFocused = focusedID == itemID
-          MediaContentCard(
-            title: clip.title,
-            subtitle: clipSubtitle(clip),
-            thumbnailURL: clip.thumbnailURL,
-            durationText: Self.shortDuration(clip.durationSeconds),
-            isFocused: isFocused,
-            mediaWidth: tileWidth,
-            mediaHeight: tileMediaHeight,
-            focusHorizontalInset: focusHInset,
-            focusVerticalInset: focusVInset,
-            cardCornerRadius: cardCorner,
-            mediaCornerRadius: mediaCorner
-          )
-          .contentShape(RoundedRectangle(cornerRadius: cardCorner))
-          .focusable(true)
-          .focused($focusedID, equals: itemID)
+          FocusableTile(
+            cornerRadius: cardCorner,
+            focusedScale: AppLayout.focusedCardScale,
+            onSelect: { onDemandItem = .clip(slug: clip.slug, title: clip.title) }
+          ) { isFocused in
+            MediaContentCard(
+              title: clip.title,
+              subtitle: clipSubtitle(clip),
+              thumbnailURL: clip.thumbnailURL,
+              durationText: Self.shortDuration(clip.durationSeconds),
+              isFocused: isFocused,
+              mediaWidth: tileWidth,
+              mediaHeight: tileMediaHeight,
+              focusHorizontalInset: focusHInset,
+              focusVerticalInset: focusVInset,
+              cardCornerRadius: cardCorner,
+              mediaCornerRadius: mediaCorner
+            )
+          }
           .prefersDefaultFocus(defaultFocusID == itemID, in: focusNamespace)
-          .focusEffectDisabled()
-          .onTapGesture { onDemandItem = .clip(slug: clip.slug, title: clip.title) }
-          .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-          .animation(.easeOut(duration: 0.14), value: isFocused)
-          .zIndex(isFocused ? 2 : 0)
         }
       }
     } else if isLoadingContent {
@@ -438,29 +424,26 @@ struct ChannelPageView: View {
       contentRow(title: "Past Broadcasts") {
         ForEach(videos) { vod in
           let itemID = "vod-\(vod.id)"
-          let isFocused = focusedID == itemID
-          MediaContentCard(
-            title: vod.title,
-            subtitle: vodSubtitle(vod),
-            thumbnailURL: vod.thumbnailURL,
-            durationText: Self.longDuration(vod.lengthSeconds),
-            isFocused: isFocused,
-            mediaWidth: tileWidth,
-            mediaHeight: tileMediaHeight,
-            focusHorizontalInset: focusHInset,
-            focusVerticalInset: focusVInset,
-            cardCornerRadius: cardCorner,
-            mediaCornerRadius: mediaCorner
-          )
-          .contentShape(RoundedRectangle(cornerRadius: cardCorner))
-          .focusable(true)
-          .focused($focusedID, equals: itemID)
+          FocusableTile(
+            cornerRadius: cardCorner,
+            focusedScale: AppLayout.focusedCardScale,
+            onSelect: { onDemandItem = .vod(id: vod.id, title: vod.title) }
+          ) { isFocused in
+            MediaContentCard(
+              title: vod.title,
+              subtitle: vodSubtitle(vod),
+              thumbnailURL: vod.thumbnailURL,
+              durationText: Self.longDuration(vod.lengthSeconds),
+              isFocused: isFocused,
+              mediaWidth: tileWidth,
+              mediaHeight: tileMediaHeight,
+              focusHorizontalInset: focusHInset,
+              focusVerticalInset: focusVInset,
+              cardCornerRadius: cardCorner,
+              mediaCornerRadius: mediaCorner
+            )
+          }
           .prefersDefaultFocus(defaultFocusID == itemID, in: focusNamespace)
-          .focusEffectDisabled()
-          .onTapGesture { onDemandItem = .vod(id: vod.id, title: vod.title) }
-          .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-          .animation(.easeOut(duration: 0.14), value: isFocused)
-          .zIndex(isFocused ? 2 : 0)
         }
       }
     } else if isLoadingContent {
@@ -489,30 +472,26 @@ struct ChannelPageView: View {
         ScrollView(.horizontal, showsIndicators: false) {
           LazyHStack(spacing: 22) {
             ForEach(recommendations) { channel in
-              let itemID = "rec-\(channel.id)"
-              let isFocused = focusedID == itemID
-              StreamChannelCard(
-                channel: channel,
-                isFocused: isFocused,
-                layout: .rail(
-                  mediaWidth: tileWidth,
-                  mediaHeight: tileMediaHeight,
-                  focusHorizontalInset: focusHInset,
-                  focusVerticalInset: focusVInset,
-                  cardCornerRadius: cardCorner,
-                  mediaCornerRadius: mediaCorner
-                ),
-                showsGameName: true
-              )
-              .accessibilityAddTraits(.isButton)
-              .contentShape(RoundedRectangle(cornerRadius: cardCorner))
-              .focusable(true)
-              .focused($focusedID, equals: itemID)
-              .focusEffectDisabled()
-              .onTapGesture { onWatchChannel?(channel) }
-              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(.easeOut(duration: 0.14), value: isFocused)
-              .zIndex(isFocused ? 2 : 0)
+              FocusableTile(
+                cornerRadius: cardCorner,
+                focusedScale: AppLayout.focusedCardScale,
+                onSelect: { onWatchChannel?(channel) }
+              ) { isFocused in
+                StreamChannelCard(
+                  channel: channel,
+                  isFocused: isFocused,
+                  layout: .rail(
+                    mediaWidth: tileWidth,
+                    mediaHeight: tileMediaHeight,
+                    focusHorizontalInset: focusHInset,
+                    focusVerticalInset: focusVInset,
+                    cardCornerRadius: cardCorner,
+                    mediaCornerRadius: mediaCorner
+                  ),
+                  showsGameName: true
+                )
+                .accessibilityAddTraits(.isButton)
+              }
             }
           }
           .padding(.horizontal, AppLayout.horizontalPadding)
@@ -628,7 +607,12 @@ struct ChannelPageView: View {
     isLoadingContent = false
 
     if let signals = loadedContent?.signals {
+      // Let the page become interactive before kicking off the heavy multi-seed
+      // recommendation pass, so first focus/render isn't competing with scoring.
+      await Task.yield()
       recommendations = await SimilarChannelsEngine.recommend(using: signals)
+    } else {
+      recommendations = []
     }
     isLoadingRecs = false
   }
@@ -734,5 +718,27 @@ struct ChannelPageView: View {
     }
     if result.hasSuffix("/") { result = String(result.dropLast()) }
     return result
+  }
+}
+
+/// Focusable wrapper that keeps focus state local to the tile via
+/// `@Environment(\.isFocused)` instead of a parent `@FocusState` binding.
+private struct FocusableTile<Content: View>: View {
+  let cornerRadius: CGFloat
+  let focusedScale: CGFloat
+  let onSelect: () -> Void
+  @ViewBuilder let content: (Bool) -> Content
+
+  @Environment(\.isFocused) private var isFocused
+
+  var body: some View {
+    content(isFocused)
+      .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
+      .focusable(true)
+      .focusEffectDisabled()
+      .onTapGesture(perform: onSelect)
+      .scaleEffect(isFocused ? focusedScale : 1)
+      .animation(.easeOut(duration: 0.14), value: isFocused)
+      .zIndex(isFocused ? 2 : 0)
   }
 }

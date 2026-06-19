@@ -37,6 +37,11 @@
 	<string>$(TVOS_DEPLOYMENT_TARGET)</string>
 	<key>TWITCH_CLIENT_ID</key>
 	<string>$(TWITCH_CLIENT_ID)</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>OpenDyslexic-Regular.otf</string>
+		<string>OpenDyslexic-Bold.otf</string>
+	</array>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>3</integer>

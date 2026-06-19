@@ -18,8 +18,15 @@ enum ChatAppearance {
   static let emoteSizeStep: CGFloat = 2
 
   /// Extra spacing applied *within* a wrapped message line.
-  static let lineHeightRange: ClosedRange<CGFloat> = -4...16
+  static let lineHeightRange: ClosedRange<CGFloat> = -8...16
   static let lineHeightStep: CGFloat = 1
+
+  /// Extra spacing inserted *between characters* (tracking). A readability aid —
+  /// looser character spacing is one of the more evidence-backed dyslexia aids.
+  /// Negative values tighten the text for users who prefer denser lines; the
+  /// floor stops short of the point where glyphs collide and become illegible.
+  static let letterSpacingRange: ClosedRange<CGFloat> = -5...12
+  static let letterSpacingStep: CGFloat = 1
 
   /// Vertical gap *between* messages.
   static let messageSpacingRange: ClosedRange<CGFloat> = 0...32
@@ -33,6 +40,7 @@ enum ChatAppearance {
 
   static let defaultTextSize: CGFloat = 26
   static let defaultLineHeight: CGFloat = -1
+  static let defaultLetterSpacing: CGFloat = 0
   static let defaultMessageSpacing: CGFloat = 14
   static let defaultWidth: CGFloat = 460
   static let defaultEmoteAuto = true
@@ -119,14 +127,17 @@ enum ChatAppearancePreset: String, CaseIterable, Identifiable {
   }
 }
 
-/// Selectable typeface for chat text. Maps onto SwiftUI's built-in system font
-/// designs so every option ships with the OS (no bundled font files) and scales
-/// cleanly at any size on tvOS.
+/// Selectable typeface for chat text. Most options map onto SwiftUI's built-in
+/// system font designs (which ship with the OS and scale cleanly at any size on
+/// tvOS); `openDyslexic` is the one exception and resolves to the bundled
+/// OpenDyslexic typeface — a face designed for readers with dyslexia, with
+/// weighted letter bottoms so glyphs are harder to visually flip or rotate.
 enum ChatFontStyle: String, CaseIterable, Identifiable {
   case standard
   case rounded
   case serif
   case monospaced
+  case openDyslexic
 
   var id: String { rawValue }
 
@@ -136,16 +147,53 @@ enum ChatFontStyle: String, CaseIterable, Identifiable {
     case .rounded: return "Rounded"
     case .serif: return "Serif"
     case .monospaced: return "Mono"
+    case .openDyslexic: return "Dyslexic"
     }
   }
 
+  /// The bundled font family name, or `nil` for the system-design options.
+  /// Both the Regular and Bold faces are registered under this family, so a
+  /// `.weight(.bold)` request resolves to the matching face.
+  private var customFontName: String? {
+    switch self {
+    case .openDyslexic: return "OpenDyslexic"
+    default: return nil
+    }
+  }
+
+  /// System font design backing the standard/rounded/serif/mono options.
+  /// `openDyslexic` ships its own face, so this is only a fallback for it.
   var design: Font.Design {
     switch self {
-    case .standard: return .default
+    case .standard, .openDyslexic: return .default
     case .rounded: return .rounded
     case .serif: return .serif
     case .monospaced: return .monospaced
     }
+  }
+
+  /// Visual-size correction so switching typefaces doesn't jump in size.
+  /// OpenDyslexic renders noticeably larger than the system fonts at the same
+  /// point size (large x-height, heavy forms), so it's scaled down to roughly
+  /// match; the system designs are already consistent with each other.
+  var sizeMultiplier: CGFloat {
+    switch self {
+    case .openDyslexic: return 0.82
+    default: return 1
+    }
+  }
+
+  /// Resolve the concrete `Font` for chat text at a given size/weight. Custom
+  /// (bundled) families go through `Font.custom` so they scale like the system
+  /// options; everything else uses the matching system design. The size is
+  /// pre-corrected by `sizeMultiplier` so each typeface lands at a comparable
+  /// visual size.
+  func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    let resolvedSize = size * sizeMultiplier
+    if let customFontName {
+      return Font.custom(customFontName, size: resolvedSize).weight(weight)
+    }
+    return .system(size: resolvedSize, weight: weight, design: design)
   }
 }
 

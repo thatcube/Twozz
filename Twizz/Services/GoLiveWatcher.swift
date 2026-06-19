@@ -67,6 +67,15 @@ final class GoLiveWatcher {
   /// Begin polling on behalf of `auth`. Replaces any existing watch. A no-op
   /// (after teardown) cadence keeps running and simply skips work while the
   /// viewer is signed out, so it resumes automatically after sign-in.
+  ///
+  /// The poll loop is intentionally *always on* while the app is foreground —
+  /// Home, Browse, and during playback — because a go-live toast must be able to
+  /// surface no matter where the viewer is in the app. We deliberately do not
+  /// gate it on `scenePhase`: one Helix `streams/followed` request per minute is
+  /// negligible, and tvOS suspends the app (and this `Task.sleep` loop) on its
+  /// own when it goes to the background, so there's nothing to hand-tune there.
+  /// (Per-channel EventSub `stream.online` would avoid polling entirely but caps
+  /// subscriptions below a large follow list — see the type doc above.)
   func start(using auth: TwitchAuthSession) {
     stop()
     self.auth = auth

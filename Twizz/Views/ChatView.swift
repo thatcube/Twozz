@@ -25,6 +25,14 @@ struct ChatView: View {
   var animatedEmotes: Bool = true
   var fontStyle: ChatFontStyle = ChatAppearance.defaultFontStyle
   var showBadges: Bool = ChatAppearance.defaultShowBadges
+  /// Master on/off for mention highlighting.
+  var highlightEnabled: Bool = true
+  /// Signed-in user's Twitch login (lowercase) and display name, used to detect
+  /// lines that mention the viewer. Both nil when signed out.
+  var viewerLogin: String? = nil
+  var viewerDisplayName: String? = nil
+  /// Extra user-defined highlight keywords (already normalized/lowercased).
+  var highlightKeywords: [String] = []
   var isConnected: Bool = false
   var emoteURLs: [String: URL] = [:]
   var badgeURLs: [String: URL] = [:]
@@ -314,9 +322,88 @@ struct ChatView: View {
       }
     } else if message.isFirstMessage {
       firstMessageHighlight(around: richLine)
+    } else if shouldHighlight(message) {
+      mentionHighlight(around: richLine)
     } else {
       richLine
     }
+  }
+
+  // MARK: - Mention highlight
+
+  /// Discord-style gold/amber accent for lines that mention the viewer — the
+  /// universal "you were mentioned" color, kept distinct from the purple
+  /// subscription/first-message and orange watch-streak treatments.
+  private var mentionAccent: Color {
+    Color(twitchHex: "#FAA61A") ?? .orange
+  }
+
+  /// Whether `message` should get the mention highlight: it names the signed-in
+  /// user (word-boundary match on login or display name, covering bare mentions
+  /// and Twitch replies, which prefix `@you`), it's a threaded reply to the
+  /// viewer, or it contains one of the user's highlight keywords.
+  private func shouldHighlight(_ message: ChatMessage) -> Bool {
+    guard highlightEnabled else { return false }
+
+    if let login = message.replyParentLogin,
+       let viewerLogin, !viewerLogin.isEmpty,
+       login == viewerLogin.lowercased() {
+      return true
+    }
+
+    let haystack = message.text.lowercased()
+
+    for name in [viewerLogin, viewerDisplayName] {
+      guard let name, !name.isEmpty else { continue }
+      if Self.containsWord(name.lowercased(), in: haystack) { return true }
+    }
+
+    for keyword in highlightKeywords where haystack.contains(keyword) {
+      return true
+    }
+
+    return false
+  }
+
+  /// Case-insensitive whole-token match for a username so "sam" doesn't fire on
+  /// "same". Both inputs are expected lowercased. A leading `@` (as in a mention
+  /// or reply prefix) counts as a boundary.
+  private static func containsWord(_ word: String, in text: String) -> Bool {
+    guard !word.isEmpty else { return false }
+    var searchRange = text.startIndex..<text.endIndex
+    while let found = text.range(of: word, range: searchRange) {
+      let beforeOK: Bool = {
+        guard found.lowerBound > text.startIndex else { return true }
+        let prev = text[text.index(before: found.lowerBound)]
+        return !(prev.isLetter || prev.isNumber || prev == "_")
+      }()
+      let afterOK: Bool = {
+        guard found.upperBound < text.endIndex else { return true }
+        let next = text[found.upperBound]
+        return !(next.isLetter || next.isNumber || next == "_")
+      }()
+      if beforeOK && afterOK { return true }
+      searchRange = found.upperBound..<text.endIndex
+    }
+    return false
+  }
+
+  /// Wraps an ordinary chat line in the gold mention treatment: a tinted strip
+  /// that bleeds to the panel edges with a leading accent bar — structurally the
+  /// same affordance as the first-message highlight, just a different accent.
+  private func mentionHighlight<Content: View>(around line: Content) -> some View {
+    let barWidth: CGFloat = 4
+
+    return line
+      .padding(.vertical, verticalPadding)
+      .padding(.horizontal, horizontalPadding)
+      .background(alignment: .leading) {
+        ZStack(alignment: .leading) {
+          mentionAccent.opacity(isSideLayout ? 0.12 : 0.20)
+          mentionAccent.frame(width: barWidth)
+        }
+      }
+      .padding(.horizontal, -horizontalPadding)
   }
 
   // MARK: - Subscription highlight

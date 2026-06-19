@@ -166,6 +166,13 @@ struct PlayerView: View {
   @AppStorage("chatFontStyle") var chatFontStyleRaw = ChatAppearance.defaultFontStyle
     .rawValue
   @AppStorage("chatShowBadges") var chatShowBadges = ChatAppearance.defaultShowBadges
+  /// Global on/off for highlighting chat lines that mention the signed-in user
+  /// (and any user keywords below). On by default.
+  @AppStorage("chatHighlightMentionsEnabled") var chatHighlightMentionsEnabled = true
+  /// User-defined extra highlight keywords (other handles, "giveaway", a game
+  /// name…), stored as a single comma/newline-separated string and parsed into a
+  /// normalized list by `chatHighlightKeywordList`.
+  @AppStorage("chatHighlightKeywords") var chatHighlightKeywords = ""
   @AppStorage("chatLayoutMode") var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
   @AppStorage("chatSyncToStream") var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") var experimentalYouTubeMergeEnabled = false
@@ -246,6 +253,7 @@ struct PlayerView: View {
   @State var chatDraft: String = ""
   @State var chatInputActivationToken: Int = 0
   @State var youtubeInputActivationToken: Int = 0
+  @State var highlightKeywordsActivationToken: Int = 0
   @State var isSendingChat = false
   @State var chatSendError: String?
   /// When chat sync is active, a sent message is held until it appears in the
@@ -630,6 +638,8 @@ struct PlayerView: View {
     case chatAnimatedToggle
     case chatFontOption(Int)
     case chatBadgesToggle
+    case chatHighlightToggle
+    case chatHighlightKeywords
     case chatResetButton
   }
 
@@ -669,6 +679,19 @@ struct PlayerView: View {
 
   var chatMessageSpacing: CGFloat {
     CGFloat(chatMessageSpacingValue)
+  }
+
+  /// Normalized highlight keywords: split on commas/newlines, trimmed,
+  /// lowercased, de-duplicated, empties dropped.
+  var chatHighlightKeywordList: [String] {
+    var seen = Set<String>()
+    var out: [String] = []
+    for piece in chatHighlightKeywords.split(whereSeparator: { $0 == "," || $0 == "\n" }) {
+      let token = piece.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      guard !token.isEmpty, seen.insert(token).inserted else { continue }
+      out.append(token)
+    }
+    return out
   }
 
   /// Resolved emote height: derived from the text size in Auto mode, otherwise
@@ -1880,6 +1903,8 @@ struct PlayerView: View {
       .chatAnimatedToggle,
       .chatFontOption,
       .chatBadgesToggle,
+      .chatHighlightToggle,
+      .chatHighlightKeywords,
       .chatResetButton:
       return true
     default:
@@ -1925,6 +1950,10 @@ struct PlayerView: View {
         animatedEmotes: chatAnimatedEmotes,
         fontStyle: chatFontStyle,
         showBadges: chatShowBadges,
+        highlightEnabled: chatHighlightMentionsEnabled,
+        viewerLogin: auth.userLogin,
+        viewerDisplayName: auth.userDisplayName,
+        highlightKeywords: chatHighlightKeywordList,
         useGlassBackground: isGlass,
         useLighterOverlayBackground: useLighterOverlayBackground,
         autoScroll: !(isChatScrolling || chatSoftPauseRemaining != nil),
@@ -2236,10 +2265,15 @@ struct PlayerView: View {
     }
   }
 
+  /// Placeholder/value shown in the highlight-keywords settings field.
+  var highlightKeywordsDisplayText: String {
+    let trimmed = chatHighlightKeywords.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? "Add keywords (optional)" : trimmed
+  }
+
   /// The effective YouTube merge target shown in the settings input: the manual
   /// entry when present, otherwise the resolved default handle for the channel.
-  var youtubeMergeDisplayText: String {
-    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(
+  var youtubeMergeDisplayText: String {    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(
       in: .whitespacesAndNewlines)
     if !manual.isEmpty { return manual }
     return youtubeMergeDefaultTarget.isEmpty
@@ -2557,6 +2591,11 @@ private struct ChatMessagesColumn: View {
   let animatedEmotes: Bool
   let fontStyle: ChatFontStyle
   let showBadges: Bool
+  /// Highlight (mention) inputs, passed straight through to `ChatView`.
+  var highlightEnabled: Bool = true
+  var viewerLogin: String? = nil
+  var viewerDisplayName: String? = nil
+  var highlightKeywords: [String] = []
   let useGlassBackground: Bool
   let useLighterOverlayBackground: Bool
   let autoScroll: Bool
@@ -2595,6 +2634,10 @@ private struct ChatMessagesColumn: View {
       animatedEmotes: animatedEmotes,
       fontStyle: fontStyle,
       showBadges: showBadges,
+      highlightEnabled: highlightEnabled,
+      viewerLogin: viewerLogin,
+      viewerDisplayName: viewerDisplayName,
+      highlightKeywords: highlightKeywords,
       isConnected: isConnected,
       emoteURLs: emoteURLs,
       badgeURLs: badgeURLs,

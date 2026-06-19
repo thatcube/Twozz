@@ -48,6 +48,11 @@ struct ChatMessage: Identifiable {
     /// Styling for the highlighted notice when `systemMessage` is set. Ignored
     /// for ordinary chat lines.
     var systemNoticeStyle: SystemNoticeStyle = .subscription
+    /// Twitch login of the user this line replies to, from the IRC
+    /// `reply-parent-user-login` tag (threaded replies only). Used as a robust
+    /// secondary signal for "this line mentions me" highlighting, alongside the
+    /// `@DisplayName` prefix Twitch already adds to a reply's visible text.
+    var replyParentLogin: String? = nil
     /// Timestamp when the message was received (for chronological merging).
     let timestamp: Date
     /// Render-ready tokens precomputed at ingest (`ChatService`) so the chat
@@ -117,6 +122,7 @@ extension ChatMessage {
         self.bits = tags["bits"].flatMap { Int($0) } ?? 0
         self.source = .twitch
         self.systemMessage = nil
+        self.replyParentLogin = tags["reply-parent-user-login"].flatMap { $0.isEmpty ? nil : $0.lowercased() }
         self.timestamp = Date()
     }
 

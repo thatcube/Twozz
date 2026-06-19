@@ -230,7 +230,7 @@ struct AudioVisualizerView: View {
   private func core(diameter: CGFloat, amp: Double) -> some View {
     if showAvatar, let avatarURL {
       let avatarSize = diameter * 0.56
-      AsyncImage(url: avatarURL) { image in
+      CachedAsyncImage(url: avatarURL) { image in
         image.resizable().scaledToFill()
       } placeholder: {
         glowCore(diameter: diameter, amp: amp)

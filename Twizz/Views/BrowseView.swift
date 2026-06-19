@@ -132,7 +132,7 @@ struct CategoryStreamsView: View {
           // Header (scrolls with content)
           HStack(spacing: 20) {
             if let url = category.boxArtURL {
-              AsyncImage(url: url) { img in
+              CachedAsyncImage(url: url) { img in
                 img.resizable().scaledToFill()
               } placeholder: {
                 Color.primary.opacity(0.08)

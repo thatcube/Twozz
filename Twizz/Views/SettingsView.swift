@@ -234,7 +234,7 @@ struct SettingsView: View {
     Group {
       if auth.isAuthenticated {
         HStack(spacing: 20) {
-          AsyncImage(url: auth.profileImageURL) { image in
+          CachedAsyncImage(url: auth.profileImageURL) { image in
             image.resizable().scaledToFill()
           } placeholder: {
             Icon(glyph: .userCircle, size: 64)

@@ -1,4 +1,5 @@
 import AVKit
+import GameController
 import Observation
 import SwiftUI
 import UIKit
@@ -209,6 +210,21 @@ struct PlayerView: View {
   /// stays inside the retained window. Also gates the stall watchdog so an
   /// intentional pause is never mistaken for a freeze.
   @State private var isUserPaused = false
+  /// True while the viewer is actively scrubbing the rewind bar (analog trackpad
+  /// glide). Gates the latency monitor's rate-force and the stall watchdog so
+  /// repositioning the playhead is never mistaken for a freeze or fought.
+  @State private var isScrubbing = false
+  /// Live scrub position (seconds on the player timeline) while a trackpad jog is
+  /// in progress. The orb tracks this instantly for buttery feedback; the actual
+  /// `AVPlayerItem.seek` is throttled/coalesced against it.
+  @State private var scrubTargetSeconds: Double?
+  /// Throttle clock for the coalesced scrub seeks issued during a jog.
+  @State private var lastScrubSeekAt = Date.distantPast
+  /// Debounced "settle" that commits a final frame-accurate seek and clears the
+  /// intended position once rapid stepping/jogging stops.
+  @State private var scrubCommitTask: Task<Void, Never>?
+  /// Drives the analog (precision) trackpad scrubbing while the bar is focused.
+  @State private var scrubInput = ScrubInputCoordinator()
 
   private var wallClockLatencySeconds: Double? {
     get { mon.wallClockLatencySeconds }
@@ -371,6 +387,10 @@ struct PlayerView: View {
   private let rewindWindowSeconds: Double = 1800
   /// Seconds the rewind step buttons jump per press.
   private let rewindStepSeconds: Double = 10
+  /// Maximum precision-scrub rate (timeline seconds per real second) at full
+  /// trackpad deflection. The response curve is shaped so small touches near the
+  /// center scrub slowly (frame-accurate) and a firm glide ramps up to this.
+  private let scrubMaxRate: Double = 75
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
@@ -681,8 +701,8 @@ struct PlayerView: View {
       notification in
       guard let stalledItem = notification.object as? AVPlayerItem else { return }
       guard stalledItem == player.currentItem else { return }
-      // Ignore stalls while intentionally paused for DVR rewind.
-      guard !isUserPaused else { return }
+      // Ignore stalls while intentionally paused or scrubbing for DVR rewind.
+      guard !isUserPaused, !isScrubbing else { return }
       let now = Date()
       guard now.timeIntervalSince(lastStallNotificationAt) >= stallNotificationDebounceSeconds
       else { return }
@@ -698,6 +718,7 @@ struct PlayerView: View {
       sleepTimerTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
+      stopScrubInput()
       audioLevelMonitor.stop()
       player.pause()
       chat.disconnect()
@@ -744,6 +765,14 @@ struct PlayerView: View {
       }
     }
     .onChange(of: focus) { oldFocus, newFocus in
+      // Start/stop precision trackpad scrubbing as the rewind bar gains/loses
+      // focus. The analog jog (GameController + display link) only runs while the
+      // bar is focused so it never competes with normal control navigation.
+      if newFocus == .rewindScrubber, oldFocus != .rewindScrubber {
+        startScrubInput()
+      } else if oldFocus == .rewindScrubber, newFocus != .rewindScrubber {
+        stopScrubInput()
+      }
       // Track when the composer becomes focused so an up-swipe that rides in on
       // a diagonal move from the chat-toggle button can't accidentally pause.
       if newFocus == .chatInput, oldFocus != .chatInput {
@@ -1270,14 +1299,28 @@ struct PlayerView: View {
     .focusSection()
 
       if streamRewindEnabled {
-        RewindTransportBar(
-          readout: rewindReadout,
-          focus: $focus,
-          onScrubBack: { rewindStep(-rewindStepSeconds) },
-          onScrubForward: { rewindStep(rewindStepSeconds) },
-          onTogglePause: { toggleRewindPlayPause() },
-          onLeave: { focus = .quality }
-        )
+        Button {
+          toggleRewindPlayPause()
+        } label: {
+          RewindScrubBar(readout: rewindReadout, isFocused: focus == .rewindScrubber)
+        }
+        .buttonStyle(ScrubBarButtonStyle())
+        .focused($focus, equals: .rewindScrubber)
+        .onMoveCommand { direction in
+          // This Button traps directional focus (same proven pattern as the top
+          // control cluster): every direction is handled here, so a swipe/press
+          // can never fling focus out to the chat pane while scrubbing.
+          switch direction {
+          case .up:
+            focus = .quality
+          case .left:
+            if !isScrubbing { rewindStep(-rewindStepSeconds) }
+          case .right:
+            if !isScrubbing { rewindStep(rewindStepSeconds) }
+          default:
+            break
+          }
+        }
         .focusSection()
         .frame(maxWidth: .infinity)
       }
@@ -3674,7 +3717,8 @@ struct PlayerView: View {
     }
     // An intentional viewer pause (DVR rewind) holds the playhead in place; that
     // is not a stall, so reset the watchdog counters and bail before they trip.
-    guard !isUserPaused else {
+    // An in-progress scrub holds/repositions the playhead the same way.
+    guard !isUserPaused, !isScrubbing else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil
       diagWasStalled = false
@@ -3793,10 +3837,14 @@ struct PlayerView: View {
         isPaused: isUserPaused, isAtLiveEdge: true)
       return
     }
+    // While scrubbing/stepping the orb tracks the intended position instantly so
+    // it feels buttery even though the real seek lags slightly behind.
+    let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
     let span = max(window.end - window.start, 0.001)
-    let fraction = (window.now - window.start) / span
-    let behind = max(window.end - window.now, 0)
-    let atLive = !isUserPaused && behind <= targetLiveEdgeSeconds + 1.5
+    let fraction = (position - window.start) / span
+    let behind = max(window.end - position, 0)
+    let atLive =
+      !isUserPaused && scrubTargetSeconds == nil && behind <= targetLiveEdgeSeconds + 1.5
     rewindReadout.update(
       positionFraction: fraction,
       behindLiveSeconds: behind,
@@ -3805,15 +3853,19 @@ struct PlayerView: View {
       isAtLiveEdge: atLive)
   }
 
-  /// Seeks relative to the current playhead. Forward seeks clamp to a safe live
-  /// point (the proxy inflates the seekable edge with the promoted prefetch tail,
-  /// and seeking onto that inflated edge can freeze), so swiping right repeatedly
-  /// lands cleanly back at live.
+  /// Steps the playhead by `delta` seconds with instant orb feedback and a
+  /// coalesced, tolerant seek so the viewer can spam left/right fluidly without
+  /// each press triggering a full rebuffer hiccup.
   private func rewindStep(_ delta: Double) {
     guard let window = currentSeekWindow() else { return }
     let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
-    let target = min(max(window.now + delta, window.start), liveCap)
-    seekRewind(to: target)
+    let base = scrubTargetSeconds ?? window.now
+    let target = min(max(base + delta, window.start), liveCap)
+    scrubTargetSeconds = target
+    updateRewindReadout()
+    throttledScrubSeek(to: target)
+    scheduleScrubCommit()
+    scheduleHide()
   }
 
   /// Toggles between pausing in place (DVR window keeps growing) and resuming.
@@ -3829,16 +3881,100 @@ struct PlayerView: View {
     scheduleHide()
   }
 
-  /// Seeks to an absolute position on the player timeline (default tolerance so
-  /// the seek lands on a real segment boundary inside the retained window).
-  private func seekRewind(to seconds: Double) {
+  // MARK: - Precision (analog) scrubbing
+
+  /// Begins listening to the Siri Remote trackpad as an analog jog wheel while the
+  /// rewind bar is focused. Each display frame the coordinator reports a shaped
+  /// horizontal velocity; we translate it into a smooth, frame-accurate scrub.
+  private func startScrubInput() {
+    guard streamRewindEnabled else { return }
+    scrubInput.maxRate = scrubMaxRate
+    scrubInput.onJogChanged = { [self] active in
+      handleJogChanged(active)
+    }
+    scrubInput.onTick = { [self] deltaSeconds in
+      handleScrubTick(deltaSeconds)
+    }
+    scrubInput.start()
+  }
+
+  private func stopScrubInput() {
+    scrubInput.stop()
+    scrubInput.onJogChanged = nil
+    scrubInput.onTick = nil
+    if isScrubbing { handleJogChanged(false) }
+  }
+
+  /// Called when the finger crosses the trackpad dead zone (jog start) or lifts
+  /// (jog end). Pausing during an active jog gives clean, judder-free scrubbing.
+  private func handleJogChanged(_ active: Bool) {
+    if active {
+      guard let window = currentSeekWindow() else { return }
+      isScrubbing = true
+      scrubCommitTask?.cancel()
+      hideTask?.cancel()
+      if scrubTargetSeconds == nil { scrubTargetSeconds = window.now }
+      if !isUserPaused { player.pause() }
+    } else {
+      isScrubbing = false
+      if let target = scrubTargetSeconds {
+        commitScrubSeek(to: target)
+      } else if !isUserPaused {
+        player.play()
+      }
+      scheduleHide()
+    }
+  }
+
+  /// One analog jog frame: advance the intended position by the shaped delta,
+  /// move the orb instantly, and issue a throttled tolerant seek.
+  private func handleScrubTick(_ deltaSeconds: Double) {
+    guard let window = currentSeekWindow() else { return }
+    let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
+    let base = scrubTargetSeconds ?? window.now
+    let target = min(max(base + deltaSeconds, window.start), liveCap)
+    scrubTargetSeconds = target
+    updateRewindReadout()
+    throttledScrubSeek(to: target)
+  }
+
+  /// Coalesced, tolerant seek used during continuous scrubbing/stepping. Cheap and
+  /// responsive (loose tolerance) so it can fire many times a second without the
+  /// rebuffer hiccup a frame-accurate seek would cause.
+  private func throttledScrubSeek(to seconds: Double) {
+    guard let item = player.currentItem else { return }
+    let now = Date()
+    guard now.timeIntervalSince(lastScrubSeekAt) >= 0.07 else { return }
+    lastScrubSeekAt = now
+    let time = CMTime(seconds: seconds, preferredTimescale: 600)
+    let tolerance = CMTime(seconds: 0.4, preferredTimescale: 600)
+    item.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+  }
+
+  /// Debounced final settle for rapid left/right stepping: once the presses stop,
+  /// land a frame-accurate seek and release the intended-position override.
+  private func scheduleScrubCommit() {
+    scrubCommitTask?.cancel()
+    scrubCommitTask = Task { [self] in
+      try? await Task.sleep(for: .milliseconds(280))
+      guard !Task.isCancelled else { return }
+      await MainActor.run {
+        guard !isScrubbing, let target = scrubTargetSeconds else { return }
+        commitScrubSeek(to: target)
+      }
+    }
+  }
+
+  /// Lands a frame-accurate seek at `seconds`, clears the intended-position
+  /// override, and resumes playback (unless the viewer is intentionally paused).
+  private func commitScrubSeek(to seconds: Double) {
+    scrubCommitTask?.cancel()
     let time = CMTime(seconds: seconds, preferredTimescale: 600)
     player.currentItem?.seek(to: time, completionHandler: { [self] _ in
+      scrubTargetSeconds = nil
       if !isUserPaused { player.play() }
       updateRewindReadout()
     })
-    updateRewindReadout()
-    scheduleHide()
   }
 
   // MARK: - Offline empty state
@@ -4029,6 +4165,10 @@ struct PlayerView: View {
     liveEdgeLatency: Double?
   ) {
     guard isPlaybackActive else { return }
+    // Never fight an intentional pause or an in-progress scrub: this monitor runs
+    // every tick and force-resetting the rate here would silently resume playback
+    // the instant the viewer pauses or starts scrubbing the rewind bar.
+    guard !isUserPaused, !isScrubbing else { return }
     // Stability-first policy: do not perform any automatic seeks or rate changes
     // during playback. Those interventions can look like user-visible jumps.
     _ = item
@@ -4657,19 +4797,16 @@ private final class RewindReadout {
   }
 }
 
-/// Single focusable DVR scrub bar shown along the bottom of the live player,
-/// modeled on YouTube's live transport bar. The native `AVPlayerViewController`
-/// controls are disabled (the player surface is passive), so the whole bar is one
-/// focus target: left/right (Siri Remote buttons or trackpad swipes) step ±10s,
-/// clicking it (or the remote play/pause button) toggles pause, and swiping right
-/// repeatedly returns to the live edge.
-private struct RewindTransportBar: View {
+/// Single DVR scrub bar shown along the bottom of the live player, modeled on
+/// YouTube's live transport bar. It is the label of a focus-trapping `Button`
+/// (the player surface is passive), so left/right step ±10s, the trackpad scrubs
+/// with analog precision, clicking it (or the remote play/pause button) toggles
+/// pause, and scrubbing/swiping right returns to the live edge. The container is a
+/// subtle, fixed Liquid Glass pill; focus emphasis lives on the seek orb, which
+/// grows and glows — not on the whole bar.
+private struct RewindScrubBar: View {
   @Bindable var readout: RewindReadout
-  @FocusState.Binding var focus: PlayerView.Focusable?
-  let onScrubBack: () -> Void
-  let onScrubForward: () -> Void
-  let onTogglePause: () -> Void
-  let onLeave: () -> Void
+  let isFocused: Bool
 
   private func behindLabel() -> String {
     if readout.isAtLiveEdge { return "LIVE" }
@@ -4680,46 +4817,46 @@ private struct RewindTransportBar: View {
   }
 
   var body: some View {
-    let isFocused = focus == .rewindScrubber
-    let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-    let trackHeight: CGFloat = isFocused ? 8 : 5
-    let handleHeight: CGFloat = isFocused ? 34 : 22
+    let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+    let trackHeight: CGFloat = 6
+    let orbSize: CGFloat = isFocused ? 30 : 16
     let fillColor = readout.isAtLiveEdge ? Color.red : Color.white
 
-    return HStack(spacing: 16) {
+    return HStack(spacing: 18) {
       GeometryReader { geo in
         let width = geo.size.width
         let x = max(0, min(width, width * readout.positionFraction))
         ZStack(alignment: .leading) {
           // Full track (retained window).
           Capsule()
-            .fill(.white.opacity(0.22))
+            .fill(.white.opacity(0.20))
             .frame(height: trackHeight)
           // Played / behind-to-live portion.
           Capsule()
             .fill(fillColor)
             .frame(width: x, height: trackHeight)
-          // Vertical playhead indicator that slides as you scrub.
-          RoundedRectangle(cornerRadius: 3, style: .continuous)
-            .fill(.white)
-            .frame(width: 6, height: handleHeight)
-            .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
-            .offset(x: x - 3)
-          // Pause glyph rides the playhead while paused.
-          if readout.isPaused {
-            Image(systemName: "pause.fill")
-              .font(.caption2)
-              .foregroundStyle(.black)
-              .frame(width: 18, height: 18)
-              .background(Circle().fill(.white))
-              .offset(x: x - 9)
+          // Seek orb — the focus target. Grows and glows when focused.
+          ZStack {
+            Circle()
+              .fill(.white)
+              .frame(width: orbSize, height: orbSize)
+              .shadow(
+                color: .white.opacity(isFocused ? 0.7 : 0.0),
+                radius: isFocused ? 10 : 0)
+              .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
+            if readout.isPaused, isFocused {
+              Image(systemName: "pause.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.black)
+            }
           }
+          .frame(width: orbSize, height: orbSize)
+          .offset(x: x - orbSize / 2)
+          .animation(.easeOut(duration: 0.14), value: isFocused)
         }
-        .frame(height: handleHeight)
         .frame(maxHeight: .infinity, alignment: .center)
       }
-      .frame(height: 40)
-      .animation(.easeInOut(duration: 0.15), value: isFocused)
+      .frame(height: 36)
 
       HStack(spacing: 6) {
         if readout.isAtLiveEdge {
@@ -4733,27 +4870,117 @@ private struct RewindTransportBar: View {
       }
       .frame(minWidth: 72, alignment: .trailing)
     }
-    .padding(.horizontal, 26)
+    .padding(.horizontal, 28)
     .padding(.vertical, 16)
-    .background(.ultraThinMaterial, in: shape)
-    .overlay(
-      shape.strokeBorder(
-        isFocused ? .white.opacity(0.85) : .white.opacity(0.12),
-        lineWidth: isFocused ? 2 : 1)
-    )
-    .clipShape(shape)
-    .animation(.easeInOut(duration: 0.15), value: isFocused)
-    .focusable(true)
-    .focused($focus, equals: .rewindScrubber)
-    .onMoveCommand { dir in
-      switch dir {
-      case .left: onScrubBack()
-      case .right: onScrubForward()
-      case .up: onLeave()
-      default: break
-      }
+    .modifier(ScrubBarGlassBackground(shape: shape, isFocused: isFocused))
+  }
+}
+
+/// Liquid Glass backing for the scrub bar pill. Stays the *same* subtle glass at
+/// rest and focused (a faint white-tint lift on focus), mirroring the chat pane
+/// glass, so the focus signal reads on the orb rather than the container. Falls
+/// back to `.ultraThinMaterial` on systems older than tvOS 26.
+private struct ScrubBarGlassBackground: ViewModifier {
+  let shape: RoundedRectangle
+  let isFocused: Bool
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(tvOS 26.0, *) {
+      content
+        .glassEffect(isFocused ? .regular.tint(.white.opacity(0.10)) : .regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.22 : 0.10), lineWidth: 1))
+    } else {
+      content
+        .background(.ultraThinMaterial, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.22 : 0.10), lineWidth: 1))
+        .clipShape(shape)
     }
-    .onTapGesture { onTogglePause() }
+  }
+}
+
+/// Passthrough button style for the scrub bar: the bar provides its own focus
+/// emphasis (the orb), so we suppress tvOS's default button chrome (the lift,
+/// scale and pressed dimming) that would otherwise fight the custom look.
+private struct ScrubBarButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+  }
+}
+
+/// Reads the Siri Remote trackpad as an analog jog wheel for precision scrubbing.
+/// A plain (non-`@Observable`) reference type held in `@State` so its per-frame
+/// work never invalidates `PlayerView`; it only calls back out through closures.
+///
+/// The Siri Remote surfaces as a `GCMicroGamepad`. Setting
+/// `reportsAbsoluteDpadValues = true` makes `dpad.xAxis` report the finger's
+/// absolute horizontal position in [-1, 1], returning to 0 on lift — exactly the
+/// continuous signal SwiftUI's discrete `onMoveCommand` can't provide.
+final class ScrubInputCoordinator {
+  /// Timeline-seconds-per-real-second at full deflection, set by the view.
+  var maxRate: Double = 75
+  /// Per-frame shaped time delta (seconds) to apply while jogging.
+  var onTick: ((Double) -> Void)?
+  /// Fires when the finger crosses the dead zone (jog start) or lifts (jog end).
+  var onJogChanged: ((Bool) -> Void)?
+
+  private var displayLink: CADisplayLink?
+  private var connectObserver: NSObjectProtocol?
+  private let deadZone = 0.12
+  private var isJogging = false
+
+  func start() {
+    guard displayLink == nil else { return }
+    configureControllers()
+    connectObserver = NotificationCenter.default.addObserver(
+      forName: .GCControllerDidConnect, object: nil, queue: .main
+    ) { [weak self] _ in self?.configureControllers() }
+    let link = CADisplayLink(target: self, selector: #selector(handleTick))
+    link.add(to: .main, forMode: .common)
+    displayLink = link
+  }
+
+  func stop() {
+    displayLink?.invalidate()
+    displayLink = nil
+    if let connectObserver {
+      NotificationCenter.default.removeObserver(connectObserver)
+    }
+    connectObserver = nil
+    if isJogging {
+      isJogging = false
+      onJogChanged?(false)
+    }
+  }
+
+  private func configureControllers() {
+    for controller in GCController.controllers() {
+      controller.microGamepad?.reportsAbsoluteDpadValues = true
+    }
+    GCController.current?.microGamepad?.reportsAbsoluteDpadValues = true
+  }
+
+  private func currentX() -> Double {
+    let pad = GCController.current?.microGamepad
+      ?? GCController.controllers().first(where: { $0.microGamepad != nil })?.microGamepad
+    return Double(pad?.dpad.xAxis.value ?? 0)
+  }
+
+  @objc private func handleTick(_ link: CADisplayLink) {
+    let x = currentX()
+    let magnitude = abs(x)
+    let jogging = magnitude > deadZone
+    if jogging != isJogging {
+      isJogging = jogging
+      onJogChanged?(jogging)
+    }
+    guard jogging else { return }
+    // Remove the dead zone then square the normalized magnitude so small touches
+    // near the center scrub slowly (frame-accurate) and a firm glide ramps up.
+    let normalized = (magnitude - deadZone) / (1 - deadZone)
+    let shaped = normalized * normalized * (x < 0 ? -1 : 1)
+    let frameDuration = link.targetTimestamp - link.timestamp
+    onTick?(shaped * maxRate * frameDuration)
   }
 }
 

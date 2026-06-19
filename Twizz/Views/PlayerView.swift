@@ -763,14 +763,10 @@ struct PlayerView: View {
           .zIndex(12)
       }
 
-      // Passive heads-up for live polls / predictions / hype trains / goals.
-      // Shown only while the transport controls are hidden (i.e. during relaxed
-      // viewing), so it never competes with the player UI. Read-only.
-      if let moment = hermes.currentMoment, !showControls, !isSleeping {
-        interactiveMomentBanner(moment)
-          .transition(.move(edge: .top).combined(with: .opacity))
-          .zIndex(9)
-      }
+      // Live polls / predictions / hype trains / goals are surfaced docked above
+      // the chat list (see `chatPane`) so they share the chat's width and glass
+      // treatment and only appear when chat is open — matching how Twitch shows
+      // them beside the stream. Read-only.
 
       if isSleeping {
         sleepingOverlay
@@ -2115,6 +2111,15 @@ struct PlayerView: View {
     let isGlass = chatLayoutMode == .glass
     let useLighterOverlayBackground = chatLayoutMode == .overlay
     return VStack(spacing: 0) {
+      // Live interactive moments (polls / predictions / hype trains / goals)
+      // dock above the chat list so they share its width + glass treatment and
+      // push the messages down when they appear. Only visible while chat is open
+      // (this whole pane is). Passive + non-interactive: never takes focus.
+      if let moment = hermes.currentMoment, !isSleeping {
+        dockedInteractiveMoment(moment, glass: isGlass)
+          .transition(.move(edge: .top).combined(with: .opacity))
+      }
+
       // ChatView is wrapped so the live `chat.messages` read happens inside the
       // wrapper's body, not PlayerView's. Otherwise every incoming chat message
       // (several per second on busy channels) re-executes the whole PlayerView

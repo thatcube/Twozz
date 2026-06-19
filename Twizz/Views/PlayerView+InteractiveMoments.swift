@@ -5,23 +5,26 @@ import SwiftUI
 // couch viewers don't miss them. Non-interactive by design: Twitch exposes no
 // viewer-side API to vote, and these never take focus or steal input.
 extension PlayerView {
+  /// Docked above the chat list (see `chatPane`): surfaces the current live
+  /// interactive moment sharing the chat's width and glass treatment. Passive
+  /// and non-interactive — Twitch exposes no viewer-side API to vote, and this
+  /// never takes focus or steals input.
   @ViewBuilder
-  func interactiveMomentBanner(_ moment: InteractiveMoment) -> some View {
-    VStack {
-      Group {
-        switch moment {
-        case .poll(let poll): pollBanner(poll)
-        case .prediction(let prediction): predictionBanner(prediction)
-        case .hypeTrain(let train): hypeTrainBanner(train)
-        case .goal(let goal): goalBanner(goal)
-        }
+  func dockedInteractiveMoment(_ moment: InteractiveMoment, glass: Bool) -> some View {
+    Group {
+      switch moment {
+      case .poll(let poll): pollBanner(poll)
+      case .prediction(let prediction): predictionBanner(prediction)
+      case .hypeTrain(let train): hypeTrainBanner(train)
+      case .goal(let goal): goalBanner(goal)
       }
-      .frame(maxWidth: 560)
-      .padding(.top, 60)
-      Spacer()
     }
+    // Inset a touch in glass mode so the card clears the pane's rounded corners;
+    // flush to the chat width otherwise.
+    .padding(.horizontal, glass ? 10 : 12)
+    .padding(.top, glass ? 10 : 12)
+    .padding(.bottom, 10)
     .allowsHitTesting(false)
-    .ignoresSafeArea()
   }
 
   // MARK: - Poll
@@ -124,18 +127,18 @@ extension PlayerView {
     title: String,
     @ViewBuilder content: () -> Content
   ) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack(spacing: 10) {
-        Icon(glyph: glyph, size: 26)
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        Icon(glyph: glyph, size: 22)
           .foregroundStyle(tint)
         Text(kicker.uppercased())
-          .font(.caption).bold()
-          .tracking(1.2)
+          .font(.caption2).bold()
+          .tracking(1.1)
           .foregroundStyle(tint)
         Spacer(minLength: 0)
       }
       Text(title)
-        .font(.title3).bold()
+        .font(.headline)
         .foregroundStyle(.white)
         .lineLimit(2)
         .multilineTextAlignment(.leading)
@@ -143,14 +146,10 @@ extension PlayerView {
         content()
       }
     }
-    .padding(.horizontal, 24)
-    .padding(.vertical, 20)
+    .padding(.horizontal, 20)
+    .padding(.vertical, 16)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 22, style: .continuous)
-        .strokeBorder(tint.opacity(0.35), lineWidth: 1))
-    .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+    .modifier(MomentDockSurface(tint: tint))
   }
 
   // MARK: - Formatting helpers
@@ -275,6 +274,35 @@ private struct MomentBar: View {
           .font(.caption2)
           .foregroundStyle(.white.opacity(0.6))
       }
+    }
+  }
+}
+
+/// Gives a docked interactive-moment card the same dark Liquid Glass surface as
+/// the chat pane and settings panel (`.glassEffect(.regular)` over a
+/// `Color.black.opacity(0.22)` scrim, with a subtle white hairline), plus a thin
+/// tinted accent border so each moment type keeps its color identity.
+private struct MomentDockSurface: ViewModifier {
+  let tint: Color
+
+  private var shape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: 22, style: .continuous)
+  }
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(tvOS 26.0, *) {
+      content
+        .background(Color.black.opacity(0.22), in: shape)
+        .glassEffect(.regular, in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 1))
+        .overlay(shape.strokeBorder(tint.opacity(0.35), lineWidth: 1))
+    } else {
+      content
+        .background(.ultraThinMaterial, in: shape)
+        .background(Color.black.opacity(0.22), in: shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 1))
+        .overlay(shape.strokeBorder(tint.opacity(0.35), lineWidth: 1))
     }
   }
 }

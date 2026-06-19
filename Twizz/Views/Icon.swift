@@ -24,6 +24,7 @@ enum Glyph: String {
   case heartFilled = "heart-filled"
   case userCircle = "user-circle"
   case userPlus = "user-plus"
+  case users
   case cards
   case clock
   case send

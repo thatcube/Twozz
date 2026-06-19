@@ -101,8 +101,10 @@ enum InteractiveMoment: Equatable {
 
 // MARK: - Service
 
-/// Passively surfaces live polls, predictions, hype trains and creator goals for
-/// the channel being watched, so couch viewers don't miss interactive moments.
+/// Passively surfaces live polls, predictions, hype trains, creator goals and
+/// the live viewer count for the channel being watched, so couch viewers don't
+/// miss interactive moments and can see how many people are watching alongside
+/// them.
 ///
 /// Transport is Twitch's private "Hermes" WebSocket
 /// (`wss://hermes.twitch.tv/v1`) — the same undocumented surface
@@ -118,6 +120,12 @@ enum InteractiveMoment: Equatable {
 final class HermesEventService {
   /// The single moment to display, chosen by priority. Nil when nothing is live.
   private(set) var currentMoment: InteractiveMoment?
+
+  /// Live viewer count for the watched channel, pushed by Twitch's
+  /// `video-playback-by-id` topic (~every 20-30s). Nil until the first update
+  /// arrives (or after `stop()`); the player seeds an initial value from channel
+  /// metadata so a number shows immediately on open.
+  private(set) var viewerCount: Int?
 
   // Per-kind displayable state (drives `currentMoment` via `recompute()`).
   private var poll: LivePoll?
@@ -194,7 +202,16 @@ final class HermesEventService {
     prediction = nil
     hypeTrain = nil
     goal = nil
+    viewerCount = nil
     currentMoment = nil
+  }
+
+  /// Seed an initial viewer count from channel metadata so the player shows a
+  /// number immediately on open. Ignored once a live pubsub `viewcount` update
+  /// has arrived, so the authoritative live value is never overwritten.
+  func seedViewerCount(_ count: Int?) {
+    guard let count, viewerCount == nil else { return }
+    viewerCount = count
   }
 
   // MARK: - Receive loop
@@ -259,6 +276,7 @@ final class HermesEventService {
     "predictions-channel-v1.%@",
     "hype-train-events-v2.%@",
     "creator-goals-events-v1.%@",
+    "video-playback-by-id.%@",
   ]
 
   private func subscribeIfReady() {
@@ -286,6 +304,12 @@ final class HermesEventService {
   // MARK: - Payload routing
 
   private func route(_ payload: [String: Any]) {
+    // `video-playback-by-id` pushes top-level typed messages (viewcount,
+    // stream-up/down, commercial); we only surface the live viewer count.
+    if let type = payload["type"] as? String, type == "viewcount" {
+      applyViewCount(payload)
+      return
+    }
     let data = payload["data"] as? [String: Any]
     if let pollDict = data?["poll"] as? [String: Any] {
       applyPoll(pollDict)
@@ -298,6 +322,13 @@ final class HermesEventService {
     } else if let type = payload["type"] as? String, type.contains("hype-train") {
       applyHypeTrain(payload)
     }
+  }
+
+  // MARK: Viewer count
+
+  private func applyViewCount(_ payload: [String: Any]) {
+    guard let viewers = Self.intValue(payload["viewers"]) else { return }
+    viewerCount = viewers
   }
 
   // MARK: Poll

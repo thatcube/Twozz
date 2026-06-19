@@ -1334,6 +1334,26 @@ struct PlayerView: View {
     }
   }
 
+  /// Twitch-style live viewer count shown under the stream title: a red people
+  /// glyph plus the current count. Live-only; the number animates as updates
+  /// arrive (~every 20-30s) via `.numericText()` content transitions.
+  @ViewBuilder
+  func liveViewerBadge(_ count: Int) -> some View {
+    HStack(spacing: 6) {
+      Icon(glyph: .users, size: 18)
+        .foregroundStyle(.red)
+      Text(count.formatted(.number))
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.white)
+        .monospacedDigit()
+        .contentTransition(.numericText())
+    }
+    .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
+    .transition(.opacity)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(count.formatted(.number)) watching")
+  }
+
   var bottomOverlay: some View {
     VStack(spacing: 18) {
       HStack(alignment: .center, spacing: 24) {
@@ -1385,18 +1405,27 @@ struct PlayerView: View {
           }
         }
 
-        Text(streamTitle.isEmpty ? channelDisplayName : streamTitle)
-          .font(.headline)
-          .foregroundStyle(.white)
-          .lineLimit(2)
-          .minimumScaleFactor(0.5)
-          .truncationMode(.tail)
-          .fixedSize(horizontal: false, vertical: true)
-          .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
-          // Cap the title to the buttons' height so a tall title centers against
-          // the buttons instead of growing the bottom-pinned row and pushing the
-          // buttons upward off their fixed position.
-          .frame(maxWidth: .infinity, maxHeight: controlButtonsHeight > 0 ? controlButtonsHeight : nil, alignment: .leading)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(streamTitle.isEmpty ? channelDisplayName : streamTitle)
+            .font(.headline)
+            .foregroundStyle(.white)
+            .lineLimit(2)
+            .minimumScaleFactor(0.5)
+            .truncationMode(.tail)
+            .fixedSize(horizontal: false, vertical: true)
+            .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
+
+          // Live-only viewer count (VODs have no live audience). Seeded from
+          // channel metadata on open, then driven live by Hermes pubsub.
+          if !isVOD, let viewers = hermes.viewerCount {
+            liveViewerBadge(viewers)
+          }
+        }
+        // Cap the block to the buttons' height so a tall title centers against
+        // the buttons instead of growing the bottom-pinned row and pushing the
+        // buttons upward off their fixed position.
+        .frame(maxWidth: .infinity, maxHeight: controlButtonsHeight > 0 ? controlButtonsHeight : nil, alignment: .leading)
+        .animation(.easeInOut(duration: 0.25), value: hermes.viewerCount)
       }
 
       Spacer(minLength: 18)

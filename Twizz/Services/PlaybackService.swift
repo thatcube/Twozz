@@ -43,6 +43,10 @@ struct ChannelMetadata {
     let displayName: String
     let title: String
     let profileImageURL: URL?
+    /// Current live viewer count, when the channel is live. `nil` for offline
+    /// channels. Used only to seed the player's count instantly on open; live
+    /// updates afterwards come from Hermes pubsub.
+    let viewersCount: Int?
 }
 
 /// Authoritative live state for a channel, used to decide whether to surface the
@@ -138,7 +142,7 @@ struct PlaybackService {
         var req = TwitchAPIClient.graphQLRequest(
             clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
 
-        let query = "query ChannelMetadata($login: String!) { user(login: $login) { displayName profileImageURL(width: 70) stream { title } } }"
+        let query = "query ChannelMetadata($login: String!) { user(login: $login) { displayName profileImageURL(width: 70) stream { title viewersCount } } }"
         let body: [String: Any] = [
             "query": query,
             "variables": ["login": channel.lowercased()],
@@ -155,13 +159,15 @@ struct PlaybackService {
         let displayName = (userObj["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let streamObj = userObj["stream"] as? [String: Any]
         let title = (streamObj?["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let viewersCount = (streamObj?["viewersCount"] as? NSNumber)?.intValue
         let imageURLString = userObj["profileImageURL"] as? String
         let profileImageURL = imageURLString.flatMap(URL.init(string:))
 
         return ChannelMetadata(
             displayName: (displayName?.isEmpty == false ? displayName! : channel),
             title: title,
-            profileImageURL: profileImageURL
+            profileImageURL: profileImageURL,
+            viewersCount: viewersCount
         )
     }
 

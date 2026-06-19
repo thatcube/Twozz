@@ -718,7 +718,12 @@ extension PlayerView {
     channelAvatarURL = metadata.profileImageURL
     // VOD mode keeps the broadcast's own title; only the live player adopts the
     // channel's current stream title here.
-    if !isVOD { streamTitle = metadata.title }
+    if !isVOD {
+      streamTitle = metadata.title
+      // Seed the live viewer badge so a number shows immediately; Hermes pubsub
+      // takes over with live updates and ignores this seed once it arrives.
+      hermes.seedViewerCount(metadata.viewersCount)
+    }
   }
 
   func setIdleTimer(disabled: Bool) {

@@ -170,9 +170,17 @@ extension PlayerView {
     // The proxy is attached when EITHER low-latency promotion OR Stream Rewind
     // (DVR retention) is on. Each behavior is independent: promotion pulls the
     // live edge in, retention grows the seekable window for rewind.
-    let useProxy = lowLatencyProxyEnabled || streamRewindEnabled
+    //
+    // The stream-stability watchdog can veto promotion at runtime: on a
+    // chronically-stalling stream the prefetch promotion is the destabilizer
+    // (it shoves the playhead at a live edge the source can't sustain), so while
+    // `isStreamUnstable` we drop promotion and — when Rewind isn't holding the
+    // proxy on for DVR — detach the proxy entirely and play the plain Twitch
+    // playlist, exactly as a manual "LL proxy off" would.
+    let promotePrefetch = lowLatencyProxyEnabled && !isStreamUnstable
+    let useProxy = promotePrefetch || streamRewindEnabled
     lowLatencyProxy.configure(
-      promotePrefetch: lowLatencyProxyEnabled,
+      promotePrefetch: promotePrefetch,
       retainHistory: streamRewindEnabled,
       windowSeconds: rewindWindowSeconds
     )
@@ -526,8 +534,6 @@ extension PlayerView {
         liveResyncAttempts = 0
       }
     }
-
-    clearStreamStabilityIfRecovered()
 
     let isHardStallSignal =
       player.timeControlStatus == .waitingToPlayAtSpecifiedRate

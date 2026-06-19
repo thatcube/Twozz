@@ -73,17 +73,32 @@ extension PlayerView {
     }
   }
 
-  /// Switch into deep-buffer stability mode: stop chasing the live edge, deepen the
-  /// forward buffer, and seek back to a cushion of already-produced segments so the
-  /// source's jitter is absorbed instead of causing a stall/rewind loop.
+  /// Switch into deep-buffer stability mode: stop chasing the live edge, drop the
+  /// low-latency prefetch proxy (its promotion is what destabilizes a struggling
+  /// source), and ride a deep buffer of already-produced segments so the source's
+  /// jitter is absorbed instead of causing a stall/rewind loop. The flag latches
+  /// for the rest of this channel session — a stream that has proven it can't hold
+  /// the live edge keeps the safe strategy until the viewer changes channel
+  /// (`resetDiagnostics`); we never flap back and risk re-destabilizing it.
   func enterStreamStabilityMode() {
     streamUnstableSince = Date()
     if showLatencyDiagnostics {
       logDiagnosticsEvent("stream unstable -> stability mode")
     }
-    // activeLivePlaybackPolicy now returns the deep-buffer fallback; apply it.
+    // `isStreamUnstable` is now set, so the active policy is the deep-buffer
+    // fallback and `makeItem` will build the item without prefetch promotion.
     applyActiveLivePlaybackPolicy()
-    // Build a cushion (and skip a stuck near-edge segment) by riding well back.
+
+    // If the prefetch proxy was actually promoting (the real-world destabilizer),
+    // rebuild the pipeline without it. The reload restarts the timeline well
+    // behind the unstable edge and fills the deep buffer — no manual seek needed.
+    if lowLatencyProxyEnabled {
+      if showLatencyDiagnostics { logDiagnosticsEvent("stability: LL prefetch OFF") }
+      Task { await load(reason: "stabilityProxyOff", resetMetadata: false) }
+      return
+    }
+
+    // Proxy already off: just build a cushion by riding back behind the edge.
     guard !isUserPaused, !isScrubbing, pinnedToLive,
       let item = player.currentItem, let edge = liveSeekableEdgeSeconds(item)
     else { return }
@@ -98,19 +113,6 @@ extension PlayerView {
     ) { [self] _ in
       player.playImmediately(atRate: 1.0)
     }
-  }
-
-  /// Leave stability mode after a sustained stall-free streak, returning the stream
-  /// to the normal low-latency strategy (catch-up re-engages to pull back to live).
-  func clearStreamStabilityIfRecovered() {
-    guard isStreamUnstable, let lastStall = lastStallAt else { return }
-    guard Date().timeIntervalSince(lastStall) >= streamStabilityRecoverySeconds else { return }
-    streamUnstableSince = nil
-    recentStallTimes = []
-    if showLatencyDiagnostics {
-      logDiagnosticsEvent("stream recovered -> low latency")
-    }
-    applyActiveLivePlaybackPolicy()
   }
 
   /// Detects forward/backward playhead jumps by comparing actual playhead

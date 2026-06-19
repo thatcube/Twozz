@@ -617,11 +617,9 @@ struct PlayerView: View {
   /// deep-buffer stability mode (ride behind the edge instead of chasing it).
   let unstableStallWindowSeconds: Double = 45
   let unstableStallCountThreshold = 4
-  /// A stall-free streak this long while in stability mode returns the stream to
-  /// the normal low-latency strategy.
-  let streamStabilityRecoverySeconds: Double = 90
   /// On entering stability mode, seek back to roughly this far behind the live
-  /// edge to build a cushion (and skip past a stuck near-edge segment).
+  /// edge to build a cushion (and skip past a stuck near-edge segment). Only used
+  /// when the proxy was already off; otherwise a reload repositions the timeline.
   let stabilityTargetBehindEdgeSeconds: Double = 20
   /// How long the player may sit unable to play (waiting on a starved buffer)
   /// before we authoritatively ask Twitch whether the channel is still live.
@@ -1723,11 +1721,16 @@ struct PlayerView: View {
   var diagnosticsLines: [String] {
     var lines: [String] = []
 
-    let mode = lowLatencyProxyEnabled ? "LL proxy ON" : "LL proxy off"
+    let mode: String
+    if lowLatencyProxyEnabled {
+      mode = isStreamUnstable ? "LL proxy auto-off (unstable)" : "LL proxy ON"
+    } else {
+      mode = "LL proxy off"
+    }
     let pin = preferredQuality == "Auto" ? "Auto/adaptive" : "\(preferredQuality) (pinned)"
     lines.append("Mode: \(mode) · \(pin)")
     if isStreamUnstable {
-      lines.append("⚠︎ STABILITY MODE (deep buffer, riding behind edge)")
+      lines.append("⚠︎ STABILITY MODE (proxy off, deep buffer, riding behind edge)")
     }
 
     if let item = player.currentItem {

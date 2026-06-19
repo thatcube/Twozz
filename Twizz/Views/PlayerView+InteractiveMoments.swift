@@ -130,11 +130,13 @@ extension PlayerView {
       kicker: Self.hypeTrainKicker(train.phase),
       tint: tint,
       title: Self.hypeTrainTitle(train),
-      style: style
-    ) {
-      if let expiresAt = train.expiresAt, train.phase != .completed {
-        HypeTrainCountdown(expiresAt: expiresAt, tint: tint, style: style)
+      style: style,
+      trailing: {
+        if let expiresAt = train.expiresAt, train.phase != .completed {
+          HypeTrainCountdown(expiresAt: expiresAt, tint: tint, style: style)
+        }
       }
+    ) {
       if train.goal > 0 {
         MomentBar(
           label: train.phase == .approaching ? "Contributions to start" : "Progress to next level",
@@ -143,6 +145,7 @@ extension PlayerView {
           tint: tint,
           style: style,
           emphasized: true)
+        .padding(.bottom, 8)
       }
     }
   }
@@ -157,8 +160,14 @@ extension PlayerView {
 
   static func hypeTrainTitle(_ train: LiveHypeTrain) -> String {
     switch train.phase {
-    case .approaching: return "Starting soon"
-    case .active, .completed: return "Level \(train.level)"
+    case .approaching:
+      return "Starting soon"
+    case .active, .completed:
+      // Only show a level when we actually know it — better to say nothing than
+      // a wrong "Level 1" when the end event omitted the level. The kicker
+      // already conveys the completed/active state, so drop the title entirely.
+      if let level = train.level { return "Level \(level)" }
+      return ""
     }
   }
 
@@ -186,32 +195,48 @@ extension PlayerView {
 
   // MARK: - Shared card
 
-  @ViewBuilder
-  private func momentCard<Content: View>(
+  private func momentCard<Trailing: View, Content: View>(
     glyph: Glyph,
     kicker: String,
     tint: Color,
     title: String,
     style: MomentDockStyle,
+    @ViewBuilder trailing: () -> Trailing = { EmptyView() },
     @ViewBuilder content: () -> Content
   ) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 8) {
-        Icon(glyph: glyph, size: 22)
-          .foregroundStyle(tint)
-        Text(kicker.uppercased())
-          .font(.caption2).bold()
-          .tracking(1.1)
-          .foregroundStyle(tint)
-        Spacer(minLength: 0)
+    let kickerRow = HStack(spacing: 8) {
+      Icon(glyph: glyph, size: 22)
+        .foregroundStyle(tint)
+      Text(kicker.uppercased())
+        .font(.caption2).bold()
+        .tracking(1.1)
+        .foregroundStyle(tint)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    return VStack(alignment: .leading, spacing: 10) {
+      // Keep the trailing accessory (e.g. the Hype Train timer) on the kicker
+      // row when it fits, but let it flow onto its own line once the chat pane
+      // is too narrow (the panel is user-resizable down to 300pt).
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) {
+          kickerRow
+          Spacer(minLength: 8)
+          trailing()
+        }
+        VStack(alignment: .leading, spacing: 6) {
+          kickerRow
+          trailing()
+        }
       }
-      Text(title)
-        .font(.headline)
-        .foregroundStyle(style.primaryText)
-        .lineLimit(2)
-        .multilineTextAlignment(.leading)
-        .contentTransition(.numericText())
-        .animation(.snappy, value: title)
+      if !title.isEmpty {
+        Text(title)
+          .font(.headline)
+          .foregroundStyle(style.primaryText)
+          .lineLimit(2)
+          .multilineTextAlignment(.leading)
+          .contentTransition(.numericText())
+          .animation(.snappy, value: title)
+      }
       VStack(alignment: .leading, spacing: 8) {
         content()
       }
@@ -357,17 +382,18 @@ private struct MomentBar: View {
   }
 }
 
-/// A live, self-updating countdown to a Hype Train's expiry. Uses SwiftUI's
-/// `Text(timerInterval:)` so the clock ticks without a manual timer, and clamps
-/// to `0:00` once the window has lapsed (an out-of-order range would trap).
+/// A live, self-updating countdown to a Hype Train's expiry, sized to tuck into
+/// the card header's top-right. Uses SwiftUI's `Text(timerInterval:)` so the
+/// clock ticks without a manual timer, and clamps to `0:00` once the window has
+/// lapsed (an out-of-order range would trap).
 private struct HypeTrainCountdown: View {
   let expiresAt: Date
   let tint: Color
   let style: MomentDockStyle
 
   var body: some View {
-    HStack(spacing: 6) {
-      Icon(glyph: .clock, size: 15)
+    HStack(spacing: 4) {
+      Icon(glyph: .clock, size: 13)
         .foregroundStyle(tint)
       Group {
         if expiresAt > .now {
@@ -376,13 +402,11 @@ private struct HypeTrainCountdown: View {
           Text("0:00")
         }
       }
-      .font(.subheadline).bold()
+      .font(.caption).bold()
       .monospacedDigit()
       .foregroundStyle(style.primaryText.opacity(0.9))
-      Text("left")
-        .font(.caption)
-        .foregroundStyle(style.secondaryText)
-      Spacer(minLength: 0)
+      .lineLimit(1)
+      .fixedSize()
     }
   }
 }

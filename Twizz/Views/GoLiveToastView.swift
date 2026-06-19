@@ -18,7 +18,7 @@ struct GoLiveToastView: View {
   /// Large channel avatar; the toast's height tracks it (avatar + equal inset).
   private let avatarSize: CGFloat = 76
   /// Equal gap between the avatar and the toast's top, bottom, and leading edges.
-  private let avatarInset: CGFloat = 8
+  private let avatarInset: CGFloat = 16
 
   var body: some View {
     HStack(spacing: 16) {

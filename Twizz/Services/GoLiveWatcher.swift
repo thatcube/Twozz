@@ -222,12 +222,9 @@ final class GoLiveWatcher {
       URLQueryItem(name: "first", value: "100"),
     ]
 
-    var req = URLRequest(url: components.url!)
-    req.httpMethod = "GET"
-    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+    let req = TwitchAPIClient.helixRequest(
+      url: components.url!, accessToken: accessToken, clientID: clientID,
+      accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
     let (data, response) = try await URLSession.shared.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -258,12 +255,9 @@ final class GoLiveWatcher {
     var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
     components.queryItems = Array(query.prefix(100))
 
-    var req = URLRequest(url: components.url!)
-    req.httpMethod = "GET"
-    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+    let req = TwitchAPIClient.helixRequest(
+      url: components.url!, accessToken: accessToken, clientID: clientID,
+      accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
     let (data, response) = try await URLSession.shared.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1

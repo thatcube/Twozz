@@ -217,12 +217,8 @@ final class VODChatReplayService {
   private nonisolated static func fetchComments(
     vodID: String, offset: Int, clientID: String, userAgent: String
   ) async -> CommentPage? {
-    guard let url = URL(string: "https://gql.twitch.tv/gql") else { return nil }
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.setValue(clientID, forHTTPHeaderField: "Client-ID")
-    request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    var request = TwitchAPIClient.graphQLRequest(
+      clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
 
     let query = """
       query($id: ID!, $o: Int) { video(id: $id) { comments(contentOffsetSeconds: $o) { \
@@ -230,15 +226,12 @@ final class VODChatReplayService {
       message { userColor userBadges { setID version } fragments { text emote { emoteID } } } } } \
       pageInfo { hasNextPage } } } }
       """
-    let body: [String: Any] = [
-      "query": query,
-      "variables": ["id": vodID, "o": offset],
-    ]
-    request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    request.httpBody = try? JSONSerialization.data(
+      withJSONObject: TwitchAPIClient.graphQLBody(
+        query: query, variables: ["id": vodID, "o": offset]))
 
     guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
-    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-    guard (200...299).contains(status) else { return nil }
+    guard TwitchAPIClient.isSuccess(response) else { return nil }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let dataObj = json["data"] as? [String: Any],
       let video = dataObj["video"] as? [String: Any],

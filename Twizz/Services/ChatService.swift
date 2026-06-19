@@ -1302,18 +1302,12 @@ actor BadgeCatalogService {
       return id
     }
 
-    var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-    req.httpMethod = "POST"
-    req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-    req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    var req = TwitchAPIClient.graphQLRequest(
+      clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
 
     let query = "query UserID($login: String!) { user(login: $login) { id } }"
-    let body: [String: Any] = [
-      "query": query,
-      "variables": ["login": login],
-    ]
-    req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    req.httpBody = try? JSONSerialization.data(
+      withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: ["login": login]))
 
     guard let json = await fetchJSON(request: req) as? [String: Any] else { return nil }
     guard let data = json["data"] as? [String: Any] else { return nil }

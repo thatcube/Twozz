@@ -143,19 +143,13 @@ actor CheermoteCatalogService {
     }
 
     private func fetchGQL(query: String, variables: [String: Any]? = nil) async -> Any? {
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-        req.httpMethod = "POST"
-        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        var body: [String: Any] = ["query": query]
-        if let variables { body["variables"] = variables }
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        var req = TwitchAPIClient.graphQLRequest(
+            clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
+        req.httpBody = try? JSONSerialization.data(
+            withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: variables))
 
         guard let (data, response) = try? await URLSession.shared.data(for: req) else { return nil }
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        guard (200...299).contains(status) else { return nil }
+        guard TwitchAPIClient.isSuccess(response) else { return nil }
         return try? JSONSerialization.jsonObject(with: data)
     }
 }

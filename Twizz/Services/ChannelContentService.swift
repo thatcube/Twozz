@@ -33,7 +33,6 @@ struct ChannelSignals {
 /// the recommendation engine, all from the anonymous Twitch GQL endpoint.
 struct ChannelContentService {
   static let clientID = TwitchConfig.webPublicClientID
-  static let endpoint = URL(string: "https://gql.twitch.tv/gql")!
 
   static let session: URLSession = {
     let config = URLSessionConfiguration.default
@@ -187,18 +186,13 @@ struct ChannelContentService {
   // MARK: - GQL transport
 
   static func perform(query: String, variables: [String: Any]) async throws -> Data {
-    var req = URLRequest(url: endpoint)
-    req.httpMethod = "POST"
-    req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
-    req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query, "variables": variables])
+    var req = TwitchAPIClient.graphQLRequest(
+      clientID: clientID, clientIDField: "Client-ID", userAgent: TwitchConfig.apiUserAgent)
+    req.httpBody = try JSONSerialization.data(
+      withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: variables))
 
     let (data, response) = try await session.data(for: req)
-    guard (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? -1) else {
-      throw URLError(.badServerResponse)
-    }
-    return data
+    return try TwitchAPIClient.validatedData(data, response)
   }
 
   static func parseDate(_ raw: String?) -> Date? {

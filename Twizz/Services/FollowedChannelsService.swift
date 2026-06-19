@@ -162,12 +162,9 @@ final class FollowedChannelsService {
       var components = URLComponents(string: "https://api.twitch.tv/helix/channels")!
       components.queryItems = batch.map { URLQueryItem(name: "broadcaster_id", value: $0) }
 
-      var req = URLRequest(url: components.url!)
-      req.httpMethod = "GET"
-      req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-      req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-      req.setValue("application/json", forHTTPHeaderField: "Accept")
-      req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+      let req = TwitchAPIClient.helixRequest(
+        url: components.url!, accessToken: accessToken, clientID: clientID,
+        accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
       let (data, status) = try await performHelixRequest(req)
       guard (200...299).contains(status) else {
@@ -285,12 +282,9 @@ final class FollowedChannelsService {
   }
 
   private func fetchCurrentUserID(clientID: String, accessToken: String) async throws -> String {
-    var req = URLRequest(url: URL(string: "https://api.twitch.tv/helix/users")!)
-    req.httpMethod = "GET"
-    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+    let req = TwitchAPIClient.helixRequest(
+      url: URL(string: "https://api.twitch.tv/helix/users")!, accessToken: accessToken,
+      clientID: clientID, accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -313,12 +307,9 @@ final class FollowedChannelsService {
       URLQueryItem(name: "first", value: "100"),
     ]
 
-    var req = URLRequest(url: components.url!)
-    req.httpMethod = "GET"
-    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+    let req = TwitchAPIClient.helixRequest(
+      url: components.url!, accessToken: accessToken, clientID: clientID,
+      accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -337,12 +328,9 @@ final class FollowedChannelsService {
       URLQueryItem(name: "first", value: "100"),
     ]
 
-    var req = URLRequest(url: components.url!)
-    req.httpMethod = "GET"
-    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+    let req = TwitchAPIClient.helixRequest(
+      url: components.url!, accessToken: accessToken, clientID: clientID,
+      accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -363,12 +351,9 @@ final class FollowedChannelsService {
     components.queryItems?.append(
       contentsOf: cappedIDs.map { URLQueryItem(name: "user_id", value: $0) })
 
-    var req = URLRequest(url: components.url!)
-    req.httpMethod = "GET"
-    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+    let req = TwitchAPIClient.helixRequest(
+      url: components.url!, accessToken: accessToken, clientID: clientID,
+      accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -388,12 +373,9 @@ final class FollowedChannelsService {
     var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
     components.queryItems = cappedIDs.map { URLQueryItem(name: "id", value: $0) }
 
-    var req = URLRequest(url: components.url!)
-    req.httpMethod = "GET"
-    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+    let req = TwitchAPIClient.helixRequest(
+      url: components.url!, accessToken: accessToken, clientID: clientID,
+      accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
     let (data, status) = try await performHelixRequest(req)
     guard (200...299).contains(status) else {
@@ -514,22 +496,12 @@ final class FollowedChannelsService {
       }
       """
 
-    var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-    req.httpMethod = "POST"
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.setValue(TwitchConfig.webPublicClientID, forHTTPHeaderField: "Client-Id")
-
-    let payload: [String: Any] = [
-      "query": query,
-      "variables": ["first": limit],
-    ]
-    req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+    var req = TwitchAPIClient.graphQLRequest()
+    req.httpBody = try JSONSerialization.data(
+      withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: ["first": limit]))
 
     let (data, response) = try await URLSession.shared.data(for: req)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-    guard (200...299).contains(status) else {
-      throw URLError(.badServerResponse)
-    }
+    try TwitchAPIClient.validatedData(data, response)
 
     let decoded = try JSONDecoder().decode(TrendingEnvelope.self, from: data)
     let edges = decoded.data?.streams?.edges ?? []

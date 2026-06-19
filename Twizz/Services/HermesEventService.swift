@@ -475,17 +475,11 @@ final class HermesEventService {
   /// Resolve a channel login to its numeric id anonymously via Twitch's private
   /// GraphQL (works signed out, same surface as playback).
   private static func resolveBroadcasterID(login: String) async throws -> String {
-    var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-    req.httpMethod = "POST"
-    req.setValue(webClientID, forHTTPHeaderField: "Client-ID")
-    req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-    let body: [String: Any] = [
-      "query": "query($login:String!){user(login:$login){id}}",
-      "variables": ["login": login],
-    ]
-    req.httpBody = try JSONSerialization.data(withJSONObject: body)
+    var req = TwitchAPIClient.graphQLRequest(
+      clientID: webClientID, clientIDField: "Client-ID", userAgent: userAgent)
+    req.httpBody = try JSONSerialization.data(
+      withJSONObject: TwitchAPIClient.graphQLBody(
+        query: "query($login:String!){user(login:$login){id}}", variables: ["login": login]))
 
     let (data, _) = try await URLSession.shared.data(for: req)
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],

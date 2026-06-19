@@ -48,17 +48,14 @@ struct ChannelProfileService {
       }
       """
 
-    var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-    req.httpMethod = "POST"
-    req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
+    var req = TwitchAPIClient.graphQLRequest(
+      clientID: clientID, clientIDField: "Client-ID", userAgent: TwitchConfig.apiUserAgent)
     req.httpBody = try? JSONSerialization.data(
-      withJSONObject: ["query": query, "variables": ["login": normalized]]
+      withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: ["login": normalized])
     )
 
     guard let (data, response) = try? await session.data(for: req) else { return nil }
-    guard (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? -1) else { return nil }
+    guard TwitchAPIClient.isSuccess(response) else { return nil }
 
     guard
       let decoded = try? JSONDecoder().decode(GQLEnvelope.self, from: data),

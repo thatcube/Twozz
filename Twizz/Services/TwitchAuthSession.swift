@@ -494,10 +494,8 @@ final class TwitchAuthSession {
         var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
         components.queryItems = [URLQueryItem(name: "id", value: userID)]
 
-        var req = URLRequest(url: components.url!)
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        let req = TwitchAPIClient.helixRequest(
+            url: components.url!, accessToken: accessToken, clientID: clientID)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -634,10 +632,8 @@ final class TwitchAuthSession {
         var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
         components.queryItems = [URLQueryItem(name: "login", value: normalized)]
 
-        var req = URLRequest(url: components.url!)
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        let req = TwitchAPIClient.helixRequest(
+            url: components.url!, accessToken: accessToken, clientID: clientID)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -660,11 +656,10 @@ final class TwitchAuthSession {
         clientID: String,
         accessToken: String
     ) async throws {
-        var req = URLRequest(url: URL(string: "https://api.twitch.tv/helix/chat/messages")!)
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var req = TwitchAPIClient.helixRequest(
+            url: URL(string: "https://api.twitch.tv/helix/chat/messages")!,
+            method: "POST", accessToken: accessToken, clientID: clientID,
+            contentType: "application/json")
 
         let body: [String: String] = [
             "broadcaster_id": broadcasterID,
@@ -772,10 +767,8 @@ final class TwitchAuthSession {
             URLQueryItem(name: "broadcaster_id", value: broadcasterID),
         ]
 
-        var req = URLRequest(url: components.url!)
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        let req = TwitchAPIClient.helixRequest(
+            url: components.url!, accessToken: accessToken, clientID: clientID)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -878,13 +871,10 @@ final class TwitchAuthSession {
                 """
         }
 
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-        req.httpMethod = "POST"
+        var req = TwitchAPIClient.graphQLRequest(clientID: clientID, clientIDField: "Client-ID")
         req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
-        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(
-            withJSONObject: ["query": query, "variables": variables])
+            withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: variables))
 
         let (data, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1

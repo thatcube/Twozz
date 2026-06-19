@@ -239,11 +239,10 @@ final class EventSubService {
     sessionID: String,
     credentials: TwitchEventSubCredentials
   ) async throws -> String {
-    var req = URLRequest(url: URL(string: "https://api.twitch.tv/helix/eventsub/subscriptions")!)
-    req.httpMethod = "POST"
-    req.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(credentials.clientID, forHTTPHeaderField: "Client-Id")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    var req = TwitchAPIClient.helixRequest(
+      url: URL(string: "https://api.twitch.tv/helix/eventsub/subscriptions")!,
+      method: "POST", accessToken: credentials.accessToken, clientID: credentials.clientID,
+      contentType: "application/json")
 
     let body: [String: Any] = [
       "type": "channel.raid",
@@ -274,10 +273,9 @@ final class EventSubService {
     components.queryItems = [URLQueryItem(name: "id", value: id)]
     guard let url = components.url else { return }
 
-    var req = URLRequest(url: url)
-    req.httpMethod = "DELETE"
-    req.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
-    req.setValue(credentials.clientID, forHTTPHeaderField: "Client-Id")
+    let req = TwitchAPIClient.helixRequest(
+      url: url, method: "DELETE", accessToken: credentials.accessToken,
+      clientID: credentials.clientID)
     _ = try? await URLSession.shared.data(for: req)
   }
 }

@@ -195,19 +195,11 @@ final class BrowseService {
     // MARK: - GQL Transport
 
     private func performGQL(query: String, variables: [String: Any]) async throws -> Data {
-        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(TwitchConfig.webPublicClientID, forHTTPHeaderField: "Client-Id")
-        req.setValue(TwitchConfig.apiUserAgent, forHTTPHeaderField: "User-Agent")
-
-        let payload: [String: Any] = ["query": query, "variables": variables]
-        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        var req = TwitchAPIClient.graphQLRequest(userAgent: TwitchConfig.apiUserAgent)
+        req.httpBody = try JSONSerialization.data(
+            withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: variables))
 
         let (data, response) = try await URLSession.shared.data(for: req)
-        guard (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? -1) else {
-            throw URLError(.badServerResponse)
-        }
-        return data
+        return try TwitchAPIClient.validatedData(data, response)
     }
 }

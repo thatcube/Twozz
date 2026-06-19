@@ -165,6 +165,7 @@ struct PlayerView: View {
 
   @Environment(\.dismiss) var dismiss
   @Environment(\.themePalette) var palette
+  @Environment(\.glassDisabled) var glassDisabled
   @Environment(\.accessibilityReduceMotion) var reduceMotion
   @AppStorage("preferredQuality") var preferredQuality = "Auto"
   /// Latency-vs-quality profile for the adaptive ("Auto") stream, surfaced as the
@@ -2278,7 +2279,7 @@ struct PlayerView: View {
               .foregroundStyle(
                 focus == .chatInput && !chatIsFrozen
                   ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
-                  : .white.opacity(chatDraft.isEmpty ? 0.5 : 1.0)
+                  : (glassDisabled ? palette.chromeOnOpaque : .white).opacity(chatDraft.isEmpty ? 0.5 : 1.0)
               )
               .lineLimit(1)
               .truncationMode(.tail)
@@ -2374,7 +2375,7 @@ struct PlayerView: View {
             .foregroundStyle(
               focus == .chatInput && !chatIsFrozen
                 ? .black.opacity(0.7)
-                : .white.opacity(0.45)
+                : (glassDisabled ? palette.chromeOnOpaque : .white).opacity(0.45)
             )
             .lineLimit(1)
             .padding(.horizontal, 28)
@@ -2738,6 +2739,7 @@ struct ChatInputButtonStyle: ButtonStyle {
 struct ChatGlassFieldStyle: ViewModifier {
   let isFocused: Bool
   @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
 
   private var shape: Capsule {
     Capsule(style: .continuous)
@@ -2747,8 +2749,8 @@ struct ChatGlassFieldStyle: ViewModifier {
   func body(content: Content) -> some View {
     if glassDisabled {
       content
-        .background(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(Color.twizzOpaqueGlass), in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.16), lineWidth: 0.75))
+        .background(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(palette.chromeOpaqueSurface), in: shape)
+        .overlay(shape.strokeBorder(palette.chromeOpaqueBorder.opacity(isFocused ? 0.0 : 1.0), lineWidth: 0.75))
         .scaleEffect(isFocused ? 1.05 : 1.0)
         .shadow(
           color: .black.opacity(isFocused ? 0.22 : 0.18),
@@ -3152,6 +3154,7 @@ private struct ChatSyncSendIndicator: View {
 private struct GlassChatPaneStyle: ViewModifier {
   let enabled: Bool
   @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
 
   /// Inset between the glass panel and the screen edges.
   static let edgeInset: CGFloat = 24
@@ -3176,9 +3179,9 @@ private struct GlassChatPaneStyle: ViewModifier {
     if glassDisabled {
       content
         .frame(maxHeight: .infinity)
-        .background(Color.twizzOpaqueGlass, in: shape)
+        .background(palette.chromeOpaqueSurface, in: shape)
         .clipShape(shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+        .overlay(shape.strokeBorder(palette.chromeOpaqueBorder, lineWidth: 1))
     } else if #available(tvOS 26.0, *) {
       content
         .frame(maxHeight: .infinity)
@@ -3335,6 +3338,14 @@ private struct PlayerInfoBadge: View {
   let hermes: HermesEventService
   let showLatency: Bool
   let showViewerCount: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
+
+  /// Foreground for text/dividers on the chip: dark on the Light-theme opaque
+  /// fill, white on the translucent glass over video.
+  private var chipForeground: Color {
+    glassDisabled ? palette.chromeOnOpaque : .white
+  }
 
   /// Brick red from the requested reference, nudged just bright enough to stay
   /// legible against the frosted material.
@@ -3353,7 +3364,7 @@ private struct PlayerInfoBadge: View {
               Text(viewers.formatted(.number))
                 .font(.footnote)
                 .fontWeight(.semibold)
-                .foregroundStyle(.white)
+                .foregroundStyle(chipForeground)
                 .monospacedDigit()
                 .contentTransition(.numericText())
             }
@@ -3363,7 +3374,7 @@ private struct PlayerInfoBadge: View {
 
           if viewers != nil && showLatency {
             Capsule()
-              .fill(.white.opacity(0.18))
+              .fill(chipForeground.opacity(0.18))
               .frame(width: 1, height: 16)
           }
 
@@ -3375,7 +3386,7 @@ private struct PlayerInfoBadge: View {
               Text(latency.label)
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(.white)
+                .foregroundStyle(chipForeground)
             }
           }
         }
@@ -3397,12 +3408,13 @@ private struct PlayerInfoBadge: View {
 /// instead of the lighter bare-material look they had before.
 private struct HUDChipGlassStyle: ViewModifier {
   @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
   func body(content: Content) -> some View {
     let shape = Capsule(style: .continuous)
     if glassDisabled {
       content
-        .background(Color.twizzOpaqueGlass, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+        .background(palette.chromeOpaqueSurface, in: shape)
+        .overlay(shape.strokeBorder(palette.chromeOpaqueBorder, lineWidth: 1))
         .clipShape(shape)
     } else if #available(tvOS 26.0, *) {
       content
@@ -3466,6 +3478,14 @@ final class RewindReadout {
 private struct RewindScrubBar: View {
   @Bindable var readout: RewindReadout
   let isFocused: Bool
+  @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
+
+  /// Foreground for the track/orb/label: dark on the Light-theme opaque fill,
+  /// white on the translucent glass over video.
+  private var chromeForeground: Color {
+    glassDisabled ? palette.chromeOnOpaque : .white
+  }
 
   private func behindLabel() -> String {
     if readout.isVOD {
@@ -3492,7 +3512,7 @@ private struct RewindScrubBar: View {
     let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
     let trackHeight: CGFloat = 6
     let orbSize: CGFloat = isFocused ? 30 : 16
-    let fillColor = (readout.isAtLiveEdge && !readout.isVOD) ? Color.red : Color.white
+    let fillColor = (readout.isAtLiveEdge && !readout.isVOD) ? Color.red : chromeForeground
 
     return HStack(spacing: 18) {
       GeometryReader { geo in
@@ -3501,7 +3521,7 @@ private struct RewindScrubBar: View {
         ZStack(alignment: .leading) {
           // Full track (retained window).
           Capsule()
-            .fill(.white.opacity(0.20))
+            .fill(chromeForeground.opacity(0.20))
             .frame(height: trackHeight)
           // Played / behind-to-live portion.
           Capsule()
@@ -3510,7 +3530,7 @@ private struct RewindScrubBar: View {
           // Seek orb — the focus target. Grows and glows when focused.
           ZStack {
             Circle()
-              .fill(.white)
+              .fill(chromeForeground)
               .frame(width: orbSize, height: orbSize)
               .shadow(
                 color: .white.opacity(isFocused ? 0.7 : 0.0),
@@ -3519,7 +3539,7 @@ private struct RewindScrubBar: View {
             if readout.isPaused, isFocused {
               Image(systemName: "pause.fill")
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.black)
+                .foregroundStyle(glassDisabled ? palette.chromeOpaqueSurface : .black)
             }
           }
           .frame(width: orbSize, height: orbSize)
@@ -3537,7 +3557,7 @@ private struct RewindScrubBar: View {
         Text(behindLabel())
           .font(.callout)
           .fontWeight(.semibold)
-          .foregroundStyle(.white)
+          .foregroundStyle(chromeForeground)
           .monospacedDigit()
       }
       .frame(minWidth: 72, alignment: .trailing)
@@ -3556,13 +3576,14 @@ private struct ScrubBarGlassBackground: ViewModifier {
   let shape: RoundedRectangle
   let isFocused: Bool
   @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
 
   @ViewBuilder
   func body(content: Content) -> some View {
     if glassDisabled {
       content
-        .background(Color.twizzOpaqueGlass, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.30 : 0.16), lineWidth: 1))
+        .background(palette.chromeOpaqueSurface, in: shape)
+        .overlay(shape.strokeBorder(palette.chromeOpaqueBorder.opacity(isFocused ? 1.6 : 1.0), lineWidth: 1))
         .clipShape(shape)
     } else if #available(tvOS 26.0, *) {
       content
@@ -3728,6 +3749,12 @@ final class ScrubInputCoordinator {
 /// stream.
 private struct SleepCountdownBadge: View {
   let text: String
+  @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
+
+  private var chipForeground: Color {
+    glassDisabled ? palette.chromeOnOpaque : .white
+  }
 
   static func format(seconds: Int) -> String {
     let clamped = max(0, seconds)
@@ -3738,13 +3765,13 @@ private struct SleepCountdownBadge: View {
     HStack(spacing: 8) {
       Image(systemName: "moon.zzz.fill")
         .font(.caption)
-        .foregroundStyle(.white)
+        .foregroundStyle(chipForeground)
 
       Text(text)
         .font(.caption)
         .fontWeight(.semibold)
         .monospacedDigit()
-        .foregroundStyle(.white)
+        .foregroundStyle(chipForeground)
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 9)
@@ -3992,34 +4019,38 @@ struct SleepingScreen: View {
 private struct DiagnosticsPanel: View {
   let lines: [String]
   let events: [DiagnosticsEvent]
+  @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
+
+  private var fg: Color { glassDisabled ? palette.chromeOnOpaque : .white }
 
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
     return VStack(alignment: .leading, spacing: 4) {
       Text("DIAGNOSTICS")
         .font(.system(size: 13, weight: .heavy).monospaced())
-        .foregroundStyle(.white.opacity(0.6))
+        .foregroundStyle(fg.opacity(0.6))
 
       ForEach(lines, id: \.self) { line in
         Text(line)
           .font(.system(size: 14, weight: .semibold).monospaced())
-          .foregroundStyle(.white)
+          .foregroundStyle(fg)
       }
 
       if !events.isEmpty {
-        Divider().overlay(.white.opacity(0.2)).padding(.vertical, 2)
+        Divider().overlay(fg.opacity(0.2)).padding(.vertical, 2)
         ForEach(events) { event in
           Text(Self.eventLine(event))
             .font(.system(size: 13, weight: .regular).monospaced())
-            .foregroundStyle(.white.opacity(0.8))
+            .foregroundStyle(fg.opacity(0.8))
         }
       }
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
     .frame(maxWidth: 520, alignment: .leading)
-    .background(.black.opacity(0.55), in: shape)
-    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .background(glassDisabled ? AnyShapeStyle(palette.chromeOpaqueSurface) : AnyShapeStyle(.black.opacity(0.55)), in: shape)
+    .overlay(shape.strokeBorder(glassDisabled ? palette.chromeOpaqueBorder : .white.opacity(0.12), lineWidth: 1))
     .clipShape(shape)
   }
 

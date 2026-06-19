@@ -60,6 +60,7 @@ struct ChatView: View {
   /// composer because tvOS won't reliably keep focus on the chat ScrollView.
   var scrollTarget: ChatScrollTarget? = nil
   @Environment(\.themePalette) private var palette
+  @Environment(\.glassDisabled) private var glassDisabled
   @State private var pendingScrollWork: DispatchWorkItem?
   /// Newest message id, tracked separately so the throttled auto-scroll always
   /// targets the true latest message even if more arrived during its window.
@@ -79,6 +80,9 @@ struct ChatView: View {
   /// translucent player; only the light-theme side panel is a light surface.
   private var chatSurfaceColor: Color {
     if isSideLayout { return palette.chatSideSurface }
+    // Reduce-transparency / disable-glass: the pane paints an opaque, theme-aware
+    // chrome surface (light in Light theme), so resolve text contrast against it.
+    if glassDisabled { return palette.chromeOpaqueSurface }
     if useLighterOverlayBackground { return Color(white: 0.13) }
     return Color(white: 0.12)
   }
@@ -105,11 +109,17 @@ struct ChatView: View {
   var body: some View {
     messageList
       .background(
-        useGlassBackground
-          ? AnyShapeStyle(Color.black.opacity(0.22))
-          : (useLighterOverlayBackground
-            ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
-            : AnyShapeStyle(palette.chatSideSurface)))
+        isSideLayout
+          ? AnyShapeStyle(palette.chatSideSurface)
+          : (useGlassBackground
+            ? (glassDisabled
+              ? AnyShapeStyle(Color.clear)
+              : AnyShapeStyle(Color.black.opacity(0.22)))
+            : (useLighterOverlayBackground
+              ? (glassDisabled
+                ? AnyShapeStyle(palette.chromeOpaqueSurface)
+                : AnyShapeStyle(Color(white: 0.13).opacity(0.90)))
+              : AnyShapeStyle(palette.chatSideSurface))))
   }
 
   private var messageList: some View {
@@ -291,7 +301,7 @@ struct ChatView: View {
       animatedEmotes: animatedEmotes,
       fontStyle: fontStyle,
       showBadges: showBadges,
-      bodyColorOverride: isSideLayout ? palette.chatSidePrimaryText : nil
+      bodyColorOverride: isLightChatSurface ? palette.chatSidePrimaryText : nil
     )
 
     if let systemMessage = message.systemMessage {

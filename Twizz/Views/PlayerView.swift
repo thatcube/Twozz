@@ -206,6 +206,9 @@ struct PlayerView: View {
   @State private var suppressLowLatencyToggleReload = false
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
+  /// True only for the moment the user deliberately leaves the chat scroller via
+  /// the Back button, so the focus trap lets that one transition through.
+  @State private var isExitingChatScroll = false
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
@@ -517,7 +520,9 @@ struct PlayerView: View {
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
-      if showChatSettings {
+      if focus == .chatScroll {
+        exitChatScroll()
+      } else if showChatSettings {
         if chatSettingsPage != .main {
           closeSubpage()
         } else {
@@ -545,7 +550,20 @@ struct PlayerView: View {
         scheduleHide()
       }
     }
-    .onChange(of: focus) { _, newFocus in
+    .onChange(of: focus) { oldFocus, newFocus in
+      // Trap focus inside the chat scroller. While reading history, tvOS tries to
+      // hand focus to an adjacent control on left/right or when the list can't
+      // scroll any further — which kept ejecting the viewer mid-scroll. Keep
+      // focus on the list unless they deliberately left with Back.
+      if oldFocus == .chatScroll, newFocus != .chatScroll, showChat {
+        if isExitingChatScroll {
+          isExitingChatScroll = false
+        } else {
+          focus = .chatScroll
+          return
+        }
+      }
+
       if showChatSettings {
         guard let newFocus else {
           focus = lastChatSettingsFocus
@@ -1306,6 +1324,15 @@ struct PlayerView: View {
       chatReplayStartMessageID = nil
       showChatSettings = false
     }
+  }
+
+  /// Leave the chat scroller (Back button): resume live auto-scroll and drop the
+  /// viewer back on the composer. The flag lets the focus trap pass this one
+  /// transition through instead of yanking focus back into the list.
+  private func exitChatScroll() {
+    isExitingChatScroll = true
+    focus = .chatInput
+    scheduleHide()
   }
 
   private func isControlFocus(_ focus: Focusable) -> Bool {

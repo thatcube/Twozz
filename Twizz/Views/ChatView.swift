@@ -112,9 +112,9 @@ struct ChatView: View {
     }
 
     /// Shown while the list is focused and auto-scroll is paused, so the viewer
-    /// knows new messages are still arriving below the current scroll position.
+    /// knows new messages are still arriving below and how to get back to live.
     private var pausedPill: some View {
-        Label("Paused · press down to resume", systemImage: "pause.fill")
+        Label("Paused · press Back to resume live", systemImage: "pause.fill")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 16)

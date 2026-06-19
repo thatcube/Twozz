@@ -381,6 +381,14 @@ struct PlayerView: View {
     get { mon.lastRecoveryAttemptAt }
     nonmutating set { mon.lastRecoveryAttemptAt = newValue }
   }
+  var lastLiveResyncAt: Date {
+    get { mon.lastLiveResyncAt }
+    nonmutating set { mon.lastLiveResyncAt = newValue }
+  }
+  var liveResyncAttempts: Int {
+    get { mon.liveResyncAttempts }
+    nonmutating set { mon.liveResyncAttempts = newValue }
+  }
   var liveStallWaitingSince: Date? {
     get { mon.liveStallWaitingSince }
     nonmutating set { mon.liveStallWaitingSince = newValue }
@@ -567,6 +575,17 @@ struct PlayerView: View {
   let playbackWatchdogIntervalSeconds: Double = 2
   let hardStallRecoverySeconds: Double = 10
   let recoveryCooldownSeconds: Double = 15
+  /// Live-edge drift recovery. When the player is following live (`pinnedToLive`)
+  /// but the playhead has involuntarily fallen this far behind the seekable edge,
+  /// snap it back toward live with a lightweight seek instead of waiting for the
+  /// frozen-playhead watchdog (which a slow-playing-after-rewind player defeats).
+  /// Set well above any normal latency so it only fires in the genuinely-broken
+  /// "rewound far back and stuck" state, never for ordinary drift.
+  let liveEdgeResyncThresholdSeconds: Double = 45
+  /// Minimum spacing between lightweight live-edge resync seeks.
+  let liveResyncCooldownSeconds: Double = 6
+  /// After this many resync seeks fail to hold the edge, escalate to a full reload.
+  let maxLiveResyncAttempts = 3
   let stallNotificationDebounceSeconds: Double = 2.5
   /// How long the player may sit unable to play (waiting on a starved buffer)
   /// before we authoritatively ask Twitch whether the channel is still live.
@@ -888,6 +907,10 @@ struct PlayerView: View {
       else { return }
       lastStallNotificationAt = now
       markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
+      // Re-kick immediately. With automaticallyWaitsToMinimizeStalling the player
+      // usually self-resumes once buffered, but an explicit nudge shortens the
+      // gap and helps the player that has stalled without auto-resuming.
+      player.playImmediately(atRate: 1.0)
     }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) {
       notification in
@@ -2989,6 +3012,12 @@ final class PlaybackMonitorBox {
   var stalledPlaybackSamples = 0
   var isRecoveringPlayback = false
   var lastRecoveryAttemptAt = Date.distantPast
+  /// Throttle + escalation state for the lightweight live-edge resync that pulls
+  /// the playhead back when AVPlayer involuntarily drifts far behind live (the
+  /// "rewound 120s and never recovered" failure). Escalates to a full reload only
+  /// after repeated resyncs fail to stick.
+  var lastLiveResyncAt = Date.distantPast
+  var liveResyncAttempts = 0
   /// When the player first entered a sustained "waiting with a starved buffer"
   /// state. Drives the authoritative end-of-stream (offline) probe.
   var liveStallWaitingSince: Date?

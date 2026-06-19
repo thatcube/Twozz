@@ -327,6 +327,8 @@ extension PlayerView {
     stalledPlaybackSamples = 0
     isRecoveringPlayback = false
     lastRecoveryAttemptAt = Date.distantPast
+    lastLiveResyncAt = Date.distantPast
+    liveResyncAttempts = 0
     lastStallNotificationAt = Date.distantPast
     liveStallWaitingSince = nil
     offlineProbeInFlight = false
@@ -341,6 +343,45 @@ extension PlayerView {
     }
     lastRecoveryAttemptAt = now
     Task { await recoverFromPlaybackStall(reason: reason) }
+  }
+
+  /// Seconds value of the live seekable edge (end of the last seekable range),
+  /// or `nil` when no live window exists yet.
+  func liveSeekableEdgeSeconds(_ item: AVPlayerItem) -> Double? {
+    guard let range = item.seekableTimeRanges.last?.timeRangeValue else { return nil }
+    let edge = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+    return edge.isFinite && edge > 0 ? edge : nil
+  }
+
+  /// Lightweight recovery for involuntary live-edge drift: seek back toward the
+  /// edge and re-kick playback, without the full-reload "jump" that
+  /// `recoverFromPlaybackStall` causes. Throttled, and escalates to a full reload
+  /// only after repeated resyncs fail to hold the edge.
+  func triggerLiveEdgeResyncIfAllowed(item: AVPlayerItem, edge: Double) {
+    guard !isRecoveringPlayback, !isUserPaused, !isScrubbing else { return }
+    let now = Date()
+    guard now.timeIntervalSince(lastLiveResyncAt) >= liveResyncCooldownSeconds else { return }
+    lastLiveResyncAt = now
+
+    liveResyncAttempts += 1
+    if liveResyncAttempts > maxLiveResyncAttempts {
+      // Light seeks aren't sticking — fall back to a full reload.
+      liveResyncAttempts = 0
+      if showLatencyDiagnostics { logDiagnosticsEvent("edge drift -> reload") }
+      triggerRecoveryIfAllowed(reason: "edge drift")
+      return
+    }
+
+    let target = max(edge - targetLiveEdgeSeconds, 0)
+    let tolerance = CMTime(seconds: 0.6, preferredTimescale: 600)
+    if showLatencyDiagnostics { logDiagnosticsEvent("live resync (edge drift)") }
+    item.seek(
+      to: CMTime(seconds: target, preferredTimescale: 600),
+      toleranceBefore: tolerance,
+      toleranceAfter: tolerance
+    ) { [self] _ in
+      player.playImmediately(atRate: 1.0)
+    }
   }
 
   func samplePlaybackHealth() {
@@ -399,6 +440,22 @@ extension PlayerView {
     }
 
     lastObservedPlaybackTimeSeconds = currentSeconds
+
+    // Live-edge drift recovery. While following live, AVPlayer can involuntarily
+    // rewind the playhead far back inside a large (DVR) seekable window to refill
+    // its buffer and then resume *playing forward* from there — which the
+    // frozen-playhead heuristic above never catches (the playhead is advancing).
+    // The viewer is left tens of seconds behind live, slowly playing, forever.
+    // Detect that directly from the edge gap and snap back with a light seek.
+    if !isVOD, pinnedToLive, let edge = liveSeekableEdgeSeconds(item) {
+      let gap = edge - currentSeconds
+      if gap.isFinite, gap > liveEdgeResyncThresholdSeconds {
+        triggerLiveEdgeResyncIfAllowed(item: item, edge: edge)
+      } else if gap.isFinite, gap <= targetLiveEdgeSeconds + 6 {
+        // Back near the edge — clear the escalation counter.
+        liveResyncAttempts = 0
+      }
+    }
 
     let isHardStallSignal =
       player.timeControlStatus == .waitingToPlayAtSpecifiedRate
@@ -464,7 +521,6 @@ extension PlayerView {
     guard !isOffline else { return }
     isRecoveringPlayback = true
     defer { isRecoveringPlayback = false }
-
     // Before blindly reloading (which can loop forever on a frozen last frame
     // once a broadcast ends), authoritatively check whether the channel is still
     // live. Only act on a definitive `.offline`; `.live`/`.unknown` fall through

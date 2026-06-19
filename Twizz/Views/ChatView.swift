@@ -151,15 +151,14 @@ struct ChatView: View {
   private var pausedPill: some View {
     VStack(spacing: 6) {
       // Wide, shallow chevron — the conventional "swipe up to go up" hint, like
-      // an iOS sheet grabber — in its own small glass chip. Only on the
+      // an iOS sheet grabber — floating bare above the pill. Only on the
       // read-pause state, where an up press is the next action; it drifts gently
       // upward to read as a subtle invitation.
       if softPauseRemaining != nil {
         Image(systemName: "chevron.compact.up")
-          .font(.system(size: 26, weight: .semibold))
-          .foregroundStyle(.black.opacity(0.8))
-          .frame(width: 56, height: 34)
-          .modifier(PausedPillGlassStyle())
+          .font(.system(size: 30, weight: .semibold))
+          .foregroundStyle(.white.opacity(0.9))
+          .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
           .offset(y: hintDrift ? -2.5 : 2.5)
           .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: hintDrift)
           .onAppear { hintDrift = true }

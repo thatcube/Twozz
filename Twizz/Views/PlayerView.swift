@@ -398,6 +398,17 @@ struct PlayerView: View {
     get { mon.liveStallWaitingSince }
     nonmutating set { mon.liveStallWaitingSince = newValue }
   }
+  /// Highest live seekable-edge position seen this session, and when it last
+  /// stopped advancing — used to detect an ended broadcast (the edge freezes)
+  /// independently of the flaky waiting/stall state.
+  var lastLiveEdgeSeconds: Double? {
+    get { mon.lastLiveEdgeSeconds }
+    nonmutating set { mon.lastLiveEdgeSeconds = newValue }
+  }
+  var liveEdgeFrozenSince: Date? {
+    get { mon.liveEdgeFrozenSince }
+    nonmutating set { mon.liveEdgeFrozenSince = newValue }
+  }
   var offlineProbeInFlight: Bool {
     get { mon.offlineProbeInFlight }
     nonmutating set { mon.offlineProbeInFlight = newValue }
@@ -642,6 +653,17 @@ struct PlayerView: View {
   let offlineProbeStallSeconds: Double = 6
   /// Minimum spacing between authoritative offline probes while still stuck.
   let offlineProbeCooldownSeconds: Double = 8
+  /// End-of-stream detection by a frozen live edge. A live broadcast keeps
+  /// appending segments, so its seekable edge advances; an ended one freezes it.
+  /// Once the edge hasn't advanced for this long while we're trying to follow
+  /// live, ask Twitch whether the channel is still up (this is independent of the
+  /// waiting/stall state, which the anti-stall slow-down keeps flickering). A
+  /// merely-struggling stream still advances its edge, so it won't trip this.
+  let endOfStreamEdgeFrozenSeconds: Double = 12
+  /// Safety net for when Twitch's status lookup keeps returning `.unknown` for an
+  /// ended stream: if the edge has been frozen this long AND the buffer is empty,
+  /// surface the offline state anyway rather than sit on a dead frame forever.
+  let endOfStreamEdgeForceOfflineSeconds: Double = 30
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
   // so a multi-second drift is a genuine AVPlayer skip, not normal catch-up.
@@ -3080,6 +3102,11 @@ final class PlaybackMonitorBox {
   /// When the player first entered a sustained "waiting with a starved buffer"
   /// state. Drives the authoritative end-of-stream (offline) probe.
   var liveStallWaitingSince: Date?
+  /// Highest live seekable-edge position seen, and when it stopped advancing.
+  /// An ended broadcast freezes the edge, which is a cleaner end-of-stream signal
+  /// than the waiting/stall state the anti-stall slow-down keeps flickering.
+  var lastLiveEdgeSeconds: Double?
+  var liveEdgeFrozenSince: Date?
   /// Guards against overlapping offline probes and rate-limits them.
   var offlineProbeInFlight = false
   var lastOfflineProbeAt = Date.distantPast

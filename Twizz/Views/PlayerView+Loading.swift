@@ -366,6 +366,8 @@ extension PlayerView {
     liveResyncAttempts = 0
     lastStallNotificationAt = Date.distantPast
     liveStallWaitingSince = nil
+    lastLiveEdgeSeconds = nil
+    liveEdgeFrozenSince = nil
     offlineProbeInFlight = false
     lastOfflineProbeAt = Date.distantPast
   }
@@ -546,6 +548,37 @@ extension PlayerView {
         // Back near the edge — clear the escalation counter.
         liveResyncAttempts = 0
       }
+    }
+
+    // End-of-stream by a frozen live edge. A live broadcast keeps appending
+    // segments, so its seekable edge advances; an ended one freezes it. This is
+    // independent of the waiting/stall state (which the anti-stall slow-down keeps
+    // flickering, so the starvation timer below could otherwise never mature) and
+    // works in stability mode too. A merely-struggling stream still advances its
+    // edge, so it won't trip this.
+    if !isVOD, pinnedToLive {
+      let now = Date()
+      let edge = liveSeekableEdgeSeconds(item)
+      let advanced = edge.map { $0 > (lastLiveEdgeSeconds ?? -.greatestFiniteMagnitude) + 0.5 } ?? false
+      if let edge { lastLiveEdgeSeconds = max(lastLiveEdgeSeconds ?? edge, edge) }
+
+      if advanced {
+        liveEdgeFrozenSince = nil
+      } else if lastLiveEdgeSeconds != nil {
+        if liveEdgeFrozenSince == nil { liveEdgeFrozenSince = now }
+        let frozenFor = now.timeIntervalSince(liveEdgeFrozenSince ?? now)
+        let starved = (bufferAheadSeconds(item) ?? 0) < 1.0
+        if frozenFor >= endOfStreamEdgeForceOfflineSeconds, starved {
+          // Twitch's status lookup is being unhelpful (returning .unknown) for a
+          // clearly-dead stream — don't sit on a frozen frame forever.
+          presentOfflineState()
+        } else if frozenFor >= endOfStreamEdgeFrozenSeconds {
+          probeOfflineIfStreamEnded()
+        }
+      }
+    } else {
+      liveEdgeFrozenSince = nil
+      lastLiveEdgeSeconds = nil
     }
 
     let isHardStallSignal =

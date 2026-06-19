@@ -94,7 +94,7 @@ struct ChatView: View {
         guard let target else { return }
         pendingScrollWork?.cancel()
         if target.animated {
-          withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+          withAnimation(.spring(response: 0.24, dampingFraction: 0.84)) {
             proxy.scrollTo(target.id, anchor: target.anchor)
           }
         } else {

@@ -126,7 +126,7 @@ extension PlayerView {
   }
 
   /// Display label for a quality option. The two Auto rows already carry their
-  /// full labels ("Auto (Lower Latency)" / "Auto (Higher Quality)"), and a pinned
+  /// full labels ("Auto · Low Latency" / "Auto · High Quality"), and a pinned
   /// rendition shows its own name, so options are surfaced verbatim.
   func qualityDisplayLabel(_ option: String) -> String {
     option

@@ -27,13 +27,16 @@ struct ChannelPageView: View {
   @State private var isLoadingRecs = true
 
   @State private var onDemandItem: OnDemandItem?
-  /// Identifier of the tile that should claim focus when the page first loads
-  /// (the live card, else the first clip/VOD). It's a plain value — *not* a
-  /// `@FocusState` owned here — so the focus engine writing back on every
-  /// navigation doesn't invalidate this whole view. Each tile owns its own local
-  /// focus state and self-focuses when its id matches, then clears this.
-  @State private var initialFocusID: String?
-  @State private var didSetInitialFocus = false
+  /// Drives focus with the same stable pattern the rest of the app uses
+  /// (BrowseView/SearchView): a single `@FocusState` the focus engine owns, plus
+  /// a `@Namespace` so `.prefersDefaultFocus` can anchor the first tile (live
+  /// card, else first clip/VOD) when the page loads. Reading `focusedID == id`
+  /// per card is cheap; the expensive parts of the page (banner reflection, image
+  /// decode) are cached so a focus move stays smooth. Avoid per-card programmatic
+  /// `@FocusState` writes here — they thrash SwiftUI's focus store and, on a
+  /// dense first load, can blow the scene-update watchdog.
+  @FocusState private var focusedID: String?
+  @Namespace private var focusNamespace
 
   /// Measured height of the identity hero card, so it can straddle the banner's
   /// bottom edge by exactly 50% regardless of its dynamic content.
@@ -53,6 +56,17 @@ struct ChannelPageView: View {
   private let bannerHeight: CGFloat = 380
 
   private var hasBanner: Bool { profile?.bannerImageURL != nil }
+
+  /// Which tile should claim focus when the page first settles: the live card if
+  /// the channel is live, otherwise the first clip, otherwise the first VOD. Fed
+  /// to `.prefersDefaultFocus` per tile; recomputes as content streams in so the
+  /// engine anchors focus once the first actionable tile exists.
+  private var defaultFocusID: String? {
+    if profile?.isLive == true { return "live" }
+    if let clip = content?.clips.first { return "clip-\(clip.slug)" }
+    if let vod = content?.videos.first { return "vod-\(vod.id)" }
+    return nil
+  }
 
   private var headerName: String {
     profile?.displayName ?? target.displayName ?? target.login
@@ -98,6 +112,7 @@ struct ChannelPageView: View {
           // subtract the safe-area inset the ScrollView already applies.
           .padding(.top, hasBanner ? max(bannerHeight - safeTop - heroHeight / 2, 0) : 40)
           .padding(.bottom, 140)
+          .focusScope(focusNamespace)
         }
         .scrollClipDisabled()
       }
@@ -277,55 +292,56 @@ struct ChannelPageView: View {
   /// stream (open the player, or return to it when opened from the player).
   private func liveCard(_ profile: ChannelProfile) -> some View {
     let id = "live"
-    return FocusableCard(
-      id: id,
-      cornerRadius: heroCorner,
-      focusedScale: 1.01,
-      requestInitialFocus: initialFocusID == id,
-      onSelect: { onWatchChannel?(followedChannel(from: profile)) },
-      onInitialFocusApplied: { initialFocusID = nil }
-    ) { isFocused in
-      HStack(spacing: 20) {
-        liveThumbnail
+    let isFocused = focusedID == id
+    return HStack(spacing: 20) {
+      liveThumbnail
 
-        VStack(alignment: .leading, spacing: 8) {
-          HStack(spacing: 10) {
-            liveBadge
-            if let uptime = Self.uptime(since: profile.liveStartedAt) {
-              metaDot
-              Text("Live for \(uptime)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-            }
-            if let viewers = profile.liveViewerCount {
-              metaDot
-              Text("\(Self.plainCount(viewers)) viewers").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-            }
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 10) {
+          liveBadge
+          if let uptime = Self.uptime(since: profile.liveStartedAt) {
+            metaDot
+            Text("Live for \(uptime)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
           }
-
-          if let title = profile.liveTitle, !title.isEmpty {
-            Text(title)
-              .font(.headline)
-              .foregroundStyle(.primary)
-              .lineLimit(2)
-              .frame(maxWidth: .infinity, alignment: .leading)
-          }
-
-          if let game = profile.liveGame, !game.isEmpty {
-            Label(game, systemImage: "gamecontroller.fill")
-              .font(.subheadline).foregroundStyle(.secondary)
+          if let viewers = profile.liveViewerCount {
+            metaDot
+            Text("\(Self.plainCount(viewers)) viewers").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
           }
         }
 
-        Spacer(minLength: 0)
+        if let title = profile.liveTitle, !title.isEmpty {
+          Text(title)
+            .font(.headline)
+            .foregroundStyle(.primary)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
 
-        Image(systemName: "play.circle.fill")
-          .font(.system(size: 40))
-          .foregroundStyle(.primary.opacity(0.9))
+        if let game = profile.liveGame, !game.isEmpty {
+          Label(game, systemImage: "gamecontroller.fill")
+            .font(.subheadline).foregroundStyle(.secondary)
+        }
       }
-      .padding(18)
-      .frame(maxWidth: .infinity)
-      .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: isFocused, palette: palette)
-      .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 22, y: 12)
+
+      Spacer(minLength: 0)
+
+      Image(systemName: "play.circle.fill")
+        .font(.system(size: 40))
+        .foregroundStyle(.primary.opacity(0.9))
     }
+    .padding(18)
+    .frame(maxWidth: .infinity)
+    .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: isFocused, palette: palette)
+    .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 22, y: 12)
+    .contentShape(RoundedRectangle(cornerRadius: heroCorner))
+    .focusable(true)
+    .focused($focusedID, equals: id)
+    .prefersDefaultFocus(defaultFocusID == id, in: focusNamespace)
+    .focusEffectDisabled()
+    .onTapGesture { onWatchChannel?(followedChannel(from: profile)) }
+    .scaleEffect(isFocused ? 1.01 : 1)
+    .animation(.easeOut(duration: 0.14), value: isFocused)
+    .zIndex(isFocused ? 2 : 0)
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
@@ -378,28 +394,29 @@ struct ChannelPageView: View {
       contentRow(title: "Clips") {
         ForEach(clips) { clip in
           let itemID = "clip-\(clip.slug)"
-          FocusableCard(
-            id: itemID,
-            cornerRadius: cardCorner,
-            focusedScale: AppLayout.focusedCardScale,
-            requestInitialFocus: initialFocusID == itemID,
-            onSelect: { onDemandItem = .clip(slug: clip.slug, title: clip.title) },
-            onInitialFocusApplied: { initialFocusID = nil }
-          ) { isFocused in
-            MediaContentCard(
-              title: clip.title,
-              subtitle: clipSubtitle(clip),
-              thumbnailURL: clip.thumbnailURL,
-              durationText: Self.shortDuration(clip.durationSeconds),
-              isFocused: isFocused,
-              mediaWidth: tileWidth,
-              mediaHeight: tileMediaHeight,
-              focusHorizontalInset: focusHInset,
-              focusVerticalInset: focusVInset,
-              cardCornerRadius: cardCorner,
-              mediaCornerRadius: mediaCorner
-            )
-          }
+          let isFocused = focusedID == itemID
+          MediaContentCard(
+            title: clip.title,
+            subtitle: clipSubtitle(clip),
+            thumbnailURL: clip.thumbnailURL,
+            durationText: Self.shortDuration(clip.durationSeconds),
+            isFocused: isFocused,
+            mediaWidth: tileWidth,
+            mediaHeight: tileMediaHeight,
+            focusHorizontalInset: focusHInset,
+            focusVerticalInset: focusVInset,
+            cardCornerRadius: cardCorner,
+            mediaCornerRadius: mediaCorner
+          )
+          .contentShape(RoundedRectangle(cornerRadius: cardCorner))
+          .focusable(true)
+          .focused($focusedID, equals: itemID)
+          .prefersDefaultFocus(defaultFocusID == itemID, in: focusNamespace)
+          .focusEffectDisabled()
+          .onTapGesture { onDemandItem = .clip(slug: clip.slug, title: clip.title) }
+          .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
+          .animation(.easeOut(duration: 0.14), value: isFocused)
+          .zIndex(isFocused ? 2 : 0)
         }
       }
     } else if isLoadingContent {
@@ -421,28 +438,29 @@ struct ChannelPageView: View {
       contentRow(title: "Past Broadcasts") {
         ForEach(videos) { vod in
           let itemID = "vod-\(vod.id)"
-          FocusableCard(
-            id: itemID,
-            cornerRadius: cardCorner,
-            focusedScale: AppLayout.focusedCardScale,
-            requestInitialFocus: initialFocusID == itemID,
-            onSelect: { onDemandItem = .vod(id: vod.id, title: vod.title) },
-            onInitialFocusApplied: { initialFocusID = nil }
-          ) { isFocused in
-            MediaContentCard(
-              title: vod.title,
-              subtitle: vodSubtitle(vod),
-              thumbnailURL: vod.thumbnailURL,
-              durationText: Self.longDuration(vod.lengthSeconds),
-              isFocused: isFocused,
-              mediaWidth: tileWidth,
-              mediaHeight: tileMediaHeight,
-              focusHorizontalInset: focusHInset,
-              focusVerticalInset: focusVInset,
-              cardCornerRadius: cardCorner,
-              mediaCornerRadius: mediaCorner
-            )
-          }
+          let isFocused = focusedID == itemID
+          MediaContentCard(
+            title: vod.title,
+            subtitle: vodSubtitle(vod),
+            thumbnailURL: vod.thumbnailURL,
+            durationText: Self.longDuration(vod.lengthSeconds),
+            isFocused: isFocused,
+            mediaWidth: tileWidth,
+            mediaHeight: tileMediaHeight,
+            focusHorizontalInset: focusHInset,
+            focusVerticalInset: focusVInset,
+            cardCornerRadius: cardCorner,
+            mediaCornerRadius: mediaCorner
+          )
+          .contentShape(RoundedRectangle(cornerRadius: cardCorner))
+          .focusable(true)
+          .focused($focusedID, equals: itemID)
+          .prefersDefaultFocus(defaultFocusID == itemID, in: focusNamespace)
+          .focusEffectDisabled()
+          .onTapGesture { onDemandItem = .vod(id: vod.id, title: vod.title) }
+          .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
+          .animation(.easeOut(duration: 0.14), value: isFocused)
+          .zIndex(isFocused ? 2 : 0)
         }
       }
     } else if isLoadingContent {
@@ -472,29 +490,29 @@ struct ChannelPageView: View {
           LazyHStack(spacing: 22) {
             ForEach(recommendations) { channel in
               let itemID = "rec-\(channel.id)"
-              FocusableCard(
-                id: itemID,
-                cornerRadius: cardCorner,
-                focusedScale: AppLayout.focusedCardScale,
-                requestInitialFocus: initialFocusID == itemID,
-                onSelect: { onWatchChannel?(channel) },
-                onInitialFocusApplied: { initialFocusID = nil }
-              ) { isFocused in
-                StreamChannelCard(
-                  channel: channel,
-                  isFocused: isFocused,
-                  layout: .rail(
-                    mediaWidth: tileWidth,
-                    mediaHeight: tileMediaHeight,
-                    focusHorizontalInset: focusHInset,
-                    focusVerticalInset: focusVInset,
-                    cardCornerRadius: cardCorner,
-                    mediaCornerRadius: mediaCorner
-                  ),
-                  showsGameName: true
-                )
-                .accessibilityAddTraits(.isButton)
-              }
+              let isFocused = focusedID == itemID
+              StreamChannelCard(
+                channel: channel,
+                isFocused: isFocused,
+                layout: .rail(
+                  mediaWidth: tileWidth,
+                  mediaHeight: tileMediaHeight,
+                  focusHorizontalInset: focusHInset,
+                  focusVerticalInset: focusVInset,
+                  cardCornerRadius: cardCorner,
+                  mediaCornerRadius: mediaCorner
+                ),
+                showsGameName: true
+              )
+              .accessibilityAddTraits(.isButton)
+              .contentShape(RoundedRectangle(cornerRadius: cardCorner))
+              .focusable(true)
+              .focused($focusedID, equals: itemID)
+              .focusEffectDisabled()
+              .onTapGesture { onWatchChannel?(channel) }
+              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
+              .animation(.easeOut(duration: 0.14), value: isFocused)
+              .zIndex(isFocused ? 2 : 0)
             }
           }
           .padding(.horizontal, AppLayout.horizontalPadding)
@@ -604,34 +622,15 @@ struct ChannelPageView: View {
     profile = loadedProfile
     profileFailed = loadedProfile == nil
     isLoadingProfile = false
-    if !didSetInitialFocus, loadedProfile?.isLive == true {
-      initialFocusID = "live"
-      didSetInitialFocus = true
-    }
 
     let loadedContent = await contentTask
     content = loadedContent
     isLoadingContent = false
-    focusFirstContentIfNeeded()
 
     if let signals = loadedContent?.signals {
       recommendations = await SimilarChannelsEngine.recommend(using: signals)
     }
     isLoadingRecs = false
-  }
-
-  /// Once content lands, target the first actionable tile for initial focus if we
-  /// haven't already anchored focus (i.e. the channel isn't live, so there's no
-  /// live card). The matching tile self-focuses and then clears `initialFocusID`.
-  private func focusFirstContentIfNeeded() {
-    guard !didSetInitialFocus else { return }
-    if let firstClip = content?.clips.first {
-      initialFocusID = "clip-\(firstClip.slug)"
-      didSetInitialFocus = true
-    } else if let firstVOD = content?.videos.first {
-      initialFocusID = "vod-\(firstVOD.id)"
-      didSetInitialFocus = true
-    }
   }
 
   private func followedChannel(from profile: ChannelProfile) -> FollowedChannel {
@@ -735,45 +734,5 @@ struct ChannelPageView: View {
     }
     if result.hasSuffix("/") { result = String(result.dropLast()) }
     return result
-  }
-}
-
-/// A single focusable rail tile. It owns its focus state *locally* so that moving
-/// focus only re-renders the two tiles involved in the transition — never the
-/// parent `ChannelPageView` body or its sibling tiles. (A shared `@FocusState`
-/// owned by the parent invalidates the whole page on every navigation, which is
-/// what made the channel page feel laggy.) Programmatic initial focus is driven
-/// by the plain `requestInitialFocus` flag rather than a shared focus binding.
-private struct FocusableCard<Content: View>: View {
-  let id: String
-  let cornerRadius: CGFloat
-  let focusedScale: CGFloat
-  let requestInitialFocus: Bool
-  let onSelect: () -> Void
-  let onInitialFocusApplied: () -> Void
-  @ViewBuilder let content: (Bool) -> Content
-
-  @FocusState private var isFocused: Bool
-
-  var body: some View {
-    content(isFocused)
-      .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
-      .focusable(true)
-      .focused($isFocused)
-      .focusEffectDisabled()
-      .onTapGesture(perform: onSelect)
-      .scaleEffect(isFocused ? focusedScale : 1)
-      .animation(.easeOut(duration: 0.14), value: isFocused)
-      .zIndex(isFocused ? 2 : 0)
-      .onAppear { applyInitialFocusIfNeeded() }
-      .onChange(of: requestInitialFocus) { _, now in
-        if now { applyInitialFocusIfNeeded() }
-      }
-  }
-
-  private func applyInitialFocusIfNeeded() {
-    guard requestInitialFocus, !isFocused else { return }
-    isFocused = true
-    onInitialFocusApplied()
   }
 }

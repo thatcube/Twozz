@@ -875,7 +875,9 @@ struct PlayerView: View {
             LatencyBadge(readout: latencyReadout)
             Spacer()
             if let remaining = sleepRemainingSeconds {
-              SleepCountdownBadge(remaining: remaining)
+              SleepCountdownBadge(text: SleepCountdownBadge.format(seconds: remaining))
+            } else if sleepUntilStreamEnds {
+              SleepCountdownBadge(text: "End")
             }
           }
           if showLatencyDiagnostics {
@@ -4462,11 +4464,14 @@ private struct LatencyBadge: View {
 }
 
 /// Small top-right chip showing the time left on an armed sleep timer.
+/// Small top-right chip showing the armed sleep timer: a `m:ss` countdown for
+/// timed sleeps, or a short label (e.g. "End") when set to sleep at end of
+/// stream.
 private struct SleepCountdownBadge: View {
-  let remaining: Int
+  let text: String
 
-  private var formatted: String {
-    let clamped = max(0, remaining)
+  static func format(seconds: Int) -> String {
+    let clamped = max(0, seconds)
     return String(format: "%d:%02d", clamped / 60, clamped % 60)
   }
 
@@ -4477,7 +4482,7 @@ private struct SleepCountdownBadge: View {
         .font(.caption)
         .foregroundStyle(.white)
 
-      Text(formatted)
+      Text(text)
         .font(.caption)
         .fontWeight(.semibold)
         .monospacedDigit()

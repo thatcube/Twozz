@@ -318,6 +318,24 @@ struct PlayerView: View {
   private let chatScrollMoveEpsilon: Double = 0.003
   /// Messages scrolled per unit of finger travel across the trackpad.
   private let chatScrollSwipeSensitivity: Double = 16
+  /// Per-frame velocity decay once the finger lifts, giving swipes momentum so
+  /// the chat coasts and eases to a stop instead of halting dead.
+  private let chatScrollFriction: Double = 0.92
+  /// Below this coasting speed (index-units per frame) momentum is considered
+  /// spent and stops.
+  private let chatScrollMomentumMin: Double = 0.05
+  /// Press-and-hold auto-repeat. tvOS won't emit system key-repeat here because
+  /// focus is trapped on the composer, so we drive an accelerating repeat
+  /// ourselves while the finger stays pressed/down on the pad.
+  @State private var chatHoldTask: Task<Void, Never>?
+  /// Delay after the initial press before auto-repeat kicks in (key-repeat feel).
+  private let chatHoldInitialDelay: Double = 0.35
+  /// Repeat interval at the start of a hold, shrinking toward the minimum.
+  private let chatHoldStartInterval: Double = 0.26
+  /// Fastest repeat interval the hold accelerates to.
+  private let chatHoldMinInterval: Double = 0.06
+  /// Each repeat multiplies the interval by this, accelerating the hold.
+  private let chatHoldAccel: Double = 0.82
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
   @State private var chatInputFocusedAt = Date.distantPast
@@ -694,6 +712,7 @@ struct PlayerView: View {
       outgoingRaidFollowTask?.cancel()
       softPauseTask?.cancel()
       trackpadScrollTask?.cancel()
+      chatHoldTask?.cancel()
       trackpad.stop()
       sleepTimerTask?.cancel()
       stopPlaybackWatchdog()
@@ -1602,9 +1621,11 @@ struct PlayerView: View {
         return
       }
       stepChatScroll(up: true)
+      startChatHold(up: true)
     } else if chatSoftPauseRemaining != nil {
       beginChatScrolling()
       stepChatScroll(up: true)
+      startChatHold(up: true)
     } else {
       // Ignore an up-swipe that arrives right as focus lands on the composer —
       // that's a diagonal move off the chat-toggle button, not a deliberate
@@ -1622,6 +1643,7 @@ struct PlayerView: View {
         return
       }
       stepChatScroll(up: false)
+      startChatHold(up: false)
     } else if chatSoftPauseRemaining != nil {
       resumeChatLive()
     }
@@ -1673,6 +1695,8 @@ struct PlayerView: View {
     trackpadScrollTask = Task { @MainActor in
       var primed = false
       var lastY = 0.0
+      // Coasting speed in index-units per frame, carried after the finger lifts.
+      var velocity = 0.0
       while !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(16))
         if Task.isCancelled { break }
@@ -1680,49 +1704,106 @@ struct PlayerView: View {
 
         let x = Double(trackpad.horizontalValue)
         let y = Double(trackpad.verticalValue)
-        // ~(0,0) means the finger is centered or lifted — end the current swipe
-        // so the next touch re-baselines instead of jumping.
-        guard abs(x) > chatScrollTouchEpsilon || abs(y) > chatScrollTouchEpsilon else {
+        let touching =
+          abs(x) > chatScrollTouchEpsilon || abs(y) > chatScrollTouchEpsilon
+
+        if !touching {
+          // Finger lifted: coast with the velocity built up during the swipe so
+          // the chat eases to a stop (momentum) instead of halting dead.
           primed = false
+          if abs(velocity) > chatScrollMomentumMin {
+            if !applyScrollDelta(velocity) { break }
+            velocity *= chatScrollFriction
+          } else {
+            velocity = 0
+          }
           continue
         }
+        // A fresh touch (including a press's finger-down) cancels any coast so it
+        // doesn't fight the press/step handler, then re-baselines travel.
         if !primed {
           primed = true
           lastY = y
+          velocity = 0
           continue
         }
         let dy = y - lastY
         lastY = y
-        // Only finger *movement* scrolls. A resting or pressing finger (dy ~ 0)
-        // is left alone so the loop never re-asserts a position and fights the
-        // discrete press/step handler.
-        guard abs(dy) > chatScrollMoveEpsilon else { continue }
-        lastGestureScrollAt = Date()
-
-        let msgs = visibleChatMessages
-        guard !msgs.isEmpty else { continue }
-        let lastIndex = Double(msgs.count - 1)
-        // Up travel (y increases) scrolls toward older messages (lower index).
-        let idx = trackpadScrollIndex - dy * chatScrollSwipeSensitivity
-        if idx >= lastIndex {
-          resumeChatLive()
-          break
+        // A resting or pressing finger (dy ~ 0) is left alone; bleed off any
+        // leftover velocity so pausing mid-swipe doesn't later coast.
+        guard abs(dy) > chatScrollMoveEpsilon else {
+          velocity *= chatScrollFriction
+          continue
         }
-        let clamped = max(0, idx)
-        trackpadScrollIndex = clamped
-        let target = Int(clamped.rounded())
-        guard target != lastSentScrollIndex else { continue }
-        lastSentScrollIndex = target
-        chatScrollAnchorID = msgs[target].id
-        sendChatScroll(to: msgs[target].id, animated: false)
+        lastGestureScrollAt = Date()
+        // Up travel (y increases) scrolls toward older messages (lower index).
+        let delta = -dy * chatScrollSwipeSensitivity
+        // Smooth into the velocity estimate so the handoff to momentum is stable.
+        velocity = velocity * 0.35 + delta * 0.65
+        if !applyScrollDelta(delta) { break }
       }
       trackpadScrollTask = nil
     }
   }
 
+  /// Move the scroll position by `delta` messages (fractional). Returns false if
+  /// the move reached the live bottom and resumed the feed, signalling the loop
+  /// to stop.
+  @discardableResult
+  private func applyScrollDelta(_ delta: Double) -> Bool {
+    let msgs = visibleChatMessages
+    guard !msgs.isEmpty else { return false }
+    let lastIndex = Double(msgs.count - 1)
+    let idx = trackpadScrollIndex + delta
+    if idx >= lastIndex {
+      resumeChatLive()
+      return false
+    }
+    let clamped = max(0, idx)
+    trackpadScrollIndex = clamped
+    let target = Int(clamped.rounded())
+    guard target != lastSentScrollIndex else { return true }
+    lastSentScrollIndex = target
+    chatScrollAnchorID = msgs[target].id
+    sendChatScroll(to: msgs[target].id, animated: false)
+    return true
+  }
+
+  /// Auto-repeat a press while the finger stays pressed/down on the pad. tvOS
+  /// gives no system key-repeat here (focus is trapped on the composer), so we
+  /// step on an accelerating interval until the finger lifts or a swipe takes
+  /// over. Requires the trackpad monitor so we can detect the finger lifting.
+  private func startChatHold(up: Bool) {
+    guard trackpad.hasController else { return }
+    chatHoldTask?.cancel()
+    chatHoldTask = Task { @MainActor in
+      try? await Task.sleep(for: .seconds(chatHoldInitialDelay))
+      var interval = chatHoldStartInterval
+      while !Task.isCancelled {
+        guard isChatScrolling else { break }
+        let mag = max(
+          abs(Double(trackpad.verticalValue)), abs(Double(trackpad.horizontalValue)))
+        // Finger lifted -> stop repeating.
+        guard mag > chatScrollTouchEpsilon else { break }
+        // A swipe is actively driving -> hand off to the gesture loop.
+        if Date().timeIntervalSince(lastGestureScrollAt) < 0.12 { break }
+        stepChatScroll(up: up)
+        try? await Task.sleep(for: .seconds(interval))
+        interval = max(chatHoldMinInterval, interval * chatHoldAccel)
+      }
+      chatHoldTask = nil
+    }
+  }
+
+  private func stopChatHold() {
+    chatHoldTask?.cancel()
+    chatHoldTask = nil
+  }
+
   private func stopTrackpadScrollLoop() {
     trackpadScrollTask?.cancel()
     trackpadScrollTask = nil
+    stopChatHold()
     lastSentScrollIndex = -1
   }
 

@@ -89,7 +89,7 @@ struct ChatView: View {
         // animation so multi-message steps feel responsive rather than draggy.
         guard let target else { return }
         pendingScrollWork?.cancel()
-        withAnimation(.snappy(duration: 0.18, extraBounce: 0)) {
+        withAnimation(.easeOut(duration: 0.12)) {
           proxy.scrollTo(target.id, anchor: target.anchor)
         }
       }
@@ -123,7 +123,7 @@ struct ChatView: View {
         }
       }
       .animation(.easeInOut(duration: 0.2), value: autoScroll)
-      .animation(.easeInOut(duration: 0.2), value: softPauseRemaining != nil)
+      .animation(.easeInOut(duration: 0.2), value: softPauseRemaining)
       .overlay {
         if messages.isEmpty {
           Text(isConnected ? "Waiting for messages…" : "Connecting to chat…")
@@ -134,17 +134,18 @@ struct ChatView: View {
     }
   }
 
-  /// Shown while the list is frozen. In the soft-pause "read" mode it nudges the
-  /// viewer that they can scroll up (animated chevron); once they actually scroll
-  /// it collapses to a minimal "Scrolling" indicator.
+  /// Shown while the list is frozen. In the soft-pause "read" mode it keeps the
+  /// "Chat paused" countdown but adds an animated up-chevron hinting that you can
+  /// scroll; once you actually scroll it collapses to a minimal "Scrolling" tag.
   private var pausedPill: some View {
     HStack(spacing: 8) {
-      if softPauseRemaining != nil {
+      if let remaining = softPauseRemaining {
         Image(systemName: "chevron.up")
           .font(.caption.weight(.bold))
           .symbolEffect(.bounce.up, options: .repeating)
-        Text("Scroll")
+        Text("Chat paused · \(remaining)s")
           .font(.caption.weight(.semibold))
+          .contentTransition(.numericText())
       } else {
         Image(systemName: "chevron.up.chevron.down")
           .font(.caption.weight(.bold))

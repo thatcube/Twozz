@@ -701,6 +701,17 @@ struct PlayerView: View {
       }
     }
     .onMoveCommand { direction in
+      // While actively scrolling with the chrome hidden, route every directional
+      // input through the scroll handler (and swallow horizontal) so a stray
+      // swipe can't surface the chrome and bump you out of the scroll.
+      if !showControls, showChat, isChatScrolling {
+        switch direction {
+        case .up: handleChatUpPress()
+        case .down: handleChatDownPress()
+        default: break
+        }
+        return
+      }
       if !showControls {
         // Directional movement should immediately surface controls. Pressing
         // right with chat open means the user wants the composer, so land
@@ -727,9 +738,19 @@ struct PlayerView: View {
       if newFocus == .chatInput, oldFocus != .chatInput {
         chatInputFocusedAt = Date()
       }
-      // If chat is frozen (soft pause or scroll) and the viewer navigates away
-      // to a real control, resume live so the frozen state can't get stranded.
-      if isChatScrolling || chatSoftPauseRemaining != nil {
+      // Keep the swipe target stable while chat is held.
+      if isChatScrolling {
+        // Active scroll traps focus on the composer so a stray diagonal swipe
+        // can't jump to a control and silently end the scroll. The only
+        // exception is `.video`, which is the page-level handler that drives
+        // scrolling while the chrome is hidden. Exit is via Back or scrolling
+        // back to the bottom.
+        if let newFocus, newFocus != .chatInput, newFocus != .video {
+          focus = .chatInput
+        }
+      } else if chatSoftPauseRemaining != nil {
+        // Lightweight read pause: navigating away to a real control resumes live
+        // so the frozen state can't get stranded.
         if let newFocus, newFocus != .chatInput, isControlFocus(newFocus) {
           resumeChatLive()
         }
@@ -1637,7 +1658,10 @@ struct PlayerView: View {
 
   private func sendChatScroll(to id: ChatMessage.ID) {
     chatScrollNonce += 1
-    chatScrollTarget = ChatScrollTarget(id: id, anchor: .top, nonce: chatScrollNonce)
+    // Anchor the target at the bottom of the viewport. A `.top` anchor clamps
+    // hard near the live bottom (where every scroll starts), so the first swipes
+    // barely move; `.bottom` reveals a full step of older messages immediately.
+    chatScrollTarget = ChatScrollTarget(id: id, anchor: .bottom, nonce: chatScrollNonce)
   }
 
   /// Leave any frozen state and let chat snap back to the live, newest message.

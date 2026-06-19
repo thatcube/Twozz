@@ -96,7 +96,7 @@ struct ChannelContentService {
           }
           videos(first: 24, sort: TIME, type: ARCHIVE) {
             edges { node {
-              id title lengthSeconds previewThumbnailURL publishedAt viewCount
+              id title lengthSeconds previewThumbnailURL publishedAt viewCount status
               game { name displayName }
             } }
           }
@@ -124,6 +124,14 @@ struct ChannelContentService {
 
     let videos: [ChannelVOD] = (user.videos?.edges ?? []).compactMap { edge in
       guard let node = edge.node, let id = node.id, !id.isEmpty else { return nil }
+      // Drop the channel's in-progress broadcast: while a channel is live and
+      // "store past broadcasts" is on, the current stream shows up as the newest
+      // ARCHIVE video with status "RECORDING" and a 404_processing thumbnail.
+      // The live card at the top already covers watching it, so this duplicate
+      // (thumbnail-less) tile would just be a confusing first "Past Broadcast".
+      // A RECORDING status only exists during an active broadcast, so this never
+      // affects offline channels or finished VODs.
+      if node.status?.uppercased() == "RECORDING" { return nil }
       return ChannelVOD(
         id: id,
         title: node.title?.trimmed.nilIfEmpty ?? "Past Broadcast",
@@ -245,6 +253,7 @@ struct ChannelContentService {
     let previewThumbnailURL: String?
     let publishedAt: String?
     let viewCount: Int?
+    let status: String?
     let game: GameNode?
   }
 }

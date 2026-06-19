@@ -58,6 +58,24 @@ avoid clobbering:
    own branch does not prove it works once merged with everything else. After a
    merge, do one real on-device test of the resulting `main` before moving on.
 
+## Design: prefer native components and appearance
+
+Default to platform-native UI. When building or changing UI, prefer SwiftUI/UIKit's
+built-in components and the system's native appearance over custom-built equivalents:
+
+1. **Reach for native first.** Use standard controls, the tvOS focus engine, system
+   materials (e.g. `.ultraThinMaterial`), SF Symbols, system colors, default fonts and
+   metrics, and built-in players/containers before writing anything custom.
+2. **Only go custom when native genuinely can't do the job.** Build a custom component
+   solely when a native control cannot meet the functional, performance, or UX
+   requirement (for example, the player overlay must be custom because Twitch playback
+   needs controls AVKit doesn't expose). Note *why* in the code or PR when you do.
+3. **Extend, don't replace.** When a native component is close but not exact, prefer
+   styling or composing it over reimplementing it from scratch.
+4. **Why:** native components are more accessible (VoiceOver, Dynamic Type for free),
+   more familiar to users, more maintainable, and stay consistent with tvOS conventions
+   and future OS updates.
+
 ## Always deploy after successful local build
 
 When code changes are made and a build succeeds, always deploy the newest build to the paired Apple TV so the user can test immediately.

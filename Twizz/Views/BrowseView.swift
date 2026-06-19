@@ -111,7 +111,7 @@ private struct BrowseCategoriesView: View {
               onSelectCategory(category)
             }
             .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
+            .animation(AppLayout.focusScaleAnimation, value: isFocused)
             .zIndex(isFocused ? 2 : 0)
           }
         }
@@ -227,7 +227,7 @@ private struct BrowseStreamsView: View {
                   selectedChannel = channel
                 }
                 .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-                .animation(.easeOut(duration: 0.14), value: isFocused)
+                .animation(AppLayout.focusScaleAnimation, value: isFocused)
                 .zIndex(isFocused ? 2 : 0)
               }
             }
@@ -253,4 +253,3 @@ private struct BrowseStreamsView: View {
     }
   }
 }
-

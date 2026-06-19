@@ -17,8 +17,9 @@ struct ChatView: View {
   var emoteSize: CGFloat = ChatAppearance.defaultEmoteSize
   var messageSpacing: CGFloat = ChatAppearance.defaultMessageSpacing
   var lineHeight: CGFloat = ChatAppearance.defaultLineHeight
+  var letterSpacing: CGFloat = ChatAppearance.defaultLetterSpacing
   var animatedEmotes: Bool = true
-  var fontDesign: Font.Design = ChatAppearance.defaultFontStyle.design
+  var fontStyle: ChatFontStyle = ChatAppearance.defaultFontStyle
   var showBadges: Bool = ChatAppearance.defaultShowBadges
   var isConnected: Bool = false
   var emoteURLs: [String: URL] = [:]
@@ -169,8 +170,9 @@ struct ChatView: View {
       textSize: textSize,
       emoteSize: emoteSize,
       lineHeight: lineHeight,
+      letterSpacing: letterSpacing,
       animatedEmotes: animatedEmotes,
-      fontDesign: fontDesign,
+      fontStyle: fontStyle,
       showBadges: showBadges,
       bodyColorOverride: isSideLayout ? palette.chatSidePrimaryText : nil
     )

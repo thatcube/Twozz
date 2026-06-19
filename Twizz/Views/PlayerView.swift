@@ -1,4 +1,5 @@
 import AVKit
+import Observation
 import SwiftUI
 import UIKit
 
@@ -104,14 +105,22 @@ struct PlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.themePalette) private var palette
   @AppStorage("preferredQuality") private var preferredQuality = "Auto"
-  @AppStorage("chatTextSizeValue") private var chatTextSizeValue = Double(ChatAppearance.defaultTextSize)
+  @AppStorage("chatTextSizeValue") private var chatTextSizeValue = Double(
+    ChatAppearance.defaultTextSize)
   @AppStorage("chatEmoteAuto") private var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
-  @AppStorage("chatEmoteSizeValue") private var chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
-  @AppStorage("chatLineHeightValue") private var chatLineHeightValue = Double(ChatAppearance.defaultLineHeight)
-  @AppStorage("chatMessageSpacingValue") private var chatMessageSpacingValue = Double(ChatAppearance.defaultMessageSpacing)
+  @AppStorage("chatEmoteSizeValue") private var chatEmoteSizeValue = Double(
+    ChatAppearance.defaultEmoteSize)
+  @AppStorage("chatLineHeightValue") private var chatLineHeightValue = Double(
+    ChatAppearance.defaultLineHeight)
+  @AppStorage("chatLetterSpacingValue") private var chatLetterSpacingValue = Double(
+    ChatAppearance.defaultLetterSpacing)
+  @AppStorage("chatMessageSpacingValue") private var chatMessageSpacingValue = Double(
+    ChatAppearance.defaultMessageSpacing)
   @AppStorage("chatWidthValue") private var chatWidthValue = Double(ChatAppearance.defaultWidth)
-  @AppStorage("chatAnimatedEmotes") private var chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
-  @AppStorage("chatFontStyle") private var chatFontStyleRaw = ChatAppearance.defaultFontStyle.rawValue
+  @AppStorage("chatAnimatedEmotes") private var chatAnimatedEmotes = ChatAppearance
+    .defaultAnimatedEmotes
+  @AppStorage("chatFontStyle") private var chatFontStyleRaw = ChatAppearance.defaultFontStyle
+    .rawValue
   @AppStorage("chatShowBadges") private var chatShowBadges = ChatAppearance.defaultShowBadges
   @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
   @AppStorage("chatSyncToStream") private var chatSyncToStream = false
@@ -142,7 +151,8 @@ struct PlayerView: View {
   @State private var errorMessage: String?
   @State private var isOffline = false
   @State private var isLoading = true
-  @State private var showChat: Bool = UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
+  @State private var showChat: Bool =
+    UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
   @State private var chatReplayStartMessageID: ChatMessage.ID?
   /// Live resolution AVPlayer's adaptive (Auto) selection is currently showing,
   /// e.g. "1080p60". Drives the "Auto (1080p60)" label on the quality button.
@@ -176,32 +186,96 @@ struct PlayerView: View {
   @State private var isQualityMenuPresented = false
   @State private var latencyTask: Task<Void, Never>?
   @State private var playbackWatchdogTask: Task<Void, Never>?
-  @State private var wallClockLatencySeconds: Double?
-  @State private var liveEdgeLatencySeconds: Double?
-  @State private var smoothedLatencySeconds: Double?
-  /// Total settled latency samples since playback became active.
-  @State private var latencySampleCount = 0
-  /// Consecutive samples whose smoothed value barely moved — i.e. the reading
-  /// has stopped climbing off the live edge and looks trustworthy.
-  @State private var latencyStableCount = 0
+  // The live-latency and playback-watchdog tasks rewrite a large set of
+  // bookkeeping values once per second. Storing them as `@State` re-executed the
+  // entire (very large) PlayerView body every tick, which rebuilt the focused
+  // quality button and made its focus highlight visibly flash ~once a second.
+  // They live in a plain (non-Observable) reference box instead: mutating the
+  // box's properties never invalidates the view, so the per-second monitoring
+  // no longer churns the UI. The forwarding computed properties below keep the
+  // original names so the monitoring code reads unchanged. UI that needs the
+  // latency reading goes through `latencyReadout` (an `@Observable` the badge
+  // leaf observes), so only the badge — not the whole player — updates.
+  @State private var mon = PlaybackMonitorBox()
+  @State private var latencyReadout = LatencyReadout()
+
+  private var wallClockLatencySeconds: Double? {
+    get { mon.wallClockLatencySeconds }
+    nonmutating set { mon.wallClockLatencySeconds = newValue }
+  }
+  private var liveEdgeLatencySeconds: Double? {
+    get { mon.liveEdgeLatencySeconds }
+    nonmutating set { mon.liveEdgeLatencySeconds = newValue }
+  }
+  private var smoothedLatencySeconds: Double? {
+    get { mon.smoothedLatencySeconds }
+    nonmutating set { mon.smoothedLatencySeconds = newValue }
+  }
+  private var latencySampleCount: Int {
+    get { mon.latencySampleCount }
+    nonmutating set { mon.latencySampleCount = newValue }
+  }
+  private var latencyStableCount: Int {
+    get { mon.latencyStableCount }
+    nonmutating set { mon.latencyStableCount = newValue }
+  }
   // The real (pre-proxy) source URL of the currently loaded item, so we can tell
   // whether a quality switch actually needs to replace the item. AVURLAsset.url
   // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
   // for this comparison directly.
   @State private var currentSourceURL: URL?
-  @State private var isPlaybackActive = false
-  @State private var didRequestPlayback = false
-  @State private var lastHardCatchUpJumpAt = Date.distantPast
-  @State private var lastWallClockCatchUpAt = Date.distantPast
-  @State private var edgeLatencyLowConfidenceStreak = 0
-  @State private var wallClockHighLatencyStreak = 0
-  @State private var wallClockLowConfidenceStreak = 0
-  @State private var lastPlaybackDateSample: Date?
-  @State private var lastPlaybackTimeSampleSeconds: Double?
-  @State private var lastObservedPlaybackTimeSeconds: Double?
-  @State private var stalledPlaybackSamples = 0
-  @State private var isRecoveringPlayback = false
-  @State private var lastRecoveryAttemptAt = Date.distantPast
+  private var isPlaybackActive: Bool {
+    get { mon.isPlaybackActive }
+    nonmutating set { mon.isPlaybackActive = newValue }
+  }
+  private var didRequestPlayback: Bool {
+    get { mon.didRequestPlayback }
+    nonmutating set { mon.didRequestPlayback = newValue }
+  }
+  private var lastHardCatchUpJumpAt: Date {
+    get { mon.lastHardCatchUpJumpAt }
+    nonmutating set { mon.lastHardCatchUpJumpAt = newValue }
+  }
+  private var lastWallClockCatchUpAt: Date {
+    get { mon.lastWallClockCatchUpAt }
+    nonmutating set { mon.lastWallClockCatchUpAt = newValue }
+  }
+  private var edgeLatencyLowConfidenceStreak: Int {
+    get { mon.edgeLatencyLowConfidenceStreak }
+    nonmutating set { mon.edgeLatencyLowConfidenceStreak = newValue }
+  }
+  private var wallClockHighLatencyStreak: Int {
+    get { mon.wallClockHighLatencyStreak }
+    nonmutating set { mon.wallClockHighLatencyStreak = newValue }
+  }
+  private var wallClockLowConfidenceStreak: Int {
+    get { mon.wallClockLowConfidenceStreak }
+    nonmutating set { mon.wallClockLowConfidenceStreak = newValue }
+  }
+  private var lastPlaybackDateSample: Date? {
+    get { mon.lastPlaybackDateSample }
+    nonmutating set { mon.lastPlaybackDateSample = newValue }
+  }
+  private var lastPlaybackTimeSampleSeconds: Double? {
+    get { mon.lastPlaybackTimeSampleSeconds }
+    nonmutating set { mon.lastPlaybackTimeSampleSeconds = newValue }
+  }
+  private var lastObservedPlaybackTimeSeconds: Double? {
+    get { mon.lastObservedPlaybackTimeSeconds }
+    nonmutating set { mon.lastObservedPlaybackTimeSeconds = newValue }
+  }
+  private var stalledPlaybackSamples: Int {
+    get { mon.stalledPlaybackSamples }
+    nonmutating set { mon.stalledPlaybackSamples = newValue }
+  }
+  private var isRecoveringPlayback: Bool {
+    get { mon.isRecoveringPlayback }
+    nonmutating set { mon.isRecoveringPlayback = newValue }
+  }
+  private var lastRecoveryAttemptAt: Date {
+    get { mon.lastRecoveryAttemptAt }
+    nonmutating set { mon.lastRecoveryAttemptAt = newValue }
+  }
   @State private var lastStallNotificationAt = Date.distantPast
   @State private var suppressLowLatencyToggleReload = false
   @State private var consecutiveLoadFailures = 0
@@ -235,11 +309,34 @@ struct PlayerView: View {
     isChatScrolling || chatSoftPauseRemaining != nil
   }
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
+  /// A just-activated settings control to briefly defend against tvOS's
+  /// transient focus jump when toggling an option resizes the panel.
+  @State private var chatFocusPin: Focusable?
+  @State private var chatFocusPinTask: Task<Void, Never>?
   @State private var raidBannerDismissTask: Task<Void, Never>?
   /// The outgoing raid currently being followed (with a cancel window).
   @State private var outgoingRaid: OutgoingRaidEvent?
   @State private var outgoingRaidSecondsRemaining = 0
   @State private var outgoingRaidFollowTask: Task<Void, Never>?
+
+  // MARK: Sleep timer (hidden inside the Quality menu)
+  // A single countdown task pauses playback after a chosen duration so the
+  // Apple TV can sleep when the viewer dozes off. It lives inside the Quality
+  // menu (no dedicated button) and surfaces a small top-right countdown badge.
+  @State private var sleepTimerTask: Task<Void, Never>?
+  /// Wall-clock instant playback should pause at, for the timed durations.
+  @State private var sleepDeadline: Date?
+  /// "End of stream" mode: sleep when the channel goes offline, not on a clock.
+  @State private var sleepUntilStreamEnds = false
+  /// Seconds left before sleep, republished each second for the countdown badge.
+  @State private var sleepRemainingSeconds: Int?
+  /// Index of the chosen option, so the submenu shows a checkmark.
+  @State private var sleepSelectionIndex = 0
+  /// Shown ~30s before a timed sleep so an awake viewer can keep watching.
+  @State private var showStillWatching = false
+  /// True once the timer fires: playback is paused under a dim "Sleeping"
+  /// overlay until the viewer presses to resume.
+  @State private var isSleeping = false
 
   // MARK: Diagnostics (experimental troubleshooting overlay)
   // Counters and a rolling event log so freezes/jumps can be observed on-device
@@ -314,6 +411,7 @@ struct PlayerView: View {
     case offlineViewChannel, offlineTryAgain
     case chatSend
     case raidFollowCancel
+    case sleepKeepWatching, sleepResume
     case simulateRaidButton
     case simulateOfflineButton
     case chatSettingsButton
@@ -354,6 +452,7 @@ struct PlayerView: View {
     case text
     case emote
     case lineHeight
+    case letterSpacing
     case messageSpacing
     case width
   }
@@ -364,6 +463,10 @@ struct PlayerView: View {
 
   private var chatLineHeight: CGFloat {
     CGFloat(chatLineHeightValue)
+  }
+
+  private var chatLetterSpacing: CGFloat {
+    CGFloat(chatLetterSpacingValue)
   }
 
   private var chatMessageSpacing: CGFloat {
@@ -432,7 +535,8 @@ struct PlayerView: View {
         // doesn't collide with the sign-in `.fullScreenCover` below. Two
         // presentation modifiers on the *same* view conflict on tvOS and only
         // one fires, which previously left the avatar button doing nothing.
-        .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) { target in
+        .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) {
+          target in
           ChannelPageView(
             target: target,
             onWatchChannel: { channel in
@@ -485,6 +589,17 @@ struct PlayerView: View {
           .transition(.move(edge: .bottom).combined(with: .opacity))
           .zIndex(11)
       }
+
+      if showStillWatching, !isSleeping {
+        stillWatchingBanner()
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .zIndex(12)
+      }
+
+      if isSleeping {
+        sleepingOverlay
+          .transition(.opacity)
+      }
     }
     .onChange(of: chat.pendingRaid) { _, newRaid in
       // Incoming raids (someone raiding the channel you're watching) are purely
@@ -506,6 +621,27 @@ struct PlayerView: View {
       guard let newRaid else { return }
       beginOutgoingRaidFollow(newRaid)
     }
+    .onChange(of: isOffline) { _, offline in
+      // "End of current stream" sleep mode: when the channel goes offline, let
+      // the device sleep (the offline empty-state is already shown, so no extra
+      // overlay is needed).
+      guard offline, sleepUntilStreamEnds else { return }
+      sleepUntilStreamEnds = false
+      sleepSelectionIndex = 0
+      sleepRemainingSeconds = nil
+      setIdleTimer(disabled: false)
+    }
+    .onChange(of: showStillWatching) { _, showing in
+      // Pull focus to the "Keep watching" button so an awake viewer can dismiss
+      // the pending sleep with a single press. Cancel the quality menu's focus
+      // recovery first so it can't yank focus back to the quality button (this
+      // matters when a short test timer surfaces the banner right as the menu
+      // is still closing).
+      if showing {
+        focusRecoveryTask?.cancel()
+        focus = .sleepKeepWatching
+      }
+    }
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
       configurePlayerForLive()
@@ -521,11 +657,13 @@ struct PlayerView: View {
     .onAppear {
       setIdleTimer(disabled: true)
     }
-    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) { notification in
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) {
+      notification in
       guard let stalledItem = notification.object as? AVPlayerItem else { return }
       guard stalledItem == player.currentItem else { return }
       let now = Date()
-      guard now.timeIntervalSince(lastStallNotificationAt) >= stallNotificationDebounceSeconds else { return }
+      guard now.timeIntervalSince(lastStallNotificationAt) >= stallNotificationDebounceSeconds
+      else { return }
       lastStallNotificationAt = now
       markDiagnosticsStall(reason: "AVPlayerItemPlaybackStalled")
     }
@@ -535,6 +673,7 @@ struct PlayerView: View {
       chatSyncSendClearTask?.cancel()
       outgoingRaidFollowTask?.cancel()
       softPauseTask?.cancel()
+      sleepTimerTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
       audioLevelMonitor.stop()
@@ -544,7 +683,9 @@ struct PlayerView: View {
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
-      if isChatScrolling || chatSoftPauseRemaining != nil {
+      if isSleeping {
+        wakeFromSleep()
+      } else if isChatScrolling || chatSoftPauseRemaining != nil {
         resumeChatLive()
       } else if showChatSettings {
         if chatSettingsPage != .main {
@@ -596,8 +737,22 @@ struct PlayerView: View {
 
       if showChatSettings {
         guard let newFocus else {
-          focus = lastChatSettingsFocus
+          focus = chatFocusPin ?? lastChatSettingsFocus
           return
+        }
+
+        // A control was just activated: defend it against the transient focus
+        // jump tvOS performs when toggling an option resizes the panel, which
+        // dumps focus onto the section's first focusable (the back button). We
+        // only revert that specific spurious target so deliberate navigation to
+        // any other control is never fought, and consume the pin after one move.
+        if let pin = chatFocusPin, newFocus != pin {
+          chatFocusPin = nil
+          chatFocusPinTask?.cancel()
+          if newFocus == firstChatSettingsFocus {
+            focus = pin
+            return
+          }
         }
 
         if isChatSettingsFocus(newFocus) {
@@ -717,8 +872,13 @@ struct PlayerView: View {
       {
         VStack {
           HStack {
-            LatencyBadge(color: latencyColor, label: latencyLabel)
+            LatencyBadge(readout: latencyReadout)
             Spacer()
+            if let remaining = sleepRemainingSeconds {
+              SleepCountdownBadge(text: SleepCountdownBadge.format(seconds: remaining))
+            } else if sleepUntilStreamEnds {
+              SleepCountdownBadge(text: "End of stream")
+            }
           }
           if showLatencyDiagnostics {
             HStack {
@@ -731,6 +891,7 @@ struct PlayerView: View {
         }
         .padding(.top, 36)
         .padding(.leading, 40)
+        .padding(.trailing, 40)
       }
 
       // Only expose the video focus target while controls are hidden.
@@ -969,6 +1130,10 @@ struct PlayerView: View {
           onMenuDismissed: {
             isQualityMenuPresented = false
             focusRecoveryTask?.cancel()
+            // If selecting a (short) sleep timer already surfaced the
+            // still-watching banner or the sleeping overlay, don't yank focus
+            // back to the quality button — let those own it.
+            guard !showStillWatching, !isSleeping else { return }
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
@@ -980,11 +1145,16 @@ struct PlayerView: View {
               guard !Task.isCancelled else { return }
               await MainActor.run {
                 guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
+                guard !showStillWatching, !isSleeping else { return }
                 guard focus == nil || focus == .quality else { return }
                 focus = .quality
               }
             }
-          }
+          },
+          sleepOptions: sleepTimerOptionLabels,
+          sleepSelectedIndex: sleepSelectionIndex,
+          sleepIsArmed: sleepTimerIsArmed,
+          onSelectSleep: { selectSleepTimer(at: $0) }
         )
         .equatable()
         .focused($focus, equals: .quality)
@@ -1116,14 +1286,16 @@ struct PlayerView: View {
       ? (chatSyncDelaySeconds.map { "\(diagFormat($0, decimals: 1))s" } ?? "measuring")
       : "off"
     if diagIsFrozen {
-      let frozenFor = diagFrozenSince.map { max(0, Int(Date().timeIntervalSince($0).rounded())) } ?? 0
+      let frozenFor =
+        diagFrozenSince.map { max(0, Int(Date().timeIntervalSince($0).rounded())) } ?? 0
       lines.append("State: FROZEN (\(frozenFor)s) · Waiting: \(diagWaitingReasonDescription())")
     } else {
       lines.append("State: Playing/waiting · Waiting: \(diagWaitingReasonDescription())")
     }
     lines.append("Edge gap: \(edge) · Encoder: \(wall)")
     lines.append("Chat hold: \(chatHold)")
-    lines.append("Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
+    lines.append(
+      "Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
 
     return lines
   }
@@ -1191,13 +1363,15 @@ struct PlayerView: View {
   /// skip-to-live shows up as several seconds of unexplained forward advance.
   private func sampleDiagnostics() {
     guard showLatencyDiagnostics else {
-      diagLastPlayheadSeconds = nil
-      diagLastSampleAt = nil
+      // Diagnostics is off by default; only write when there's something to
+      // clear so this per-second call doesn't invalidate the player each tick.
+      if diagLastPlayheadSeconds != nil { diagLastPlayheadSeconds = nil }
+      if diagLastSampleAt != nil { diagLastSampleAt = nil }
       return
     }
     guard isPlaybackActive, let item = player.currentItem else {
-      diagLastPlayheadSeconds = nil
-      diagLastSampleAt = nil
+      if diagLastPlayheadSeconds != nil { diagLastPlayheadSeconds = nil }
+      if diagLastSampleAt != nil { diagLastSampleAt = nil }
       return
     }
 
@@ -1502,19 +1676,22 @@ struct PlayerView: View {
     let isGlass = chatLayoutMode == .glass
     let useLighterOverlayBackground = chatLayoutMode == .overlay
     return VStack(spacing: 0) {
-      ChatView(
+      // ChatView is wrapped so the live `chat.messages` read happens inside the
+      // wrapper's body, not PlayerView's. Otherwise every incoming chat message
+      // (several per second on busy channels) re-executes the whole PlayerView
+      // body and flashes the focused Quality menu while it's open.
+      ChatMessagesColumn(
+        chat: chat,
         channel: channel,
-        messages: visibleChatMessages,
+        replayStartMessageID: chatReplayStartMessageID,
         textSize: chatTextSize,
         emoteSize: chatEmoteSize,
         messageSpacing: chatMessageSpacing,
         lineHeight: chatLineHeight,
+        letterSpacing: chatLetterSpacing,
         animatedEmotes: chatAnimatedEmotes,
-        fontDesign: chatFontStyle.design,
+        fontStyle: chatFontStyle,
         showBadges: chatShowBadges,
-        isConnected: chat.isConnected,
-        emoteURLs: chat.emoteURLs,
-        badgeURLs: chat.badgeURLs,
         useGlassBackground: isGlass,
         useLighterOverlayBackground: useLighterOverlayBackground,
         autoScroll: !(isChatScrolling || chatSoftPauseRemaining != nil),
@@ -1539,12 +1716,14 @@ struct PlayerView: View {
       if showChatSettings {
         let topInset: CGFloat = isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16
         GeometryReader { geo in
-          chatSettingsPanel(maxHeight: max(geo.size.height - topInset - chatSettingsBottomClearance, 0))
-            .frame(width: chatSettingsPanelWidth)
-            .padding(.top, topInset)
-            .padding(.bottom, chatSettingsBottomClearance)
-            .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+          chatSettingsPanel(
+            maxHeight: max(geo.size.height - topInset - chatSettingsBottomClearance, 0)
+          )
+          .frame(width: chatSettingsPanelWidth)
+          .padding(.top, topInset)
+          .padding(.bottom, chatSettingsBottomClearance)
+          .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
         .frame(width: chatSettingsPanelWidth)
         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1572,7 +1751,8 @@ struct PlayerView: View {
     case .appearance, .playback:
       return .chatAdvancedBack
     case .main:
-      let index = (activeChatPreset.flatMap { ChatAppearancePreset.allCases.firstIndex(of: $0) }) ?? 1
+      let index =
+        (activeChatPreset.flatMap { ChatAppearancePreset.allCases.firstIndex(of: $0) }) ?? 1
       return .chatPresetOption(index)
     }
   }
@@ -1581,7 +1761,8 @@ struct PlayerView: View {
     // Measured content height, capped to the space available beside the chat.
     // When the content is shorter than the cap the panel shrinks to fit; only
     // when it would overflow does the inner ScrollView start scrolling.
-    let resolvedHeight = chatSettingsContentHeight > 0
+    let resolvedHeight =
+      chatSettingsContentHeight > 0
       ? min(chatSettingsContentHeight, maxHeight)
       : maxHeight
 
@@ -1617,7 +1798,7 @@ struct PlayerView: View {
     // or bottom edge are hidden inside the menu instead of bleeding out over the
     // chat. tvOS auto-scrolls a focused row fully into view, and the content's
     // generous interior padding keeps focus halos off this clip edge.
-    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+    .clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
     // Match the chat pane's real Liquid Glass (`.glassEffect(.regular)`) so the
     // panel reads the same as the Glass chat layout, instead of a flatter
     // frosted material.
@@ -1635,7 +1816,8 @@ struct PlayerView: View {
         settingsSectionHeader("Appearance")
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatAppearancePreset.allCases.enumerated()), id: \.element) { index, preset in
+          ForEach(Array(ChatAppearancePreset.allCases.enumerated()), id: \.element) {
+            index, preset in
             settingsPill(
               title: preset.title,
               isSelected: activeChatPreset == preset,
@@ -1798,8 +1980,10 @@ struct PlayerView: View {
         Button {
           // Seed the keyboard with the value the field is showing so editing
           // starts from the resolved default rather than a blank line.
-          if experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-             !youtubeMergeDefaultTarget.isEmpty {
+          if experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty,
+            !youtubeMergeDefaultTarget.isEmpty
+          {
             experimentalYouTubeMergeChannelOrURL = youtubeMergeDefaultTarget
           }
           youtubeInputActivationToken &+= 1
@@ -1862,6 +2046,7 @@ struct PlayerView: View {
 
         settingsStepperRow(.text)
         settingsStepperRow(.lineHeight)
+        settingsStepperRow(.letterSpacing)
         settingsStepperRow(.messageSpacing)
       }
 
@@ -1892,12 +2077,14 @@ struct PlayerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
 
-        Text(chatEmoteAuto
-          ? "Auto keeps emotes proportional to the text size."
-          : "Custom sets emote height independently of the text size.")
-          .font(.caption2)
-          .foregroundStyle(.white.opacity(0.55))
-          .fixedSize(horizontal: false, vertical: true)
+        Text(
+          chatEmoteAuto
+            ? "Auto keeps emotes proportional to the text size."
+            : "Custom sets emote height independently of the text size."
+        )
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.55))
+        .fixedSize(horizontal: false, vertical: true)
       }
 
       VStack(alignment: .leading, spacing: 10) {
@@ -1968,7 +2155,10 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    Button(action: action) {
+    Button {
+      pinChatFocus(focusTag)
+      action()
+    } label: {
       HStack(spacing: 8) {
         if let icon {
           Icon(glyph: icon, size: 22)
@@ -2111,13 +2301,32 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    Button(action: action) {
+    Button {
+      pinChatFocus(focusTag)
+      action()
+    } label: {
       Icon(glyph: glyph, size: 22)
         .opacity(enabled ? 1.0 : 0.35)
     }
     .chatSettingsGlassButton()
     .buttonBorderShape(.circle)
     .focused($focus, equals: focusTag)
+  }
+
+  /// Briefly "pin" focus to a just-activated settings control. Toggling an
+  /// option can resize the panel, and tvOS responds by yanking focus to the
+  /// section's first focusable (the back button). For a short window the focus
+  /// handler reverts any such unsolicited jump back to the control the user
+  /// actually used; the timer is only a safety net since the pin is consumed on
+  /// the first reverted move.
+  private func pinChatFocus(_ tag: Focusable) {
+    chatFocusPin = tag
+    chatFocusPinTask?.cancel()
+    chatFocusPinTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(600))
+      guard !Task.isCancelled else { return }
+      chatFocusPin = nil
+    }
   }
 
   private func chatStepperConfig(
@@ -2127,11 +2336,24 @@ struct PlayerView: View {
     case .text:
       return ("Text Size", ChatAppearance.textSizeRange, ChatAppearance.textSizeStep, chatTextSize)
     case .emote:
-      return ("Emote Size", ChatAppearance.emoteSizeRange, ChatAppearance.emoteSizeStep, CGFloat(chatEmoteSizeValue))
+      return (
+        "Emote Size", ChatAppearance.emoteSizeRange, ChatAppearance.emoteSizeStep,
+        CGFloat(chatEmoteSizeValue)
+      )
     case .lineHeight:
-      return ("Line Height", ChatAppearance.lineHeightRange, ChatAppearance.lineHeightStep, chatLineHeight)
+      return (
+        "Line Height", ChatAppearance.lineHeightRange, ChatAppearance.lineHeightStep, chatLineHeight
+      )
+    case .letterSpacing:
+      return (
+        "Letter Spacing", ChatAppearance.letterSpacingRange, ChatAppearance.letterSpacingStep,
+        chatLetterSpacing
+      )
     case .messageSpacing:
-      return ("Message Spacing", ChatAppearance.messageSpacingRange, ChatAppearance.messageSpacingStep, chatMessageSpacing)
+      return (
+        "Message Spacing", ChatAppearance.messageSpacingRange, ChatAppearance.messageSpacingStep,
+        chatMessageSpacing
+      )
     case .width:
       return ("Width", ChatAppearance.widthRange, ChatAppearance.widthStep, chatWidth)
     }
@@ -2152,6 +2374,8 @@ struct PlayerView: View {
       chatEmoteSizeValue = Double(next)
     case .lineHeight:
       chatLineHeightValue = Double(next)
+    case .letterSpacing:
+      chatLetterSpacingValue = Double(next)
     case .messageSpacing:
       chatMessageSpacingValue = Double(next)
     case .width:
@@ -2170,6 +2394,7 @@ struct PlayerView: View {
   private func resetChatAppearance() {
     applyChatPreset(.normal)
     chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
+    chatLetterSpacingValue = Double(ChatAppearance.defaultLetterSpacing)
     chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
   }
 
@@ -2183,7 +2408,8 @@ struct PlayerView: View {
   }
 
   private func closeSubpage() {
-    let returnFocus: Focusable = chatSettingsPage == .playback ? .chatMoreButton : .chatAdvancedButton
+    let returnFocus: Focusable =
+      chatSettingsPage == .playback ? .chatMoreButton : .chatAdvancedButton
     chatSettingsPage = .main
     lastChatSettingsFocus = returnFocus
     Task { @MainActor in
@@ -2237,9 +2463,11 @@ struct PlayerView: View {
           } label: {
             Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
               .font(.subheadline)
-              .foregroundStyle(focus == .chatInput && !chatIsFrozen
-                ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
-                : .white.opacity(chatDraft.isEmpty ? 0.5 : 1.0))
+              .foregroundStyle(
+                focus == .chatInput && !chatIsFrozen
+                  ? .black.opacity(chatDraft.isEmpty ? 0.55 : 1.0)
+                  : .white.opacity(chatDraft.isEmpty ? 0.5 : 1.0)
+              )
               .lineLimit(1)
               .truncationMode(.tail)
               .frame(maxWidth: .infinity, alignment: .leading)
@@ -2318,9 +2546,11 @@ struct PlayerView: View {
         } label: {
           Text("Sign in to send messages")
             .font(.subheadline)
-            .foregroundStyle(focus == .chatInput && !chatIsFrozen
-              ? .black.opacity(0.7)
-              : .white.opacity(0.45))
+            .foregroundStyle(
+              focus == .chatInput && !chatIsFrozen
+                ? .black.opacity(0.7)
+                : .white.opacity(0.45)
+            )
             .lineLimit(1)
             .padding(.horizontal, 28)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2350,13 +2580,16 @@ struct PlayerView: View {
       }
     }
     .padding(.horizontal, 16)
-    .padding(.vertical, 12)
+    .padding(.top, 12)
+    // Match the composer's bottom gap to the 16pt left/right inset so it sits
+    // evenly inside the glass pane's rounded corners.
+    .padding(.bottom, 16)
     .background(
       chatLayoutMode == .glass
         ? AnyShapeStyle(Color.black.opacity(0.22))
         : (chatLayoutMode == .overlay
-            ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
-            : AnyShapeStyle(Color(white: 0.07).opacity(0.96)))
+          ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
+          : AnyShapeStyle(Color(white: 0.07).opacity(0.96)))
     )
   }
 
@@ -2364,7 +2597,8 @@ struct PlayerView: View {
     let text = chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty, !isSendingChat else { return }
     // Dismiss the tvOS keyboard overlay before sending.
-    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     isSendingChat = true
     chatSendError = nil
     Task {
@@ -2542,6 +2776,177 @@ struct PlayerView: View {
     outgoingRaidSecondsRemaining = 0
   }
 
+  // MARK: - Sleep timer
+
+  /// One selectable sleep-timer duration. `seconds == nil && !isEndOfStream` is
+  /// the "Off" row; `isEndOfStream` sleeps when the channel goes offline.
+  private struct SleepTimerOption: Hashable {
+    let label: String
+    let seconds: Int?
+    let isEndOfStream: Bool
+  }
+
+  private static let sleepTimerOptions: [SleepTimerOption] = [
+    .init(label: "Off", seconds: nil, isEndOfStream: false),
+    .init(label: "15 minutes", seconds: 15 * 60, isEndOfStream: false),
+    .init(label: "30 minutes", seconds: 30 * 60, isEndOfStream: false),
+    .init(label: "1 hour", seconds: 60 * 60, isEndOfStream: false),
+    .init(label: "1.5 hours", seconds: 90 * 60, isEndOfStream: false),
+    .init(label: "End of stream", seconds: nil, isEndOfStream: true),
+  ]
+
+  private var sleepTimerOptionLabels: [String] {
+    Self.sleepTimerOptions.map(\.label)
+  }
+
+  private var sleepTimerIsArmed: Bool {
+    sleepDeadline != nil || sleepUntilStreamEnds
+  }
+
+  /// Applies a sleep-timer choice from the menu.
+  private func selectSleepTimer(at index: Int) {
+    guard Self.sleepTimerOptions.indices.contains(index) else { return }
+    let option = Self.sleepTimerOptions[index]
+    sleepTimerTask?.cancel()
+    sleepTimerTask = nil
+    withAnimation { showStillWatching = false }
+    sleepSelectionIndex = index
+
+    if option.isEndOfStream {
+      sleepUntilStreamEnds = true
+      sleepDeadline = nil
+      sleepRemainingSeconds = nil
+      return
+    }
+
+    guard let seconds = option.seconds else {
+      disarmSleepTimer()
+      return
+    }
+
+    sleepUntilStreamEnds = false
+    sleepDeadline = Date().addingTimeInterval(Double(seconds))
+    sleepRemainingSeconds = seconds
+    startSleepCountdown()
+  }
+
+  private func disarmSleepTimer() {
+    sleepTimerTask?.cancel()
+    sleepTimerTask = nil
+    sleepDeadline = nil
+    sleepUntilStreamEnds = false
+    sleepRemainingSeconds = nil
+    sleepSelectionIndex = 0
+    withAnimation { showStillWatching = false }
+  }
+
+  private func startSleepCountdown() {
+    sleepTimerTask?.cancel()
+    sleepTimerTask = Task {
+      while !Task.isCancelled {
+        await MainActor.run { tickSleepTimer() }
+        try? await Task.sleep(for: .seconds(1))
+      }
+    }
+  }
+
+  private func tickSleepTimer() {
+    guard let deadline = sleepDeadline else { return }
+    let remaining = Int(deadline.timeIntervalSinceNow.rounded())
+    if remaining <= 0 {
+      enterSleepState()
+      return
+    }
+    sleepRemainingSeconds = remaining
+    if remaining <= 30, !showStillWatching {
+      withAnimation { showStillWatching = true }
+    }
+  }
+
+  /// "Still watching?" → keep playing and cancel the pending sleep.
+  private func keepWatching() {
+    disarmSleepTimer()
+    focus = showControls ? .quality : .video
+  }
+
+  /// Timer fired: stop playback (and the monitors that would otherwise try to
+  /// "recover" the deliberate pause), show the dim sleeping overlay, and release
+  /// the idle timer so tvOS can actually put the device to sleep.
+  private func enterSleepState() {
+    sleepTimerTask?.cancel()
+    sleepTimerTask = nil
+    sleepDeadline = nil
+    sleepUntilStreamEnds = false
+    sleepRemainingSeconds = nil
+    sleepSelectionIndex = 0
+    showStillWatching = false
+    // Tear down the watchdog/latency loops first so neither one sees the pause
+    // as a stall and resumes playback behind the overlay.
+    stopPlaybackWatchdog()
+    stopLatencyMonitor()
+    didRequestPlayback = false
+    player.pause()
+    setIdleTimer(disabled: false)
+    withAnimation { isSleeping = true }
+    focus = .sleepResume
+  }
+
+  private func wakeFromSleep() {
+    guard isSleeping else { return }
+    withAnimation { isSleeping = false }
+    // Resume keeping the screen awake now that the viewer is back.
+    setIdleTimer(disabled: true)
+    focus = showControls ? .quality : .video
+    // After a timed pause the live edge has moved on (often a couple of minutes)
+    // and the cached playlist may be stale, so resuming in place leaves us stuck
+    // far "behind live" or stalled. Reload from scratch to snap back to the live
+    // edge and guarantee playback actually restarts.
+    Task { await load(maxAttempts: 2, reason: "wake from sleep", resetMetadata: false) }
+  }
+
+  /// Dim full-screen "Sleeping" scene shown after a sleep timer fires. Pressing
+  /// any select/tap resumes playback. Deliberately night-friendly: a dark,
+  /// warm-red starry sky that stays easy on the eyes in a dark room and ignores
+  /// the app's light/dark setting.
+  private var sleepingOverlay: some View {
+    SleepingScreen()
+      .contentShape(Rectangle())
+      .focusable()
+      .focused($focus, equals: .sleepResume)
+      .onTapGesture { wakeFromSleep() }
+      .zIndex(50)
+  }
+
+  /// "Still watching?" heads-up shown ~30s before a timed sleep, with a
+  /// focusable button to stay awake. Mirrors the outgoing-raid banner.
+  private func stillWatchingBanner() -> some View {
+    VStack {
+      Spacer()
+      HStack(spacing: 20) {
+        Image(systemName: "moon.zzz.fill")
+          .font(.system(size: 30))
+          .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Still watching?")
+            .font(.headline).bold()
+            .foregroundStyle(.white)
+          Text("Pausing in \(sleepRemainingSeconds ?? 0)s to let your Apple TV sleep")
+            .font(.subheadline)
+            .foregroundStyle(.white.opacity(0.85))
+        }
+        Button("Keep watching") {
+          keepWatching()
+        }
+        .focused($focus, equals: .sleepKeepWatching)
+      }
+      .padding(.horizontal, 36)
+      .padding(.vertical, 20)
+      .background(Color(red: 0.13, green: 0.16, blue: 0.40).opacity(0.95), in: Capsule())
+      .padding(.bottom, 60)
+    }
+    .ignoresSafeArea()
+  }
+
   // MARK: - Quality picker
 
   private var qualityOptions: [String] {
@@ -2572,7 +2977,7 @@ struct PlayerView: View {
       labels.insert(short)
       labels.insert("Auto (\(short))")
     }
-    return Array(labels)
+    return labels.sorted()
   }
 
   /// Drops the "(Source)" suffix so the button reads "1080p60", not
@@ -2594,11 +2999,19 @@ struct PlayerView: View {
   /// Maps AVPlayer's current presentation size to the closest known variant
   /// name while on the adaptive ("Auto") master playlist.
   private func updateResolvedQuality() {
-    guard preferredQuality == "Auto" else {
-      resolvedQualityName = nil
-      return
+    let resolved = computeResolvedQualityName()
+    // Assign only on change: this runs every second, and rewriting the same
+    // `@State` value still re-executes the player body (flashing focus).
+    if resolvedQualityName != resolved {
+      resolvedQualityName = resolved
     }
-    guard let playback else { return }
+  }
+
+  private func computeResolvedQualityName() -> String? {
+    guard preferredQuality == "Auto" else {
+      return nil
+    }
+    guard let playback else { return resolvedQualityName }
 
     let videoVariants = playback.qualities.filter { !$0.isAudioOnly }
     // Named variants that advertise a parseable resolution, e.g. "720p60".
@@ -2612,22 +3025,21 @@ struct PlayerView: View {
     if let size = player.currentItem?.presentationSize, size.height > 0 {
       let height = Int(size.height.rounded())
       if let best = namedCandidates.min(by: { abs($0.0 - height) < abs($1.0 - height) }) {
-        resolvedQualityName = best.1
-        return
+        return best.1
       }
       // Variants don't expose a parseable resolution (e.g. transcoding
       // disabled, source named "chunked"): derive the label from the decoded
       // frame height directly so it still shows something accurate.
-      resolvedQualityName = "\(height)p"
-      return
+      return "\(height)p"
     }
 
     // Presentation size not yet known. If the stream offers a single video
     // rendition, Auto is effectively that rendition — show it rather than
     // leaving the label stuck on a bare "Auto".
     if videoVariants.count == 1 {
-      resolvedQualityName = Self.shortQualityName(videoVariants[0].name)
+      return Self.shortQualityName(videoVariants[0].name)
     }
+    return resolvedQualityName
   }
 
   /// Display label for a quality option. "Auto" is the adaptive-bitrate choice;
@@ -2652,9 +3064,11 @@ struct PlayerView: View {
   /// The effective YouTube merge target shown in the settings input: the manual
   /// entry when present, otherwise the resolved default handle for the channel.
   private var youtubeMergeDisplayText: String {
-    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(
+      in: .whitespacesAndNewlines)
     if !manual.isEmpty { return manual }
-    return youtubeMergeDefaultTarget.isEmpty ? "YouTube handle or channel URL" : youtubeMergeDefaultTarget
+    return youtubeMergeDefaultTarget.isEmpty
+      ? "YouTube handle or channel URL" : youtubeMergeDefaultTarget
   }
 
   /// The handle the merge falls back to when no manual value is entered. Prefers
@@ -2668,7 +3082,8 @@ struct PlayerView: View {
   }
 
   private func applyExperimentalYouTubeSettings() {
-    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(
+      in: .whitespacesAndNewlines)
     let resolvedTarget = manual.isEmpty ? youtubeMergeDefaultTarget : manual
 
     chat.configureExperimentalYouTubeMerge(
@@ -2795,9 +3210,11 @@ struct PlayerView: View {
 
   /// Lowercases and strips everything but letters/digits for loose comparison.
   private static func normalizeIdentity(_ raw: String) -> String {
-    String(String.UnicodeScalarView(raw.lowercased().unicodeScalars.filter {
-      CharacterSet.alphanumerics.contains($0)
-    }))
+    String(
+      String.UnicodeScalarView(
+        raw.lowercased().unicodeScalars.filter {
+          CharacterSet.alphanumerics.contains($0)
+        }))
   }
 
   private static func firstYouTubeChannelURL(in text: String) -> String? {
@@ -3108,6 +3525,9 @@ struct PlayerView: View {
           updateSmoothedLatency()
           sampleDiagnostics()
           applyChatSyncSettings()
+          // Push the rendered badge values into the observed readout (deduped),
+          // so only the badge leaf updates — not the whole player every tick.
+          latencyReadout.update(color: latencyColor, label: latencyLabel)
         }
         try? await Task.sleep(for: .seconds(1))
       }
@@ -3117,6 +3537,7 @@ struct PlayerView: View {
   private func stopLatencyMonitor() {
     latencyTask?.cancel()
     latencyTask = nil
+    latencyReadout.update(color: .gray, label: "Waiting for playback")
     wallClockLatencySeconds = nil
     liveEdgeLatencySeconds = nil
     smoothedLatencySeconds = nil
@@ -3547,16 +3968,76 @@ private struct ChatGlassFieldStyle: ViewModifier {
         .glassEffect(isFocused ? .regular.tint(.white) : .regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.10), lineWidth: 0.75))
         .scaleEffect(isFocused ? 1.05 : 1.0)
-        .shadow(color: .black.opacity(isFocused ? 0.22 : 0.18),
-                radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
+        .shadow(
+          color: .black.opacity(isFocused ? 0.22 : 0.18),
+          radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
     } else {
       content
-        .background(isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.ultraThinMaterial), in: shape)
+        .background(
+          isFocused ? AnyShapeStyle(.white) : AnyShapeStyle(.ultraThinMaterial), in: shape
+        )
         .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.10), lineWidth: 0.75))
         .scaleEffect(isFocused ? 1.05 : 1.0)
-        .shadow(color: .black.opacity(isFocused ? 0.22 : 0.18),
-                radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
+        .shadow(
+          color: .black.opacity(isFocused ? 0.22 : 0.18),
+          radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
     }
+  }
+}
+
+/// Wraps `ChatView` and reads the live `ChatService` itself. New chat messages
+/// mutate `chat.messages`; doing that read inside this small view (instead of in
+/// the giant PlayerView body) means only the chat column re-renders per message.
+/// Previously the PlayerView body observed `chat.messages`, so every incoming
+/// message re-executed the whole body and flashed the open Quality menu's focus
+/// many times a second on busy channels.
+private struct ChatMessagesColumn: View {
+  let chat: ChatService
+  let channel: String
+  let replayStartMessageID: ChatMessage.ID?
+  let textSize: CGFloat
+  let emoteSize: CGFloat
+  let messageSpacing: CGFloat
+  let lineHeight: CGFloat
+  let letterSpacing: CGFloat
+  let animatedEmotes: Bool
+  let fontStyle: ChatFontStyle
+  let showBadges: Bool
+  let useGlassBackground: Bool
+  let useLighterOverlayBackground: Bool
+  let autoScroll: Bool
+  let softPauseRemaining: Int?
+  let scrollTarget: ChatScrollTarget?
+
+  private var visibleMessages: [ChatMessage] {
+    guard let startID = replayStartMessageID else { return chat.messages }
+    guard let startIndex = chat.messages.firstIndex(where: { $0.id == startID }) else {
+      return chat.messages
+    }
+    return Array(chat.messages[startIndex...])
+  }
+
+  var body: some View {
+    ChatView(
+      channel: channel,
+      messages: visibleMessages,
+      textSize: textSize,
+      emoteSize: emoteSize,
+      messageSpacing: messageSpacing,
+      lineHeight: lineHeight,
+      letterSpacing: letterSpacing,
+      animatedEmotes: animatedEmotes,
+      fontStyle: fontStyle,
+      showBadges: showBadges,
+      isConnected: chat.isConnected,
+      emoteURLs: chat.emoteURLs,
+      badgeURLs: chat.badgeURLs,
+      useGlassBackground: useGlassBackground,
+      useLighterOverlayBackground: useLighterOverlayBackground,
+      autoScroll: autoScroll,
+      softPauseRemaining: softPauseRemaining,
+      scrollTarget: scrollTarget
+    )
   }
 }
 
@@ -3573,12 +4054,19 @@ private struct QualityMenu: View, Equatable {
   let onSelect: (Int) -> Void
   let onMenuPresented: () -> Void
   let onMenuDismissed: () -> Void
+  // Sleep timer, nested as a submenu under the quality list (no extra button).
+  let sleepOptions: [String]
+  let sleepSelectedIndex: Int
+  let sleepIsArmed: Bool
+  let onSelectSleep: (Int) -> Void
 
   nonisolated static func == (lhs: QualityMenu, rhs: QualityMenu) -> Bool {
     lhs.options == rhs.options
       && lhs.selectedOption == rhs.selectedOption
       && lhs.buttonLabel == rhs.buttonLabel
       && lhs.reservedWidthLabels == rhs.reservedWidthLabels
+      && lhs.sleepSelectedIndex == rhs.sleepSelectedIndex
+      && lhs.sleepIsArmed == rhs.sleepIsArmed
   }
 
   /// Drives the inline `Picker` selection. Reading derives the current index
@@ -3589,6 +4077,20 @@ private struct QualityMenu: View, Equatable {
       get: { options.firstIndex(of: selectedOption) ?? 0 },
       set: { onSelect($0) }
     )
+  }
+
+  private var sleepSelection: Binding<Int> {
+    Binding(
+      get: { sleepSelectedIndex },
+      set: { onSelectSleep($0) }
+    )
+  }
+
+  private var sleepMenuLabel: String {
+    guard sleepIsArmed, sleepOptions.indices.contains(sleepSelectedIndex) else {
+      return "Sleep timer"
+    }
+    return "Sleep timer: \(sleepOptions[sleepSelectedIndex])"
   }
 
   var body: some View {
@@ -3616,6 +4118,21 @@ private struct QualityMenu: View, Equatable {
         .pickerStyle(.inline)
         .onAppear(perform: onMenuPresented)
         .onDisappear(perform: onMenuDismissed)
+
+        Divider()
+
+        // Sleep timer kept as a nested submenu so Quality stays the primary,
+        // one-tap control while the timer hides one level deeper.
+        Menu {
+          Picker("Sleep timer", selection: sleepSelection) {
+            ForEach(Array(sleepOptions.enumerated()), id: \.element) { index, option in
+              Text(option).tag(index)
+            }
+          }
+          .pickerStyle(.inline)
+        } label: {
+          Label(sleepMenuLabel, systemImage: "moon.zzz")
+        }
       } label: {
         qualityLabelText(buttonLabel)
           .accessibilityLabel("Quality, \(buttonLabel)")
@@ -3774,11 +4291,13 @@ private struct ChatSyncSendIndicator: View {
         Icon(glyph: .clock, size: 16)
           .foregroundStyle(.white.opacity(0.7))
         VStack(alignment: .leading, spacing: 4) {
-          Text(remaining > 0.5
-            ? "Sent — appears in \(Int(remaining.rounded()))s"
-            : "Appearing now…")
-            .font(.caption2)
-            .foregroundStyle(.white.opacity(0.82))
+          Text(
+            remaining > 0.5
+              ? "Sent — appears in \(Int(remaining.rounded()))s"
+              : "Appearing now…"
+          )
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.82))
           ProgressView(value: progress)
             .progressViewStyle(.linear)
             .tint(.purple)
@@ -3801,7 +4320,7 @@ private struct GlassChatPaneStyle: ViewModifier {
   static let edgeInset: CGFloat = 24
 
   private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 32, style: .continuous)
+    RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
 
   @ViewBuilder
@@ -3839,7 +4358,7 @@ private struct GlassChatPaneStyle: ViewModifier {
 /// panel can size to its content and its inner focus effects can lift freely.
 private struct ChatSettingsPanelGlassStyle: ViewModifier {
   private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 32, style: .continuous)
+    RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
 
   @ViewBuilder
@@ -3871,18 +4390,64 @@ private struct DiagnosticsEvent: Identifiable {
 
 /// Passive latency HUD chip. Its own `View` type so the per-second latency
 /// refresh only invalidates this chip, not the whole `PlayerView` body.
+/// Holds the once-per-second monitoring bookkeeping written by the live-latency
+/// and playback-watchdog tasks. It is a *plain* (non-`@Observable`) reference
+/// type on purpose: `PlayerView` keeps it in `@State`, and mutating these
+/// properties therefore never invalidates the view. Previously these were
+/// individual `@State` values, so each per-second write re-executed the entire
+/// PlayerView body and made the focused quality button's highlight flash. None
+/// of these values drive the UI directly — the only on-screen latency reading is
+/// pushed (de-duplicated) into `LatencyReadout`, which the badge observes.
+private final class PlaybackMonitorBox {
+  var wallClockLatencySeconds: Double?
+  var liveEdgeLatencySeconds: Double?
+  var smoothedLatencySeconds: Double?
+  /// Total settled latency samples since playback became active.
+  var latencySampleCount = 0
+  /// Consecutive samples whose smoothed value barely moved — i.e. the reading
+  /// has stopped climbing off the live edge and looks trustworthy.
+  var latencyStableCount = 0
+  var isPlaybackActive = false
+  var didRequestPlayback = false
+  var lastHardCatchUpJumpAt = Date.distantPast
+  var lastWallClockCatchUpAt = Date.distantPast
+  var edgeLatencyLowConfidenceStreak = 0
+  var wallClockHighLatencyStreak = 0
+  var wallClockLowConfidenceStreak = 0
+  var lastPlaybackDateSample: Date?
+  var lastPlaybackTimeSampleSeconds: Double?
+  var lastObservedPlaybackTimeSeconds: Double?
+  var stalledPlaybackSamples = 0
+  var isRecoveringPlayback = false
+  var lastRecoveryAttemptAt = Date.distantPast
+}
+
+/// The only latency state SwiftUI observes for the on-screen badge. Updated once
+/// per second (and only when the rendered value actually changes), so the badge
+/// leaf re-renders in isolation instead of churning the whole player.
+@Observable
+private final class LatencyReadout {
+  var color: Color = .gray
+  var label: String = "Waiting for playback"
+
+  /// Assigns only on change so an unchanged tick produces no SwiftUI update.
+  func update(color newColor: Color, label newLabel: String) {
+    if color != newColor { color = newColor }
+    if label != newLabel { label = newLabel }
+  }
+}
+
 private struct LatencyBadge: View {
-  let color: Color
-  let label: String
+  @Bindable var readout: LatencyReadout
 
   var body: some View {
     let shape = Capsule(style: .continuous)
     return HStack(spacing: 8) {
       Circle()
-        .fill(color)
+        .fill(readout.color)
         .frame(width: 8, height: 8)
 
-      Text(label)
+      Text(readout.label)
         .font(.caption)
         .fontWeight(.semibold)
         .foregroundStyle(.white)
@@ -3897,7 +4462,260 @@ private struct LatencyBadge: View {
   }
 }
 
-/// Live, read-off-the-screen diagnostics for troubleshooting freezes/jumps.
+/// Small top-right chip showing the time left on an armed sleep timer.
+/// Small top-right chip showing the armed sleep timer: a `m:ss` countdown for
+/// timed sleeps, or a short label (e.g. "End") when set to sleep at end of
+/// stream.
+private struct SleepCountdownBadge: View {
+  let text: String
+
+  static func format(seconds: Int) -> String {
+    let clamped = max(0, seconds)
+    return String(format: "%d:%02d", clamped / 60, clamped % 60)
+  }
+
+  var body: some View {
+    let shape = Capsule(style: .continuous)
+    return HStack(spacing: 8) {
+      Image(systemName: "moon.zzz.fill")
+        .font(.caption)
+        .foregroundStyle(.white)
+
+      Text(text)
+        .font(.caption)
+        .fontWeight(.semibold)
+        .monospacedDigit()
+        .foregroundStyle(.white)
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 9)
+    .background(.ultraThinMaterial, in: shape)
+    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .clipShape(shape)
+  }
+}
+
+// MARK: - Sleeping screen
+
+/// Deterministic, seedable RNG so the star field is generated once and never
+/// reshuffles between frames.
+private struct SeededGenerator: RandomNumberGenerator {
+  private var state: UInt64
+  init(seed: UInt64) { state = seed == 0 ? 0x9E3779B97F4A7C15 : seed }
+  mutating func next() -> UInt64 {
+    state = state &* 6364136223846793005 &+ 1442695040888963407
+    var x = state
+    x ^= x >> 33
+    x = x &* 0xFF51AFD7ED558CCD
+    x ^= x >> 33
+    return x
+  }
+}
+
+private struct SleepStar {
+  let x: Double
+  let y: Double
+  let size: Double
+  let baseOpacity: Double
+  let twinkleSpeed: Double
+  let phase: Double
+  let warmth: Double   // 0 = cool dim white, 1 = warm red
+}
+
+private struct SleepShootingStar {
+  let startX: Double
+  let startY: Double
+  let dx: Double
+  let dy: Double
+  let length: Double
+  let period: Double
+  let offset: Double
+  let duration: Double
+}
+
+/// A cute, low-brightness starry-night scene for the post-sleep-timer state.
+/// Warm reds + near-black keep it gentle on the eyes in a dark room, and the
+/// palette is hard-coded (plus a forced dark color scheme) so it looks the same
+/// whether the app is in light or dark mode.
+private struct SleepingScreen: View {
+  private let stars: [SleepStar]
+  private let shootingStars: [SleepShootingStar]
+
+  init() {
+    var rng = SeededGenerator(seed: 0x5_7A_84)
+    stars = (0..<90).map { _ in
+      SleepStar(
+        x: Double.random(in: 0...1, using: &rng),
+        y: Double.random(in: 0...1, using: &rng),
+        size: Double.random(in: 1.5...3.8, using: &rng),
+        baseOpacity: Double.random(in: 0.26...0.78, using: &rng),
+        twinkleSpeed: Double.random(in: 0.4...1.5, using: &rng),
+        phase: Double.random(in: 0...(2 * .pi), using: &rng),
+        warmth: Double.random(in: 0...1, using: &rng)
+      )
+    }
+    shootingStars = [
+      SleepShootingStar(startX: 0.08, startY: 0.16, dx: 0.42, dy: 0.20,
+                        length: 0.10, period: 9.0, offset: 1.5, duration: 1.1),
+      SleepShootingStar(startX: 0.55, startY: 0.10, dx: 0.36, dy: 0.26,
+                        length: 0.08, period: 14.0, offset: 6.0, duration: 1.3)
+    ]
+  }
+
+  // Hard-coded, night-vision-friendly palette: warm reds blended with the
+  // Twizz brand purple so it ties back to the logo while staying eye-friendly.
+  private let skyTop = Color(red: 0.06, green: 0.01, blue: 0.04)
+  private let skyBottom = Color(red: 0.08, green: 0.015, blue: 0.07)
+  private let emberLow = Color(red: 0.30, green: 0.05, blue: 0.06)
+  private let ember = Color(red: 0.62, green: 0.16, blue: 0.16)
+  private let emberSoft = Color(red: 0.74, green: 0.28, blue: 0.24)
+  private let brandPurple = Color(red: 0.569, green: 0.275, blue: 1.0)
+  private let purpleGlow = Color(red: 0.42, green: 0.20, blue: 0.78)
+  private let purpleSoft = Color(red: 0.66, green: 0.42, blue: 0.96)
+
+  /// Dim white → warm red → brand purple as `warmth` rises, so the star field
+  /// is a gentle blend of red and purple sparkle.
+  private func starColor(_ warmth: Double, opacity: Double) -> Color {
+    let cool = (r: 0.92, g: 0.82, b: 0.80)
+    let red = (r: 0.86, g: 0.30, b: 0.28)
+    let purple = (r: 0.64, g: 0.38, b: 0.96)
+    let c: (r: Double, g: Double, b: Double)
+    if warmth < 0.55 {
+      let f = warmth / 0.55
+      c = (cool.r + (red.r - cool.r) * f,
+           cool.g + (red.g - cool.g) * f,
+           cool.b + (red.b - cool.b) * f)
+    } else {
+      let f = (warmth - 0.55) / 0.45
+      c = (red.r + (purple.r - red.r) * f,
+           red.g + (purple.g - red.g) * f,
+           red.b + (purple.b - red.b) * f)
+    }
+    return Color(red: c.r, green: c.g, blue: c.b).opacity(opacity)
+  }
+
+  var body: some View {
+    TimelineView(.animation) { timeline in
+      let t = timeline.date.timeIntervalSinceReferenceDate
+      // Slowly drifting glow centers give the scene a gentle, living motion.
+      let driftA = UnitPoint(x: 0.30 + 0.14 * sin(t * 0.043),
+                             y: 0.34 + 0.10 * cos(t * 0.037))
+      let driftB = UnitPoint(x: 0.72 + 0.12 * cos(t * 0.031),
+                             y: 0.64 + 0.13 * sin(t * 0.049))
+      ZStack {
+        // Blur whatever is paused behind (stream frame + chat), then bank it
+        // way down into a dark, warm night so it stays easy on the eyes.
+        Rectangle()
+          .fill(.ultraThinMaterial)
+          .ignoresSafeArea()
+
+        LinearGradient(
+          colors: [skyTop.opacity(0.92), skyBottom.opacity(0.90), Color.black.opacity(0.92)],
+          startPoint: .top,
+          endPoint: .bottom
+        )
+        .ignoresSafeArea()
+
+        RadialGradient(
+          colors: [emberLow.opacity(0.30), .clear],
+          center: driftA, startRadius: 10, endRadius: 620
+        )
+        .blendMode(.screen)
+        .ignoresSafeArea()
+
+        RadialGradient(
+          colors: [purpleGlow.opacity(0.26), .clear],
+          center: driftB, startRadius: 10, endRadius: 560
+        )
+        .blendMode(.screen)
+        .ignoresSafeArea()
+
+        Canvas { context, size in
+          for star in stars {
+            let twinkle = 0.5 + 0.5 * sin(t * star.twinkleSpeed + star.phase)
+            let opacity = star.baseOpacity * (0.45 + 0.55 * twinkle)
+            let d = star.size
+            let cx = star.x * size.width
+            let cy = star.y * size.height
+            // Soft halo for a touch more presence without getting harsh.
+            let halo = d * 3.0
+            context.fill(
+              Path(ellipseIn: CGRect(x: cx - halo / 2, y: cy - halo / 2,
+                                     width: halo, height: halo)),
+              with: .color(starColor(star.warmth, opacity: opacity * 0.22))
+            )
+            context.fill(
+              Path(ellipseIn: CGRect(x: cx - d / 2, y: cy - d / 2,
+                                     width: d, height: d)),
+              with: .color(starColor(star.warmth, opacity: opacity))
+            )
+          }
+
+          for shot in shootingStars {
+            let local = (t + shot.offset).truncatingRemainder(dividingBy: shot.period)
+            guard local >= 0, local <= shot.duration else { continue }
+            let p = local / shot.duration
+            // Ease in/out so it streaks in and fades away.
+            let fade = sin(p * .pi)
+            let headX = (shot.startX + shot.dx * p) * size.width
+            let headY = (shot.startY + shot.dy * p) * size.height
+            let tailX = headX - shot.dx * shot.length * size.width
+            let tailY = headY - shot.dy * shot.length * size.height
+            var path = Path()
+            path.move(to: CGPoint(x: tailX, y: tailY))
+            path.addLine(to: CGPoint(x: headX, y: headY))
+            context.stroke(
+              path,
+              with: .linearGradient(
+                Gradient(colors: [
+                  emberSoft.opacity(0.0),
+                  emberSoft.opacity(0.55 * fade)
+                ]),
+                startPoint: CGPoint(x: tailX, y: tailY),
+                endPoint: CGPoint(x: headX, y: headY)
+              ),
+              lineWidth: 2
+            )
+          }
+        }
+        .ignoresSafeArea()
+
+        centerContent(pulse: 0.5 + 0.5 * sin(t * 0.6))
+      }
+      .ignoresSafeArea()
+    }
+    .environment(\.colorScheme, .dark)
+  }
+
+  private func centerContent(pulse: Double) -> some View {
+    VStack(spacing: 22) {
+      Image("TwizzPixelLogo")
+        .resizable()
+        .interpolation(.none)
+        .scaledToFit()
+        .frame(width: 132, height: 132)
+        .opacity(0.82 + 0.15 * pulse)
+        .shadow(color: brandPurple.opacity(0.45), radius: 26)
+        .shadow(color: ember.opacity(0.35), radius: 14)
+
+      Text("Sleeping")
+        .font(.system(size: 48, weight: .bold))
+        .foregroundStyle(
+          LinearGradient(
+            colors: [emberSoft.opacity(0.85 + 0.15 * pulse),
+                     purpleSoft.opacity(0.80 + 0.15 * pulse)],
+            startPoint: .leading,
+            endPoint: .trailing
+          )
+        )
+
+      Text("Press to resume")
+        .font(.system(size: 22, weight: .medium))
+        .foregroundStyle(emberSoft.opacity(0.5))
+    }
+  }
+}
+
 /// Its own `View` type so the per-second diagnostics refresh invalidates only
 /// this panel. The parent computes `lines` (it owns the player state) and
 /// passes them in; rendering lives here.

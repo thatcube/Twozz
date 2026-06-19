@@ -55,7 +55,7 @@ struct MediaContentCard: View {
     ZStack(alignment: .bottomTrailing) {
       Color.primary.opacity(0.08)
 
-      AsyncImage(url: thumbnailURL) { image in
+      CachedAsyncImage(url: thumbnailURL) { image in
         image.resizable().scaledToFill()
       } placeholder: {
         Color.clear

@@ -25,6 +25,9 @@ Package.resolved
 buildServer.json
 .sourcekit-lsp/
 
+# Maintainer-local agent instructions (personal workflow / device IDs)
+AGENTS.local.md
+
 # Secrets — never commit Twitch client IDs/tokens
 Secrets.swift
 *.xcconfig.local

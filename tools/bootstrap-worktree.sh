@@ -10,9 +10,11 @@
 #
 set -euo pipefail
 
-# Files that are gitignored but required for a working build.
+# Files that are gitignored but wanted in every worktree (build secrets plus
+# maintainer-local agent instructions).
 LOCAL_FILES=(
   "Config/TwitchSecrets.xcconfig.local"
+  "AGENTS.local.md"
 )
 
 repo_root="$(git rev-parse --show-toplevel)"

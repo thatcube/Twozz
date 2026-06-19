@@ -38,6 +38,8 @@ struct ChatView: View {
   /// When non-nil, chat is in the lightweight "soft pause" read mode and this is
   /// the seconds remaining before it auto-resumes. Drives the countdown pill.
   var softPauseRemaining: Int? = nil
+  /// Total soft-pause duration in seconds, used to draw the countdown ring.
+  var softPauseTotal: Int = 10
   /// A scroll instruction from the player (manual scroll mode). Changing its
   /// nonce scrolls the list to the given message; the player keeps focus on the
   /// composer because tvOS won't reliably keep focus on the chat ScrollView.
@@ -173,21 +175,12 @@ struct ChatView: View {
 
       HStack(spacing: 8) {
         if let remaining = softPauseRemaining {
-          HStack(spacing: 0) {
-            Text("Chat paused · ")
-            // Reserve a fixed two-digit slot (sized by a hidden "00") and
-            // trailing-align the live number inside it, with monospaced digits,
-            // so the pill width never jitters as the countdown ticks 10 → 1.
-            Text("00")
-              .hidden()
-              .overlay(alignment: .trailing) {
-                Text("\(remaining)")
-                  .contentTransition(.numericText())
-              }
-            Text("s")
-          }
-          .font(.caption.weight(.semibold))
-          .monospacedDigit()
+          Text("Chat paused")
+            .font(.caption.weight(.semibold))
+          // Twitch-style countdown: a fixed-size ring that depletes each second
+          // with the small number animating inside it. Fixed width, so the pill
+          // never resizes as the count ticks down.
+          countdownRing(remaining: remaining)
         } else {
           Image(systemName: "arrow.up.and.down")
             .font(.caption.weight(.bold))
@@ -206,6 +199,30 @@ struct ChatView: View {
     }
     .padding(.bottom, 12)
     .transition(.move(edge: .bottom).combined(with: .opacity))
+  }
+
+  /// A small depleting countdown ring with the remaining seconds animating in
+  /// its center. The ring shrinks one step per second (linear over the 1s tick)
+  /// and the number uses a numeric content transition. Fixed size so it never
+  /// changes the pill's width.
+  private func countdownRing(remaining: Int) -> some View {
+    let progress = softPauseTotal > 0
+      ? max(0, min(1, Double(remaining) / Double(softPauseTotal)))
+      : 0
+    return ZStack {
+      Circle()
+        .stroke(.black.opacity(0.16), lineWidth: 2.5)
+      Circle()
+        .trim(from: 0, to: progress)
+        .stroke(.black.opacity(0.7), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+        .animation(.linear(duration: 1), value: remaining)
+      Text("\(remaining)")
+        .font(.system(size: 14, weight: .bold))
+        .monospacedDigit()
+        .contentTransition(.numericText())
+    }
+    .frame(width: 28, height: 28)
   }
 
   private func line(for message: ChatMessage) -> some View {

@@ -2094,6 +2094,7 @@ struct PlayerView: View {
         useLighterOverlayBackground: useLighterOverlayBackground,
         autoScroll: !(isChatScrolling || chatSoftPauseRemaining != nil),
         softPauseRemaining: chatSoftPauseRemaining,
+        softPauseTotal: softPauseSeconds,
         scrollTarget: chatScrollTarget
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -4675,6 +4676,7 @@ private struct ChatMessagesColumn: View {
   let useLighterOverlayBackground: Bool
   let autoScroll: Bool
   let softPauseRemaining: Int?
+  let softPauseTotal: Int
   let scrollTarget: ChatScrollTarget?
 
   private var visibleMessages: [ChatMessage] {
@@ -4704,6 +4706,7 @@ private struct ChatMessagesColumn: View {
       useLighterOverlayBackground: useLighterOverlayBackground,
       autoScroll: autoScroll,
       softPauseRemaining: softPauseRemaining,
+      softPauseTotal: softPauseTotal,
       scrollTarget: scrollTarget
     )
   }

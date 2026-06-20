@@ -117,6 +117,12 @@ struct PlayerView: View {
   /// adaptive quality, IRC chat, watchdog).
   var vod: VODContext? = nil
 
+  /// Optional poster shown full-bleed while the stream loads, cross-fading to
+  /// video once playback starts. Used when escalating from a multiview pane so
+  /// the hand-off looks seamless (the channel's frame fills immediately) instead
+  /// of flashing a black "Loading…" screen.
+  var posterURL: URL? = nil
+
   /// True while playing a recorded broadcast rather than a live stream.
   var isVOD: Bool { vod != nil }
 
@@ -1531,6 +1537,21 @@ struct PlayerView: View {
       VideoSurface(player: player)
         .ignoresSafeArea()
 
+      // Seamless escalate: fill with the channel's frame while the full player
+      // spins up, then cross-fade to live video. Removes the black "Loading…"
+      // gap when opening a stream from a multiview pane.
+      if let posterURL, errorMessage == nil, !isOffline {
+        AsyncImage(url: posterURL) { image in
+          image.resizable().scaledToFill()
+        } placeholder: {
+          Color.black
+        }
+        .ignoresSafeArea()
+        .opacity(isLoading ? 1 : 0)
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.45), value: isLoading)
+      }
+
       if isAudioOnlyActive, !isLoading, errorMessage == nil, !isOffline {
         AudioVisualizerContainer(
           monitor: audioLevelMonitor,
@@ -1624,9 +1645,16 @@ struct PlayerView: View {
       }
 
       if isLoading {
-        ProgressView(isVOD ? "Loading broadcast…" : "Loading \(activeChannel)…")
-          .font(.title3)
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        if posterURL != nil {
+          // Over a poster the full "Loading…" treatment reads as a stall; a bare
+          // spinner makes the hand-off feel like a quick transition instead.
+          ProgressView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        } else {
+          ProgressView(isVOD ? "Loading broadcast…" : "Loading \(activeChannel)…")
+            .font(.title3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
       }
 
       if isOffline {

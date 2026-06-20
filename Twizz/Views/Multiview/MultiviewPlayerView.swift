@@ -164,7 +164,7 @@ struct MultiviewPlayerView: View {
       // multiview view stayed mounted underneath, its layout/focus are intact.
       controller.resume()
     }) { channel in
-      PlayerView(channel: channel.login, auth: auth, goLive: goLive)
+      PlayerView(channel: channel.login, auth: auth, goLive: goLive, posterURL: channel.thumbnailURL)
         .environment(\.themePalette, palette)
     }
   }

@@ -494,14 +494,14 @@ private struct MultiviewPaneTile: View {
 
       if pane.isLoading {
         // Mask the initial load *and* quality-swap reloads with the shared
-        // loading surface (the channel's frame blurred behind a spinner) instead
-        // of a black tile, so promoting to the spotlight reads as a quick
-        // sharpen rather than a flash.
+        // loading surface (the channel's frame behind a spinner) instead of a
+        // black tile, so promoting to the spotlight reads as a quick sharpen
+        // rather than a flash. Tiles use the restrained compact treatment so the
+        // spinner/name don't look oversized in a small pane.
         StreamLoadingView(
           posterURL: pane.channel.thumbnailURL,
-          avatarURL: pane.channel.profileImageURL,
           title: style == .full ? pane.channel.displayName : nil,
-          compact: style == .compact
+          compact: true
         )
         .environment(\.themePalette, palette)
       } else if pane.hasError {

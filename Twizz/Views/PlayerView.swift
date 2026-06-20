@@ -1588,26 +1588,24 @@ struct PlayerView: View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
         .ignoresSafeArea()
-
-      // Shared loading surface: the stream's frame blurred behind the channel's
-      // avatar, name, and a native spinner. It fills the *uncovered* video
-      // region immediately and cross-fades to live video once playback starts,
-      // so opening a stream (or escalating from a multiview pane) reads as a
-      // quick sharpen instead of a black "Loading…" gap. The trailing inset
-      // keeps it clear of the chat in overlay/glass modes (side mode already
-      // shrinks the video column), so it never reads as fullscreen when chat is
-      // open.
-      StreamLoadingView(
-        posterURL: posterURL,
-        avatarURL: channelAvatarURL,
-        title: isVOD ? vod?.title : offlineDisplayName
-      )
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .padding(.trailing, loadingChatInset)
-      .ignoresSafeArea(edges: loadingChatInset > 0 ? [.top, .bottom, .leading] : .all)
-      .opacity(isLoading && errorMessage == nil && !isOffline ? 1 : 0)
-      .allowsHitTesting(false)
-      .animation(.easeOut(duration: 0.45), value: isLoading)
+        // Shared loading surface: the stream's frame behind the channel's
+        // avatar, name, and a native spinner. Anchored as an overlay on the
+        // video so it tracks the *exact* video frame in every chat layout — the
+        // shrunken column in side mode, full-bleed in overlay/glass — instead of
+        // escaping to fullscreen. Cross-fades to live video once playback
+        // starts, so opening a stream reads as a quick sharpen instead of a
+        // black "Loading…" gap.
+        .overlay {
+          StreamLoadingView(
+            posterURL: posterURL,
+            avatarURL: channelAvatarURL,
+            title: isVOD ? vod?.title : offlineDisplayName
+          )
+          .padding(.trailing, loadingChatInset)
+          .opacity(isLoading && errorMessage == nil && !isOffline ? 1 : 0)
+          .allowsHitTesting(false)
+          .animation(.easeOut(duration: 0.45), value: isLoading)
+        }
 
       if isAudioOnlyActive, !isLoading, errorMessage == nil, !isOffline {
         AudioVisualizerContainer(

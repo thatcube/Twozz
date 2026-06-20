@@ -44,7 +44,7 @@ struct StreamLoadingView: View {
     }
     .allowsHitTesting(false)
     .onAppear {
-      guard !reduceMotion, hasArt || avatarURL != nil else { return }
+      guard !reduceMotion, !compact, avatarURL != nil else { return }
       withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
         pulse = true
       }
@@ -60,8 +60,8 @@ struct StreamLoadingView: View {
         palette.playerBackdrop
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .blur(radius: compact ? 14 : 36, opaque: true)
-      .overlay(Color.black.opacity(compact ? 0.32 : 0.42))
+      .blur(radius: compact ? 0 : 36, opaque: true)
+      .overlay(Color.black.opacity(compact ? 0.28 : 0.42))
       .clipped()
     } else {
       palette.playerBackdrop
@@ -73,16 +73,16 @@ struct StreamLoadingView: View {
       if !compact, let avatarURL {
         avatar(avatarURL)
       }
-      if !compact, let title, !title.isEmpty {
-        Text(title)
-          .font(.title3.weight(.semibold))
-          .foregroundStyle(foreground)
-          .lineLimit(1)
-          .shadow(color: hasArt ? .black.opacity(0.5) : .clear, radius: 6, y: 1)
-      }
       ProgressView()
         .tint(foreground)
         .scaleEffect(compact ? 1.0 : 1.3)
+      if let title, !title.isEmpty {
+        Text(title)
+          .font(compact ? .headline : .title3.weight(.semibold))
+          .foregroundStyle(compact ? foreground.opacity(0.85) : foreground)
+          .lineLimit(1)
+          .shadow(color: hasArt ? .black.opacity(0.5) : .clear, radius: 6, y: 1)
+      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(compact ? 12 : 24)

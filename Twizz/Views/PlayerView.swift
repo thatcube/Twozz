@@ -129,6 +129,12 @@ struct PlayerView: View {
   /// composer, so a dedicated invisible scroller target stands in.
   var chatFocusAnchor: Focusable { isVOD ? .chatScroller : .chatInput }
 
+  /// Where focus lands when the viewer leaves an active chat scroll via Back:
+  /// the live composer (so they can immediately type) or, on a VOD (no
+  /// composer), the collapse-chat button. Never `.chatScroller`, which would
+  /// immediately re-pause the replay.
+  var chatScrollExitFocus: Focusable { isVOD ? .chatToggle : .chatInput }
+
   /// Keep the seek bar and the chat scroller mutually non-neighboring so a
   /// sideways swipe can never escape from one into the other.
   var scrubberFocusable: Bool {
@@ -1207,6 +1213,12 @@ struct PlayerView: View {
         wakeFromSleep()
       } else if isChatScrolling || chatSoftPauseRemaining != nil {
         resumeChatLive()
+        // Land focus on the composer (live) / collapse button (VOD) with the
+        // chrome up. Without this the buttons rejoin the focus engine with no
+        // owner and tvOS defaults to the leftmost control (the channel button on
+        // the far side), instead of the "Send a message" field right under the
+        // chat the viewer was just reading.
+        revealControls(preferredFocus: chatScrollExitFocus)
       } else if showChatSettings {
         if chatSettingsPage != .main {
           closeSubpage()
@@ -1233,20 +1245,34 @@ struct PlayerView: View {
         return
       }
       if !showControls {
-        // Directional movement should immediately surface controls. Pressing
-        // right with chat open means the user wants the composer, so land
-        // there directly instead of bouncing focus to the chat toggle first.
-        // Up/down with chat open drive the soft-pause / scroll flow even while
-        // the chrome is hidden (scrolling doesn't depend on focus).
+        // From the bare video (chrome hidden) a directional press surfaces the
+        // controls and lands focus deliberately rather than letting the focus
+        // engine pick a magnet: up → the middle of the control row
+        // (quality/speed), left → the channel button, right → the chat composer
+        // (opening chat if it's hidden). Down rejoins an in-progress chat scroll,
+        // otherwise it just surfaces the controls. Chat scrolling is only ever
+        // *started* from inside chat (an up-press on the composer) — never by a
+        // bare up-swipe here, which used to dive straight into the scroll area
+        // without ever focusing the input.
+        guard !isOffline else {
+          scheduleHide()
+          return
+        }
         switch direction {
-        case .right where showChat:
+        case .up:
+          revealControls(preferredFocus: .quality)
+        case .left:
+          revealControls(preferredFocus: .streamInfo)
+        case .right:
+          if !showChat {
+            showChat = true
+            chatReplayStartMessageID = chat.messages.suffix(chatReplayMessageCount).first?.id
+          }
           revealControls(preferredFocus: chatFocusAnchor)
-        case .up where showChat:
-          handleChatUpPress()
         case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
           handleChatDownPress()
         default:
-          revealControls(preferredFocus: .chatToggle)
+          revealControls(preferredFocus: .quality)
         }
       } else {
         scheduleHide()

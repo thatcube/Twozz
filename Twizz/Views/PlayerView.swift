@@ -523,6 +523,11 @@ struct PlayerView: View {
   /// scrolls to the same id still register as a change.
   @State var chatScrollTarget: ChatScrollTarget?
   @State var chatScrollNonce = 0
+  /// Snapshot of the chat list captured when the viewer pauses/scrolls. While
+  /// non-nil it is the single source of truth for both rendering and scroll math,
+  /// so a busy channel (where the live buffer is constantly trimmed from the
+  /// front) can't shift the list out from under the reader. Cleared on resume.
+  @State var chatFrozenMessages: [ChatMessage]?
   /// Messages to advance per up/down swipe while scrolling.
   let chatScrollStep = 4
   /// Swipe-to-scroll (Siri Remote trackpad) state. The monitor reports the
@@ -954,7 +959,17 @@ struct PlayerView: View {
     ChatFontStyle(rawValue: chatFontStyleRaw) ?? .standard
   }
 
+  /// The chat list driving both rendering and scroll math. While the viewer is
+  /// reading/scrolling we serve a frozen snapshot (see `chatFrozenMessages`) so
+  /// the list can't shift; otherwise it's the live, growing buffer.
   var visibleChatMessages: [ChatMessage] {
+    if let chatFrozenMessages { return chatFrozenMessages }
+    return liveVisibleChatMessages
+  }
+
+  /// The live chat buffer, windowed to the replay start when chat was toggled
+  /// open mid-stream. This is what gets snapshotted into `chatFrozenMessages`.
+  var liveVisibleChatMessages: [ChatMessage] {
     if isVOD { return replay.messages }
     guard let startID = chatReplayStartMessageID else { return chat.messages }
     guard let startIndex = chat.messages.firstIndex(where: { $0.id == startID }) else {
@@ -1766,6 +1781,14 @@ struct PlayerView: View {
         .TwizzControlButtonStyle()
         .accessibilityLabel("Channel info")
         .accessibilityHint("Opens the channel page")
+        // While the viewer is scrolling chat, drop every control-row button out
+        // of the focus engine (mirroring the scrubber's `scrubberFocusable`
+        // gate). Focus is held on the composer; without this the engine treats
+        // these as neighbors and a left press jumps here — flashing a focused
+        // button and an audible tick — before our trap reverts it. Removing them
+        // entirely means focus simply can't move here. Exit via Back or by
+        // scrolling to the live bottom, which re-enables the row.
+        .focusable(!isChatScrolling)
         .focused($focus, equals: .streamInfo)
         .onMoveCommand { direction in
           switch direction {
@@ -1839,6 +1862,7 @@ struct PlayerView: View {
           onSelectSleep: { selectSleepTimer(at: $0) }
         )
         .equatable()
+        .focusable(!isChatScrolling)
         .focused($focus, equals: .quality)
         .onMoveCommand { direction in
           switch direction {
@@ -1867,6 +1891,7 @@ struct PlayerView: View {
               .frame(minWidth: 52)
               .accessibilityLabel("Playback Speed")
           }
+          .focusable(!isChatScrolling)
           .focused($focus, equals: .quality)
           .onMoveCommand { direction in
             switch direction {
@@ -1888,6 +1913,7 @@ struct PlayerView: View {
           Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
             .accessibilityLabel("Chat Settings")
         }
+        .focusable(!isChatScrolling)
         .focused($focus, equals: .chatSettingsButton)
         .onMoveCommand { direction in
           switch direction {
@@ -1912,6 +1938,7 @@ struct PlayerView: View {
           Icon(glyph: showChat ? .sidebarRightCollapse : .sidebarRightExpand)
             .accessibilityLabel(showChat ? "Hide Chat" : "Show Chat")
         }
+        .focusable(!isChatScrolling)
         .focused($focus, equals: .chatToggle)
         .onMoveCommand { direction in
           switch direction {
@@ -1929,14 +1956,6 @@ struct PlayerView: View {
         }
       }
       .fixedSize(horizontal: true, vertical: false)
-      // While the viewer is actively scrolling chat, drop the entire control row
-      // (channel, quality, settings, collapse) out of the focus engine. Focus is
-      // held on the composer; without this, a left press lands natively on the
-      // adjacent collapse button — playing a focus tick and flashing it focused —
-      // before the scroll focus-trap reverts it. Disabling removes them as focus
-      // neighbors so focus never moves there at all. Exit scroll via Back or by
-      // scrolling down to the live bottom, which re-enables the row.
-      .disabled(isChatScrolling)
       .TwizzControlButtonStyle()
       .background(
         GeometryReader { proxy in
@@ -2288,6 +2307,7 @@ struct PlayerView: View {
         replay: isVOD ? replay : nil,
         channel: channel,
         replayStartMessageID: chatReplayStartMessageID,
+        frozenMessages: chatFrozenMessages,
         textSize: chatTextSize,
         emoteSize: chatEmoteSize,
         messageSpacing: chatMessageSpacing,
@@ -3186,6 +3206,11 @@ private struct ChatMessagesColumn: View {
   var replay: VODChatReplayService? = nil
   let channel: String
   let replayStartMessageID: ChatMessage.ID?
+  /// When non-nil, the viewer is paused/scrolling: render this fixed snapshot
+  /// instead of the live buffer so the list can't shift under them. While nil,
+  /// `visibleMessages` reads the live buffer inside this wrapper's own body (the
+  /// reason this view exists) so PlayerView's body isn't re-run per message.
+  var frozenMessages: [ChatMessage]? = nil
   let textSize: CGFloat
   let emoteSize: CGFloat
   let messageSpacing: CGFloat
@@ -3207,6 +3232,7 @@ private struct ChatMessagesColumn: View {
   let scrollTarget: ChatScrollTarget?
 
   private var visibleMessages: [ChatMessage] {
+    if let frozenMessages { return frozenMessages }
     if let replay { return replay.messages }
     guard let chat else { return [] }
     guard let startID = replayStartMessageID else { return chat.messages }

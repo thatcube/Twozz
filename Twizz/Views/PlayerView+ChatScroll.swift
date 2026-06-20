@@ -11,6 +11,7 @@ extension PlayerView {
       chatReplayStartMessageID = nil
       showChatSettings = false
       cancelSoftPause()
+      chatFrozenMessages = nil
     }
   }
 
@@ -67,6 +68,7 @@ extension PlayerView {
   /// Freeze chat for `softPauseSeconds`, counting down then auto-resuming.
   /// Focus is left untouched — this is a lightweight "let me read" pause.
   func startSoftPause() {
+    freezeChatSnapshot()
     softPauseTask?.cancel()
     chatSoftPauseRemaining = softPauseSeconds
     softPauseTask = Task {
@@ -82,6 +84,14 @@ extension PlayerView {
     }
   }
 
+  /// Capture the live chat list so the reader's view stays put while a busy
+  /// channel keeps appending (and trimming) messages underneath. No-op if a
+  /// snapshot is already held (a soft pause promoted into a scroll keeps it).
+  func freezeChatSnapshot() {
+    guard chatFrozenMessages == nil else { return }
+    chatFrozenMessages = liveVisibleChatMessages
+  }
+
   func cancelSoftPause() {
     softPauseTask?.cancel()
     softPauseTask = nil
@@ -91,6 +101,7 @@ extension PlayerView {
   /// Promote a soft pause into manual scroll mode, anchored at the newest message.
   func beginChatScrolling() {
     guard !isChatScrolling else { return }
+    freezeChatSnapshot()
     cancelSoftPause()
     isChatScrolling = true
     let msgs = visibleChatMessages
@@ -317,6 +328,7 @@ extension PlayerView {
     cancelSoftPause()
     isChatScrolling = false
     chatScrollAnchorID = nil
+    chatFrozenMessages = nil
     stopTrackpadScrollLoop()
     scheduleHide()
   }

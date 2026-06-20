@@ -590,18 +590,7 @@ extension View {
   /// Frosted Liquid Glass panel (tvOS 26+) with a material fallback.
   @ViewBuilder
   fileprivate func glassPanel(disabled: Bool) -> some View {
-    let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-    return Group {
-      if disabled {
-        self
-          .background(Color.twizzOpaqueGlass, in: shape)
-          .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
-      } else if #available(tvOS 26.0, *) {
-        self.glassEffect(.regular, in: shape)
-      } else {
-        self.background(.ultraThinMaterial, in: shape)
-      }
-    }
+    modifier(SettingsGlassPanelModifier(disabled: disabled))
   }
 
   /// Selectable option styling. Applies a single native button style
@@ -630,6 +619,29 @@ extension View {
       self.buttonStyle(.glassProminent)
     } else {
       self.buttonStyle(.borderedProminent)
+    }
+  }
+}
+
+/// Backs the Settings section panels. When transparency is reduced (`disabled`)
+/// the panel becomes opaque — but it must follow the active theme rather than the
+/// shared near-black `twizzOpaqueGlass`, so the Light theme stays light instead of
+/// darkening just because transparency was turned off. Dark/OLED resolve to the
+/// same near-black fill + hairline as before, so they are unchanged.
+private struct SettingsGlassPanelModifier: ViewModifier {
+  let disabled: Bool
+  @Environment(\.themePalette) private var palette
+
+  func body(content: Content) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+    if disabled {
+      content
+        .background(palette.cardOpaqueSurface, in: shape)
+        .overlay(shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1))
+    } else if #available(tvOS 26.0, *) {
+      content.glassEffect(.regular, in: shape)
+    } else {
+      content.background(.ultraThinMaterial, in: shape)
     }
   }
 }

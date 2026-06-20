@@ -224,6 +224,10 @@ struct PlayerView: View {
   @AppStorage("captionsBackgroundStyle") var captionsBackgroundStyleRaw = CaptionBackgroundStyle.blur.rawValue
   /// Draw a dark outline around caption glyphs for legibility.
   @AppStorage("captionsOutline") var captionsOutline = false
+  /// Caption text color (`CaptionTextColor` raw value).
+  @AppStorage("captionsTextColor") var captionsTextColorRaw = CaptionTextColor.white.rawValue
+  /// Caption text opacity, 0.3…1.0.
+  @AppStorage("captionsTextOpacity") var captionsTextOpacity = 1.0
   /// Live viewer count badge in the top-left HUD. On by default — a glanceable,
   /// non-diagnostic stat most viewers want while watching.
   @AppStorage("showViewerCount") var showViewerCount = true
@@ -820,6 +824,7 @@ struct PlayerView: View {
     case chatDiagnosticsToggle
     case chatCaptionsToggle
     case chatCaptionsBackgroundOption(Int)
+    case chatCaptionsColorOption(Int)
     case chatCaptionsOutlineToggle
     case youtubeMergeToggle
     case youtubeMergeURL
@@ -869,6 +874,7 @@ struct PlayerView: View {
     case captionFontSize
     case captionPosition
     case captionTiming
+    case captionOpacity
   }
 
   var chatTextSize: CGFloat {
@@ -1422,7 +1428,9 @@ struct PlayerView: View {
           fontScale: captionsFontScale,
           verticalPosition: captionsVerticalPosition,
           backgroundStyle: CaptionBackgroundStyle.from(captionsBackgroundStyleRaw),
-          outline: captionsOutline
+          outline: captionsOutline,
+          textColor: CaptionTextColor.from(captionsTextColorRaw).color,
+          textOpacity: captionsTextOpacity
         )
         .transition(.opacity)
       }
@@ -2183,6 +2191,7 @@ struct PlayerView: View {
       .chatCaptionsButton,
       .chatCaptionsToggle,
       .chatCaptionsBackgroundOption,
+      .chatCaptionsColorOption,
       .chatCaptionsOutlineToggle,
       .chatEventsButton,
       .chatRaidEventToggle,
@@ -2519,14 +2528,16 @@ struct PlayerView: View {
     // evenly inside the glass pane's rounded corners.
     .padding(.bottom, 16)
     .background(
-      palette.isLight
-        ? (chatLayoutMode == .glass
-          ? AnyShapeStyle(Color.white.opacity(0.55))
-          : (chatLayoutMode == .overlay
+      // In Glass mode the composer shares the chat message list's exact wash
+      // (`chromeGlassTint(0.22)`) over the pane's glass, so "Send a message" reads
+      // as the same surface as the chat above it instead of a distinct lighter
+      // band. Overlay/side modes keep their own opaque, theme-aware fills.
+      chatLayoutMode == .glass
+        ? AnyShapeStyle(palette.chromeGlassTint(0.22))
+        : (palette.isLight
+          ? (chatLayoutMode == .overlay
             ? AnyShapeStyle(Color(white: 0.97).opacity(0.92))
-            : AnyShapeStyle(Color(white: 0.99).opacity(0.96))))
-        : (chatLayoutMode == .glass
-          ? AnyShapeStyle(Color.black.opacity(0.22))
+            : AnyShapeStyle(Color(white: 0.99).opacity(0.96)))
           : (chatLayoutMode == .overlay
             ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
             : AnyShapeStyle(Color(white: 0.07).opacity(0.96))))
@@ -2908,6 +2919,7 @@ private struct TwizzOpaquePillButtonStyle: ButtonStyle {
 private struct TwizzControlButtonStyleModifier: ViewModifier {
   var shape: TwizzControlShape
   @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
 
   @ViewBuilder
   func body(content: Content) -> some View {
@@ -2919,7 +2931,17 @@ private struct TwizzControlButtonStyleModifier: ViewModifier {
         // button style.
         .focusEffectDisabled()
     } else if #available(tvOS 26.0, *) {
-      content.buttonStyle(.glass)
+      if palette.isLight {
+        // Native `.buttonStyle(.glass)` samples the dark video and renders dark,
+        // which fights the Light theme. Swap in a light frosted-glass pill (a
+        // light wash under real `.glassEffect`) that mirrors the native focus
+        // behavior. Dark/OLED keep the untouched native glass below.
+        content
+          .buttonStyle(TwizzLightGlassControlButtonStyle(shape: shape))
+          .focusEffectDisabled()
+      } else {
+        content.buttonStyle(.glass)
+      }
     } else {
       content.buttonStyle(.automatic)
     }
@@ -2979,8 +3001,62 @@ private struct TwizzOpaqueControlButtonStyle: ButtonStyle {
   }
 }
 
-/// Reports the natural height of the chat-settings content so the floating panel
-/// can size itself to fit (and animate) rather than always filling the pane.
+/// Light-theme control pill for the *glass-enabled* path. Native
+/// `.buttonStyle(.glass)` samples the dark video frame underneath and renders
+/// dark, which clashes with the Light theme's light chrome. This paints the exact
+/// same material as the Glass chat pane — a light `chromeGlassTint` wash under a
+/// real, refractive `.glassEffect(.regular)` (brightening to white on focus) —
+/// while keeping the native focus lift (scale + shadow). Used only for the
+/// `.light` palette; dark/OLED keep the untouched native glass. Like the opaque
+/// style it reads the button's own focus state via `@Environment(\.isFocused)`.
+@available(tvOS 26.0, *)
+private struct TwizzLightGlassControlButtonStyle: ButtonStyle {
+  var shape: TwizzControlShape
+
+  func makeBody(configuration: Configuration) -> some View {
+    LightGlassControlButtonBody(configuration: configuration, shape: shape)
+  }
+
+  private struct LightGlassControlButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let shape: TwizzControlShape
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+      Group {
+        switch shape {
+        case .capsule:
+          styled(Capsule(style: .continuous))
+        case .circle:
+          styled(Circle())
+        }
+      }
+      .scaleEffect(configuration.isPressed ? 0.96 : (isFocused ? 1.08 : 1.0))
+      .shadow(
+        color: .black.opacity(isFocused ? 0.28 : 0.0),
+        radius: isFocused ? 12 : 0, x: 0, y: isFocused ? 6 : 0)
+      .animation(.easeOut(duration: 0.16), value: isFocused)
+      .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    @ViewBuilder
+    private func styled<S: InsettableShape>(_ s: S) -> some View {
+      let isCircle = (shape == .circle)
+      configuration.label
+        .foregroundStyle(isFocused ? .black : palette.chromeOnOpaque)
+        .padding(.horizontal, isCircle ? 10 : 22)
+        .padding(.vertical, isCircle ? 10 : 14)
+        // Same translucent material as the Glass chat pane, but with the
+        // stronger over-video wash so the pill reads as light as the chat even
+        // though only dark video (not light chat content) sits behind it.
+        .background(palette.chromeOverVideoTint(), in: s)
+        .glassEffect(isFocused ? .regular.tint(.white) : .regular, in: s)
+        .overlay(s.strokeBorder(.white.opacity(isFocused ? 0.0 : 0.12), lineWidth: 1))
+        .clipShape(s)
+    }
+  }
+}
 struct ChatSettingsHeightKey: PreferenceKey {
   static var defaultValue: CGFloat { 0 }
   static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -3697,14 +3773,14 @@ private struct HUDChipGlassStyle: ViewModifier {
         .clipShape(shape)
     } else if #available(tvOS 26.0, *) {
       content
-        .background(palette.chromeGlassTint(0.22), in: shape)
+        .background(palette.chromeOverVideoTint(), in: shape)
         .glassEffect(.regular, in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
         .clipShape(shape)
     } else {
       content
         .background(.ultraThinMaterial, in: shape)
-        .background(palette.chromeGlassTint(0.22), in: shape)
+        .background(palette.chromeOverVideoTint(), in: shape)
         .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
         .clipShape(shape)
     }
@@ -3866,8 +3942,11 @@ private struct ScrubBarGlassBackground: ViewModifier {
         .clipShape(shape)
     } else if #available(tvOS 26.0, *) {
       content
+        // Same translucent material as the Glass chat pane, with the stronger
+        // over-video wash so the bar reads as light as the chat over dark video.
+        .background(palette.chromeOverVideoTint(), in: shape)
         .glassEffect(isFocused ? .regular.tint(.white.opacity(0.10)) : .regular, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.22 : 0.10), lineWidth: 1))
+        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.22 : 0.12), lineWidth: 1))
     } else {
       content
         .background(.ultraThinMaterial, in: shape)

@@ -206,6 +206,19 @@ struct ThemePalette: Equatable {
     (isLight ? Color.white : Color.black).opacity(opacity)
   }
 
+  /// Wash painted *under* translucent chrome that floats directly over the video
+  /// (control pills, the scrub bar, the viewer-count/latency HUD chips). Unlike
+  /// the chat pane — whose light message content backs its glass and keeps it
+  /// reading light — these surfaces have only the dark video frame behind them,
+  /// so the refractive `.glassEffect` samples that dark frame and reads gray with
+  /// only the chat's thin 0.22 wash. The Light theme therefore needs a stronger
+  /// white wash here so the over-video chrome lands at the *same* perceived
+  /// lightness as the chat while still refracting the video through it. Dark/OLED
+  /// keep the prior `Color.black.opacity(0.22)` — a no-op.
+  func chromeOverVideoTint() -> Color {
+    isLight ? Color.white.opacity(0.5) : Color.black.opacity(0.22)
+  }
+
   /// Hairline stroke for translucent chrome glass (theme-aware so it stays
   /// visible against light glass in Light mode). Matches the prior
   /// `Color.white.opacity(0.12)` in dark/OLED.

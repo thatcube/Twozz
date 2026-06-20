@@ -684,6 +684,9 @@ struct PlayerView: View {
   @State var chatFocusPin: Focusable?
   @State var chatFocusPinTask: Task<Void, Never>?
   @State var raidBannerDismissTask: Task<Void, Never>?
+  /// Resolved avatar of the channel currently raiding us, shown in the incoming
+  /// raid banner (mirrors the go-live toast). Best-effort; nil while it loads.
+  @State var incomingRaidAvatarURL: URL?
   /// The outgoing raid currently being followed (with a cancel window).
   @State var outgoingRaid: OutgoingRaidEvent?
   @State var outgoingRaidSecondsRemaining = 0
@@ -925,6 +928,7 @@ struct PlayerView: View {
     case raidFollowCancel
     case sleepKeepWatching, sleepResume
     case simulateRaidButton
+    case simulateIncomingRaidButton
     case simulateOfflineButton
     case simulateMomentButton
     case simulateGoLiveButton
@@ -1162,7 +1166,7 @@ struct PlayerView: View {
         .ignoresSafeArea()
       }
 
-      if showRaidEvents, let raid = chat.pendingRaid {
+      if showRaidEvents, let raid = chat.pendingRaid, shouldShowIncomingRaid(raid) {
         raidBanner(raid)
           .transition(.motionAware(.move(edge: .bottom).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(10)
@@ -1208,7 +1212,25 @@ struct PlayerView: View {
       // informational: show a passive banner and auto-dismiss it. We never steal
       // focus or offer to "follow", because following would take you away from
       // the channel that is actually being raided.
-      guard newRaid != nil else { return }
+      guard let newRaid else {
+        incomingRaidAvatarURL = nil
+        return
+      }
+      // Filter out raids too small to matter for the size of the channel you're
+      // on (e.g. a 1-viewer raid into a 250k-viewer stream): drop them silently.
+      guard shouldShowIncomingRaid(newRaid) else {
+        chat.pendingRaid = nil
+        return
+      }
+      // Resolve the raider's channel avatar so the banner can show who's raiding,
+      // mirroring the go-live toast. Best-effort: the banner renders immediately
+      // with a placeholder and fills in the icon once it arrives.
+      incomingRaidAvatarURL = nil
+      Task {
+        guard let metadata = await PlaybackService.channelMetadata(for: newRaid.login) else { return }
+        guard chat.pendingRaid?.login == newRaid.login else { return }
+        incomingRaidAvatarURL = metadata.profileImageURL
+      }
       raidBannerDismissTask?.cancel()
       raidBannerDismissTask = Task {
         try? await Task.sleep(for: .seconds(12))
@@ -2386,6 +2408,7 @@ struct PlayerView: View {
       .chatPredictionEventToggle,
       .chatGoalEventToggle,
       .simulateRaidButton,
+      .simulateIncomingRaidButton,
       .simulateOfflineButton,
       .simulateMomentButton,
       .simulateGoLiveButton,

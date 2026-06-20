@@ -6,28 +6,82 @@ extension PlayerView {
   /// A passive, non-interactive banner announcing an *incoming* raid (someone
   /// raiding the channel you're watching). It deliberately has no buttons and
   /// cannot take focus — you're already on the channel being raided, so there's
-  /// nothing to follow.
+  /// nothing to follow. The raider's channel avatar is shown alongside, the same
+  /// way the go-live toast surfaces who just went live.
   @ViewBuilder
   func raidBanner(_ raid: RaidEvent) -> some View {
     VStack {
       Spacer()
-      VStack(spacing: 4) {
-        Text("\(raid.displayName) is raiding this channel")
-          .font(.headline).bold()
-          .foregroundStyle(.white)
-        Text("\(raid.viewerCount) viewers incoming")
-          .font(.subheadline)
-          .foregroundStyle(.white.opacity(0.85))
+      HStack(spacing: 16) {
+        raidAvatar
+        VStack(alignment: .leading, spacing: 2) {
+          Text("\(raid.displayName) is raiding this channel")
+            .font(.headline).bold()
+            .foregroundStyle(.primary)
+          Text("\(raid.viewerCount) viewers incoming")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
       }
-      .multilineTextAlignment(.center)
-      .accessibilityElement(children: .combine)
-      .padding(.horizontal, 32)
-      .padding(.vertical, 18)
-      .background(.purple.opacity(0.85), in: Capsule())
+      .padding(.leading, 20)
+      .padding(.vertical, 20)
+      .padding(.trailing, 28)
+      .background {
+        // Neutral, theme-aware surface (matches the go-live toast) instead of the
+        // old fixed purple: an opaque palette surface when transparency is reduced,
+        // otherwise native glass. Stays legible in every theme.
+        if glassDisabled {
+          Capsule().fill(palette.chromeOpaqueSurface)
+            .overlay(Capsule().strokeBorder(palette.chromeOpaqueBorder, lineWidth: 1))
+        } else if #available(tvOS 26.0, *) {
+          Capsule().glassEffect(.regular, in: Capsule())
+        } else {
+          Capsule().fill(.ultraThinMaterial)
+        }
+      }
+      .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
       .padding(.bottom, 60)
     }
     .allowsHitTesting(false)
     .ignoresSafeArea()
+  }
+
+  /// The raiding channel's avatar, with a neutral placeholder while it loads.
+  private var raidAvatar: some View {
+    let size: CGFloat = 72
+    return CachedAsyncImage(url: incomingRaidAvatarURL) { image in
+      image.resizable().scaledToFill()
+    } placeholder: {
+      ZStack {
+        Circle().fill(glassDisabled ? AnyShapeStyle(palette.chromeOpaqueSurface) : AnyShapeStyle(.ultraThinMaterial))
+        Icon(glyph: .userPlus, size: size * 0.42)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .frame(width: size, height: size)
+    .clipShape(Circle())
+  }
+
+  /// Whether an incoming raid is worth surfacing, scaled to the size of the
+  /// channel you're currently watching. A handful of viewers is exciting on a
+  /// tiny stream but pure noise on a huge one, so larger channels require the
+  /// raid to bring a meaningful slice of their current audience.
+  func shouldShowIncomingRaid(_ raid: RaidEvent) -> Bool {
+    // Channels at or below this many concurrent viewers are "small" enough that
+    // every raid is meaningful and always shown.
+    let smallChannelCeiling = 100
+    // On larger channels, a raid must bring at least this fraction of the
+    // current audience to clear the bar (e.g. 5% — so a 500-viewer stream needs
+    // ~25 incoming, a 250k stream needs ~12.5k).
+    let meaningfulFraction = 0.05
+
+    // Unknown audience size (count not resolved yet): show it rather than risk
+    // silently dropping a real raid.
+    guard let watching = hermes.viewerCount, watching > smallChannelCeiling else {
+      return true
+    }
+    return Double(raid.viewerCount) >= Double(watching) * meaningfulFraction
   }
 
   func followRaid(_ login: String) {
@@ -150,6 +204,20 @@ extension PlayerView {
       toBroadcasterID: "",
       viewerCount: 0
     )
+  }
+
+  /// Debug-only: inject a simulated incoming raid so the banner, its resolved
+  /// channel avatar, and the auto-dismiss can be tested without waiting for a
+  /// real raid. Uses a large viewer count so it always clears the small-raid
+  /// filter regardless of the watched channel's size.
+  func simulateIncomingRaid() {
+    withAnimation {
+      chat.pendingRaid = RaidEvent(
+        login: "monstercat",
+        displayName: "Monstercat",
+        viewerCount: 4200
+      )
+    }
   }
 
   func clearOutgoingRaidState() {

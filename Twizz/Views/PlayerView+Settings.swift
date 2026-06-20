@@ -272,6 +272,24 @@ extension PlayerView {
           }
           .frame(maxWidth: .infinity, alignment: .leading)
 
+          // Debug-only: real incoming raids depend on another channel raiding
+          // this one, so this injects a simulated raid (from Monstercat, with a
+          // big viewer count so it clears the small-raid filter) to exercise the
+          // banner, its channel avatar, and the auto-dismiss. Visible only while
+          // the Diagnostics overlay is enabled.
+          settingsPill(
+            title: "Simulate Incoming Raid",
+            isSelected: false,
+            focusTag: .simulateIncomingRaidButton
+          ) {
+            showChatSettings = false
+            Task {
+              try? await Task.sleep(for: .milliseconds(600))
+              simulateIncomingRaid()
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
           // Debug-only: there's no way to force a watched channel offline, so
           // this drops straight into the offline empty state to exercise its
           // layout, copy, and View Channel / Try Again actions. Visible only

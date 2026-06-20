@@ -58,6 +58,8 @@ enum Glyph: String {
   case world
   case home
   case layoutGrid = "layout-grid"
+  case volume
+  case volumeOff = "volume-off"
   case search
   case settings
 }

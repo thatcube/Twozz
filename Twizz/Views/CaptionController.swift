@@ -307,11 +307,21 @@ struct CaptionOverlayView: View {
                         x: geo.size.width / 2,
                         y: captionCenterY(in: geo.size.height)
                     )
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
+                    .transition(appearTransition)
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: text)
+        // Animate only the overlay appearing/disappearing (empty ↔ non-empty);
+        // text swaps while it's on screen stay instant for readability.
+        .animation(.easeOut(duration: 0.22), value: text.isEmpty)
         .allowsHitTesting(false)
+    }
+
+    /// Captions ease up from the bottom with a soft blur as they appear (and
+    /// reverse on disappear). Reduce Motion drops the slide/blur for a plain fade.
+    private var appearTransition: AnyTransition {
+        reduceMotion
+            ? .opacity
+            : .opacity.combined(with: .move(edge: .bottom)).combined(with: .captionBlur)
     }
 
     private var captionSlab: some View {
@@ -381,6 +391,23 @@ struct CaptionOverlayView: View {
                         : AnyShapeStyle(.ultraThinMaterial)
                 )
         }
+    }
+}
+
+private extension AnyTransition {
+    /// Blurs the slab in/out as part of the appear transition.
+    static var captionBlur: AnyTransition {
+        .modifier(
+            active: CaptionBlurModifier(radius: 14),
+            identity: CaptionBlurModifier(radius: 0)
+        )
+    }
+}
+
+private struct CaptionBlurModifier: ViewModifier {
+    let radius: CGFloat
+    func body(content: Content) -> some View {
+        content.blur(radius: radius)
     }
 }
 

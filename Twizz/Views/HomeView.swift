@@ -23,6 +23,10 @@ struct HomeView: View {
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
   @State private var pendingWatchChannel: FollowedChannel?
+  @State private var showingMultiview = false
+  /// When a multiview pane is clicked to watch full-screen, the channel is held
+  /// here so the normal single-stream player can open once multiview dismisses.
+  @State private var pendingMultiviewWatch: FollowedChannel?
   /// Categories opened from the Home tab are pushed one level deep here, so the
   /// category view is genuinely L2 of Home rather than a tab switch into Browse.
   @State private var homePath: [TwitchCategory] = []
@@ -55,6 +59,11 @@ struct HomeView: View {
 
   private var streamCardSize: StreamCardSize {
     StreamCardSize.resolve(streamCardSizeRaw)
+  }
+
+  /// Followed channels that are live right now — the pool multiview draws from.
+  private var liveFollowedChannels: [FollowedChannel] {
+    follows.channels.filter(\.isLive)
   }
 
   private var targetVisibleCards: CGFloat {
@@ -256,6 +265,22 @@ struct HomeView: View {
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
+    .fullScreenCover(isPresented: $showingMultiview, onDismiss: {
+      if let channel = pendingMultiviewWatch {
+        pendingMultiviewWatch = nil
+        selectedChannel = channel
+      }
+    }) {
+      MultiviewRootView(
+        liveChannels: liveFollowedChannels,
+        onWatchFull: { channel in
+          pendingMultiviewWatch = channel
+          showingMultiview = false
+        }
+      )
+      .environment(\.themePalette, resolvedPalette)
+      .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    }
     .fullScreenCover(isPresented: $showSignIn) {
       SignInView(auth: auth) {
         Task {
@@ -315,6 +340,20 @@ struct HomeView: View {
         }
 
         Spacer()
+
+        if liveFollowedChannels.count >= 2 {
+          Button {
+            showingMultiview = true
+          } label: {
+            Label {
+              Text("Multiview")
+                .font(.system(size: 24, weight: .semibold))
+            } icon: {
+              Icon(glyph: .layoutGrid, size: 26)
+            }
+          }
+          .accessibilityLabel("Watch multiple channels at once")
+        }
 
         if !follows.isUsingDemoData {
           Button {

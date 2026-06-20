@@ -9,7 +9,7 @@ extension PlayerView {
   /// observer that keeps both the replay and the seek readout in sync. All the
   /// live machinery (latency, proxy, EventSub, quality, watchdog) stays off.
   func startVOD() async {
-    guard let vod else { return }
+    guard let vod = activeVOD else { return }
     isLoading = true
     errorMessage = nil
     isOffline = false

@@ -117,14 +117,45 @@ struct PlayerView: View {
   /// adaptive quality, IRC chat, watchdog).
   var vod: VODContext? = nil
 
+  /// Runtime hand-off into the channel's in-progress broadcast VOD, used by
+  /// Stream Rewind to continue rewinding past the in-memory DVR window. Distinct
+  /// from `vod` (which is set at init for a recorded-broadcast session opened from
+  /// the channel page): this is resolved and toggled *during* a live session when
+  /// the viewer rewinds to the DVR floor. See `PlayerView+VOD` for the transition.
+  struct LiveVODHandoff: Equatable {
+    let broadcast: PlaybackService.LiveBroadcastVOD
+    /// Title to show while in the handoff VOD (the live broadcast's title).
+    let title: String
+    /// True once playback has actually switched to the VOD; false while merely
+    /// resolved/cached and still playing live.
+    var isActive: Bool
+  }
+
   /// Optional poster shown full-bleed while the stream loads, cross-fading to
   /// video once playback starts. Used when escalating from a multiview pane so
   /// the hand-off looks seamless (the channel's frame fills immediately) instead
   /// of flashing a black "Loading…" screen.
   var posterURL: URL? = nil
 
-  /// True while playing a recorded broadcast rather than a live stream.
-  var isVOD: Bool { vod != nil }
+  /// True while playing a recorded broadcast rather than a live stream — either a
+  /// VOD session opened from the channel page (`vod`) or an active Stream Rewind
+  /// hand-off into the live broadcast's in-progress VOD (`liveVODHandoff`).
+  var isVOD: Bool { activeVOD != nil }
+
+  /// The VOD currently being played, whichever source it came from. `nil` while
+  /// playing live.
+  var activeVOD: VODContext? {
+    if let vod { return vod }
+    if let handoff = liveVODHandoff, handoff.isActive {
+      return VODContext(id: handoff.broadcast.id, title: handoff.title)
+    }
+    return nil
+  }
+
+  /// True when this player was launched on a live channel (as opposed to a
+  /// recorded-broadcast session from the channel page). Only live sessions can
+  /// hand off to — and return from — the in-progress broadcast VOD.
+  var isLiveSession: Bool { vod == nil }
 
   /// VODs always expose the transport bar (seek is essential); live exposes it
   /// only when the user has Stream Rewind enabled.
@@ -451,6 +482,21 @@ struct PlayerView: View {
   /// survives pause/resume and seek. Ignored for live (always 1.0).
   @State var vodPlaybackRate: Float = 1.0
 
+  // MARK: - Stream Rewind → in-progress VOD hand-off
+
+  /// The channel's in-progress broadcast VOD, once resolved. `isActive` flips when
+  /// playback has actually crossed the DVR floor into the VOD. `nil` means either
+  /// not yet resolved or no VOD is available for hand-off.
+  @State var liveVODHandoff: LiveVODHandoff?
+  /// When we last attempted to resolve the in-progress VOD. Throttles re-resolves
+  /// so a viewer who reaches the floor before the VOD is available retries later
+  /// (rather than hammering the network or giving up forever). Reset on channel
+  /// switch / raid alongside the DVR buffers.
+  @State var lastBroadcastVODResolveAt = Date.distantPast
+  /// Guards against firing overlapping hand-off / return transitions while one is
+  /// already in flight.
+  @State var vodHandoffTransitionInFlight = false
+
   var wallClockLatencySeconds: Double? {
     get { mon.wallClockLatencySeconds }
     nonmutating set { mon.wallClockLatencySeconds = newValue }
@@ -724,6 +770,19 @@ struct PlayerView: View {
   /// True once the timer fires: playback is paused under a dim "Sleeping"
   /// overlay until the viewer presses to resume.
   @State var isSleeping = false
+
+  // MARK: Stream Rewind → VOD hand-off tuning
+
+  /// How close (seconds) the scrub target must come to the DVR floor before the
+  /// player resolves and hands off to the in-progress broadcast VOD. A small lead
+  /// so the seam happens just before the viewer hits the hard wall.
+  let vodHandoffFloorThresholdSeconds: Double = 8
+  /// How close (seconds) the scrub target must come to the VOD's recorded edge
+  /// before the player hands back to the live stream.
+  let vodReturnEdgeThresholdSeconds: Double = 8
+  /// Minimum spacing between in-progress-VOD resolve attempts, so reaching the
+  /// floor before the VOD is available retries later without hammering Twitch.
+  let broadcastVODResolveCooldownSeconds: Double = 30
 
   // MARK: Diagnostics (experimental troubleshooting overlay)
   // Counters and a rolling event log so freezes/jumps can be observed on-device
@@ -1565,6 +1624,8 @@ struct PlayerView: View {
       kickAutoResolvedTarget = ""
       // The rewind window is per-stream: drop the previous channel's DVR history.
       lowLatencyProxy.resetDVR()
+      // …and any resolved/active hand-off into the previous channel's VOD.
+      resetVODHandoff()
       isUserPaused = false
       // Keep the go-live watcher from toasting whatever we just switched to.
       goLive?.suppressedLogin = activeChannel
@@ -1653,7 +1714,7 @@ struct PlayerView: View {
           StreamLoadingView(
             posterURL: posterURL,
             avatarURL: channelAvatarURL,
-            title: isVOD ? vod?.title : offlineDisplayName
+            title: isVOD ? activeVOD?.title : offlineDisplayName
           )
           .padding(.trailing, loadingChatInset)
           .opacity(isLoading && errorMessage == nil && !isOffline ? 1 : 0)
@@ -4378,8 +4439,10 @@ private struct RewindScrubBar: View {
     }
     if readout.isAtLiveEdge { return "LIVE" }
     let total = Int(readout.behindLiveSeconds.rounded())
-    let m = total / 60
+    let h = total / 3600
+    let m = (total % 3600) / 60
     let s = total % 60
+    if h > 0 { return String(format: "-%d:%02d:%02d", h, m, s) }
     return String(format: "-%d:%02d", m, s)
   }
 

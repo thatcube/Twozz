@@ -149,12 +149,21 @@ struct PlayerView: View {
   /// check below; stepping uses explicit neighbours at each call site.
   var controlOrder: [Focusable] { [.streamInfo, .quality, .chatSettingsButton, .chatToggle] }
 
-  /// Minimum time between accepted horizontal steps. The row keeps only ONE button
-  /// in the focus engine at a time (see `controlButtonRemoved`), so tvOS can never
-  /// free-walk across it on a fast swipe — every step is driven by `stepControl`,
-  /// which this interval rate-limits. A flick lands one button, a long swipe a
-  /// couple. Bigger = more deliberate / harder to cross.
+  /// Minimum time between accepted horizontal steps *during a continuous swipe*.
+  /// The row keeps only ONE button in the focus engine at a time (see
+  /// `controlButtonRemoved`), so tvOS can never free-walk across it on a fast
+  /// swipe — every step is driven by `stepControl`, which rate-limits the swipe
+  /// burst to this interval. A flick lands one button, a long swipe a couple.
+  /// Bigger = more deliberate / harder to swipe across. Discrete D-pad clicks are
+  /// NOT subject to this (see `controlSwipeBurstGap`).
   var controlStepInterval: TimeInterval { 0.3 }
+
+  /// Move events closer together than this are treated as one continuous trackpad
+  /// swipe (momentum fires `onMoveCommand` in a rapid burst) and are rate-limited
+  /// by `controlStepInterval`. Anything slower is a deliberate press — a discrete
+  /// D-pad click, or a fresh gesture — and is allowed through immediately so
+  /// pressing left/right repeatedly moves snappily, one button per press.
+  var controlSwipeBurstGap: TimeInterval { 0.12 }
 
   /// How long the button we just stepped off stays focusable after a step. With
   /// both the old and new button briefly in the focus engine, tvOS animates the
@@ -207,14 +216,19 @@ struct PlayerView: View {
     focus = button
   }
 
-  /// Take one deliberate horizontal step from `source` to `target`, rate-limited
-  /// to one per `controlStepInterval`. Because every other button is out of the
-  /// focus engine, a continued fast swipe just re-fires this and is swallowed
-  /// until the interval elapses. `source` is held focusable for `controlSlideDuration`
+  /// Take one horizontal step from `source` to `target`. Discrete presses (D-pad
+  /// clicks or a fresh gesture — anything arriving more than `controlSwipeBurstGap`
+  /// after the previous move event) go through immediately, so pressing left/right
+  /// repeatedly is snappy. A continuous swipe fires move events in a rapid burst;
+  /// those are rate-limited to one per `controlStepInterval` so the row can't be
+  /// crossed in a single fling. `source` is held focusable for `controlSlideDuration`
   /// so tvOS animates the halo sliding across, then we collapse back to one.
   func stepControl(to target: Focusable, from source: Focusable) {
     let now = Date()
-    if let last = lastControlStepAt, now.timeIntervalSince(last) < controlStepInterval {
+    let sinceLastMove = lastControlMoveAt.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+    lastControlMoveAt = now
+    let isSwipeBurst = sinceLastMove < controlSwipeBurstGap
+    if isSwipeBurst, let last = lastControlStepAt, now.timeIntervalSince(last) < controlStepInterval {
       return
     }
     lastControlStepAt = now
@@ -707,6 +721,10 @@ struct PlayerView: View {
   @State var controlStepClearTask: Task<Void, Never>?
   /// Timestamp of the last accepted control-row step, for the swipe rate limit.
   @State var lastControlStepAt: Date?
+  /// Timestamp of the last control-row move EVENT (accepted or swallowed). The gap
+  /// since this tells `stepControl` whether the current move is part of a rapid
+  /// swipe burst (throttle) or a discrete press (allow immediately).
+  @State var lastControlMoveAt: Date?
   /// True only when the viewer deliberately asked for the seek bar via an
   /// up-press from a control button. The bar is otherwise kept out of the focus
   /// engine so it can't act as a vertical magnet — a swipe between control

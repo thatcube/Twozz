@@ -1,0 +1,1414 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-20T19:20:23.183Z",
+  "source": "ci-models",
+  "streamerCount": 159,
+  "map": {
+    "23fpstv": [
+      "fl0m",
+      "tarik",
+      "buster",
+      "eslcs",
+      "ow_esports",
+      "cs2_paragon_ru",
+      "cs2_maincast",
+      "jynxzi"
+    ],
+    "aceu": [
+      "iitztimmy",
+      "tsm_imperialhal"
+    ],
+    "adeptthebest": [
+      "xqc",
+      "nmplol",
+      "malena"
+    ],
+    "aimsey": [
+      "ludwig",
+      "squeex",
+      "tubbo",
+      "ranboo"
+    ],
+    "alveussanctuary": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "amar": [
+      "couragejd",
+      "qlnek",
+      "mirwana",
+      "nezak_",
+      "coachboop",
+      "gripey",
+      "at0m",
+      "syaazfnn"
+    ],
+    "amouranth": [
+      "xqc",
+      "trainwreckstv"
+    ],
+    "aslanshukasha": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129"
+    ],
+    "at0m": [
+      "couragejd",
+      "qlnek",
+      "mirwana",
+      "nezak_",
+      "coachboop",
+      "amar",
+      "gripey",
+      "syaazfnn"
+    ],
+    "aussieantics": [
+      "clix",
+      "nikof",
+      "mrsavage",
+      "sypherpk",
+      "happyhappygal",
+      "zemie",
+      "nickeh30"
+    ],
+    "austinshow": [
+      "ludwig",
+      "squeex",
+      "qtcinderella",
+      "nmplol",
+      "willneff"
+    ],
+    "ayangenius": [
+      "lagerta_seeman",
+      "badge_insider",
+      "mrnosleep",
+      "mogtime",
+      "stonedagecaveman",
+      "rezaraqna",
+      "g_old_man",
+      "dais"
+    ],
+    "badge_insider": [
+      "ayangenius",
+      "lagerta_seeman",
+      "mrnosleep",
+      "mogtime",
+      "stonedagecaveman",
+      "rezaraqna",
+      "g_old_man",
+      "dais"
+    ],
+    "badgebybadge": [
+      "tommy",
+      "itsprezzyg",
+      "junesup38",
+      "badgecollectordrops",
+      "badgefarm",
+      "monkeygeegee",
+      "cedie",
+      "boosterosrs"
+    ],
+    "badgecollectordrops": [
+      "badgebybadge",
+      "tommy",
+      "itsprezzyg",
+      "junesup38",
+      "badgefarm",
+      "monkeygeegee",
+      "cedie",
+      "boosterosrs"
+    ],
+    "badgefarm": [
+      "badgebybadge",
+      "tommy",
+      "itsprezzyg",
+      "junesup38",
+      "badgecollectordrops",
+      "monkeygeegee",
+      "cedie",
+      "boosterosrs"
+    ],
+    "badgeslibrary": [
+      "jagex",
+      "piratesoftware",
+      "streamdatabase",
+      "ditterbitter",
+      "gingerbeardie",
+      "moosfortune",
+      "triumphant",
+      "cauttyh"
+    ],
+    "boosterosrs": [
+      "badgebybadge",
+      "tommy",
+      "itsprezzyg",
+      "junesup38",
+      "badgecollectordrops",
+      "badgefarm",
+      "monkeygeegee",
+      "cedie"
+    ],
+    "bratishkinoff": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "buster": [
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g",
+      "peereira7",
+      "eslcs"
+    ],
+    "bysl4m": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g"
+    ],
+    "carola": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "cauttyh": [
+      "jagex",
+      "piratesoftware",
+      "streamdatabase",
+      "ditterbitter",
+      "badgeslibrary",
+      "gingerbeardie",
+      "moosfortune",
+      "triumphant"
+    ],
+    "cedie": [
+      "badgebybadge",
+      "tommy",
+      "itsprezzyg",
+      "junesup38",
+      "badgecollectordrops",
+      "badgefarm",
+      "monkeygeegee",
+      "boosterosrs"
+    ],
+    "clix": [
+      "ninja",
+      "sypherpk",
+      "nickeh30",
+      "nikof",
+      "mrsavage",
+      "happyhappygal",
+      "aussieantics",
+      "zemie"
+    ],
+    "coachboop": [
+      "couragejd",
+      "qlnek",
+      "mirwana",
+      "nezak_",
+      "amar",
+      "gripey",
+      "at0m",
+      "syaazfnn"
+    ],
+    "cooruja": [
+      "rakattack",
+      "spilo",
+      "hadi_ow",
+      "imoh97_ow",
+      "sunshinebread",
+      "tommathan",
+      "ocie_casts"
+    ],
+    "cottontailva": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "couragejd": [
+      "qlnek",
+      "mirwana",
+      "nezak_",
+      "coachboop",
+      "amar",
+      "gripey",
+      "at0m",
+      "syaazfnn"
+    ],
+    "croissantstrike": [
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g",
+      "peereira7"
+    ],
+    "cs2_maincast": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "cs2_paragon_ru": [
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g",
+      "peereira7"
+    ],
+    "csyon": [
+      "sansuay_ch",
+      "nisqyy",
+      "jaxxming",
+      "withmudmeee",
+      "knister",
+      "kevinwibe",
+      "excsise",
+      "pira_real"
+    ],
+    "dais": [
+      "ayangenius",
+      "lagerta_seeman",
+      "badge_insider",
+      "mrnosleep",
+      "mogtime",
+      "stonedagecaveman",
+      "rezaraqna",
+      "g_old_man"
+    ],
+    "deepins02": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "disguisedtoast": [
+      "pokimane",
+      "sykkuno",
+      "valkyrae",
+      "fuslie",
+      "quarterjade"
+    ],
+    "ditterbitter": [
+      "jagex",
+      "piratesoftware",
+      "streamdatabase",
+      "badgeslibrary",
+      "gingerbeardie",
+      "moosfortune",
+      "triumphant",
+      "cauttyh"
+    ],
+    "dkincc": [
+      "pokimane",
+      "maya",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "elina": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "emiru": [
+      "mizkif",
+      "ludwig",
+      "qtcinderella",
+      "pokimane"
+    ],
+    "esfandtv": [
+      "mizkif",
+      "xqc",
+      "nmplol",
+      "sodapoppin"
+    ],
+    "eslcs": [
+      "bratishkinoff",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g"
+    ],
+    "etoiles": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "excsise": [
+      "csyon",
+      "sansuay_ch",
+      "nisqyy",
+      "jaxxming",
+      "withmudmeee",
+      "knister",
+      "kevinwibe",
+      "pira_real"
+    ],
+    "fl0m": [
+      "eslcs",
+      "strogo",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g"
+    ],
+    "follentass": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "fuslie": [
+      "pokimane",
+      "sykkuno",
+      "valkyrae",
+      "quarterjade",
+      "disguisedtoast"
+    ],
+    "g_old_man": [
+      "ayangenius",
+      "lagerta_seeman",
+      "badge_insider",
+      "mrnosleep",
+      "mogtime",
+      "stonedagecaveman",
+      "rezaraqna",
+      "dais"
+    ],
+    "gingerbeardie": [
+      "jagex",
+      "piratesoftware",
+      "streamdatabase",
+      "ditterbitter",
+      "badgeslibrary",
+      "moosfortune",
+      "triumphant",
+      "cauttyh"
+    ],
+    "gripey": [
+      "couragejd",
+      "qlnek",
+      "mirwana",
+      "nezak_",
+      "coachboop",
+      "amar",
+      "at0m",
+      "syaazfnn"
+    ],
+    "hadi_ow": [
+      "rakattack",
+      "spilo",
+      "imoh97_ow",
+      "sunshinebread",
+      "ocie_casts",
+      "tommathan",
+      "cooruja"
+    ],
+    "happyhappygal": [
+      "clix",
+      "aussieantics",
+      "nikof",
+      "mrsavage",
+      "sypherpk",
+      "zemie",
+      "nickeh30"
+    ],
+    "hasanabi": [
+      "xqc",
+      "ludwig",
+      "austinshow",
+      "willneff"
+    ],
+    "hyver": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "iitztimmy": [
+      "aceu",
+      "tsm_imperialhal",
+      "genburten"
+    ],
+    "imoh97_ow": [
+      "rakattack",
+      "spilo",
+      "hadi_ow",
+      "sunshinebread",
+      "ocie_casts",
+      "tommathan",
+      "cooruja"
+    ],
+    "inkmate0": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "irissiri129": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "locklear"
+    ],
+    "itsprezzyg": [
+      "badgebybadge",
+      "tommy",
+      "junesup38",
+      "badgecollectordrops",
+      "badgefarm",
+      "monkeygeegee",
+      "cedie",
+      "boosterosrs"
+    ],
+    "izakooo": [
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g",
+      "peereira7"
+    ],
+    "jagex": [
+      "piratesoftware",
+      "streamdatabase",
+      "ditterbitter",
+      "badgeslibrary",
+      "gingerbeardie",
+      "moosfortune",
+      "triumphant",
+      "cauttyh"
+    ],
+    "jaxxming": [
+      "csyon",
+      "sansuay_ch",
+      "nisqyy",
+      "withmudmeee",
+      "knister",
+      "kevinwibe",
+      "excsise",
+      "pira_real"
+    ],
+    "jschlatt": [
+      "ludwig",
+      "slime",
+      "tednivison",
+      "slimecicle",
+      "charborg"
+    ],
+    "juansguarnizo": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129"
+    ],
+    "junesup38": [
+      "badgebybadge",
+      "tommy",
+      "itsprezzyg",
+      "badgecollectordrops",
+      "badgefarm",
+      "monkeygeegee",
+      "cedie",
+      "boosterosrs"
+    ],
+    "jynxzi": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g"
+    ],
+    "kevinwibe": [
+      "csyon",
+      "sansuay_ch",
+      "nisqyy",
+      "jaxxming",
+      "withmudmeee",
+      "knister",
+      "excsise",
+      "pira_real"
+    ],
+    "knister": [
+      "csyon",
+      "sansuay_ch",
+      "nisqyy",
+      "jaxxming",
+      "withmudmeee",
+      "kevinwibe",
+      "excsise",
+      "pira_real"
+    ],
+    "kr1stw": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "kspksp": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "kyedae": [
+      "tenz",
+      "tarik",
+      "valkyrae"
+    ],
+    "lagerta_seeman": [
+      "ayangenius",
+      "badge_insider",
+      "mrnosleep",
+      "mogtime",
+      "stonedagecaveman",
+      "rezaraqna",
+      "g_old_man",
+      "dais"
+    ],
+    "lirik": [
+      "summit1g",
+      "sodapoppin",
+      "anthonyz"
+    ],
+    "locklear": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129"
+    ],
+    "ludwig": [
+      "squeex",
+      "qtcinderella",
+      "slime",
+      "austinshow",
+      "nmplol",
+      "aimsey",
+      "mizkif"
+    ],
+    "masayoshi": [
+      "quarterjade",
+      "sykkuno",
+      "fuslie"
+    ],
+    "mauisnake": [
+      "fl0m",
+      "tarik",
+      "buster",
+      "eslcs",
+      "ow_esports",
+      "cs2_paragon_ru",
+      "cs2_maincast",
+      "jynxzi"
+    ],
+    "maya": [
+      "pokimane",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "michel": [
+      "fl0m",
+      "tarik",
+      "buster",
+      "eslcs",
+      "ow_esports",
+      "cs2_paragon_ru",
+      "cs2_maincast",
+      "jynxzi"
+    ],
+    "mirwana": [
+      "couragejd",
+      "qlnek",
+      "nezak_",
+      "coachboop",
+      "amar",
+      "gripey",
+      "at0m",
+      "syaazfnn"
+    ],
+    "mizkif": [
+      "xqc",
+      "nmplol",
+      "sodapoppin",
+      "esfandtv",
+      "ludwig",
+      "emiru"
+    ],
+    "mogtime": [
+      "ayangenius",
+      "lagerta_seeman",
+      "badge_insider",
+      "mrnosleep",
+      "stonedagecaveman",
+      "rezaraqna",
+      "g_old_man",
+      "dais"
+    ],
+    "moistcr1tikal": [
+      "jschlatt",
+      "ludwig",
+      "charlie"
+    ],
+    "monkeygeegee": [
+      "badgebybadge",
+      "tommy",
+      "itsprezzyg",
+      "junesup38",
+      "badgecollectordrops",
+      "badgefarm",
+      "cedie",
+      "boosterosrs"
+    ],
+    "moosfortune": [
+      "jagex",
+      "piratesoftware",
+      "streamdatabase",
+      "ditterbitter",
+      "badgeslibrary",
+      "gingerbeardie",
+      "triumphant",
+      "cauttyh"
+    ],
+    "morgpie": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "mrnosleep": [
+      "ayangenius",
+      "lagerta_seeman",
+      "badge_insider",
+      "mogtime",
+      "stonedagecaveman",
+      "rezaraqna",
+      "g_old_man",
+      "dais"
+    ],
+    "mrsavage": [
+      "clix",
+      "aussieantics",
+      "nikof",
+      "happyhappygal",
+      "sypherpk",
+      "zemie",
+      "nickeh30"
+    ],
+    "nezak_": [
+      "couragejd",
+      "qlnek",
+      "mirwana",
+      "coachboop",
+      "amar",
+      "gripey",
+      "at0m",
+      "syaazfnn"
+    ],
+    "nickeh30": [
+      "sypherpk",
+      "ninja",
+      "clix",
+      "aussieantics",
+      "nikof",
+      "happyhappygal",
+      "mrsavage",
+      "zemie"
+    ],
+    "nikof": [
+      "clix",
+      "aussieantics",
+      "mrsavage",
+      "sypherpk",
+      "happyhappygal",
+      "zemie",
+      "nickeh30"
+    ],
+    "ninja": [
+      "tfue",
+      "sypherpk",
+      "nickeh30",
+      "clix"
+    ],
+    "nisqyy": [
+      "csyon",
+      "sansuay_ch",
+      "jaxxming",
+      "withmudmeee",
+      "knister",
+      "kevinwibe",
+      "excsise",
+      "pira_real"
+    ],
+    "nmplol": [
+      "mizkif",
+      "xqc",
+      "sodapoppin",
+      "malena",
+      "esfandtv"
+    ],
+    "nstvgames": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "ocie_casts": [
+      "rakattack",
+      "spilo",
+      "hadi_ow",
+      "imoh97_ow",
+      "sunshinebread",
+      "tommathan",
+      "cooruja"
+    ],
+    "ohnepixel": [
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g",
+      "peereira7"
+    ],
+    "olesha": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "orslok": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "peereira7": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "summit1g"
+    ],
+    "pelaajatcom": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "ph1lza": [
+      "wilbursoot",
+      "tubbo",
+      "tommyinnit",
+      "ranboo",
+      "quackity"
+    ],
+    "pira_real": [
+      "csyon",
+      "sansuay_ch",
+      "nisqyy",
+      "jaxxming",
+      "withmudmeee",
+      "knister",
+      "kevinwibe",
+      "excsise"
+    ],
+    "piratesoftware": [
+      "jagex",
+      "streamdatabase",
+      "ditterbitter",
+      "badgeslibrary",
+      "gingerbeardie",
+      "moosfortune",
+      "triumphant",
+      "cauttyh"
+    ],
+    "pokimane": [
+      "valkyrae",
+      "sykkuno",
+      "disguisedtoast",
+      "fuslie",
+      "quarterjade",
+      "emiru",
+      "maya",
+      "dkincc"
+    ],
+    "qlnek": [
+      "couragejd",
+      "mirwana",
+      "nezak_",
+      "coachboop",
+      "amar",
+      "gripey",
+      "at0m",
+      "syaazfnn"
+    ],
+    "qoqsik": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129"
+    ],
+    "qtcinderella": [
+      "ludwig",
+      "squeex",
+      "maya",
+      "willneff",
+      "slime",
+      "austinshow"
+    ],
+    "quackity": [
+      "wilbursoot",
+      "tubbo",
+      "tommyinnit",
+      "slimecicle"
+    ],
+    "quarterjade": [
+      "masayoshi",
+      "pokimane",
+      "sykkuno",
+      "fuslie",
+      "valkyrae"
+    ],
+    "rakattack": [
+      "hadi_ow",
+      "spilo",
+      "imoh97_ow",
+      "sunshinebread",
+      "ocie_casts",
+      "tommathan",
+      "cooruja"
+    ],
+    "ranboo": [
+      "tubbo",
+      "tommyinnit",
+      "ph1lza",
+      "wilbursoot"
+    ],
+    "reginald": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "rezaraqna": [
+      "ayangenius",
+      "lagerta_seeman",
+      "badge_insider",
+      "mrnosleep",
+      "mogtime",
+      "stonedagecaveman",
+      "g_old_man",
+      "dais"
+    ],
+    "rtparenacs": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "sansuay_ch": [
+      "csyon",
+      "nisqyy",
+      "jaxxming",
+      "withmudmeee",
+      "knister",
+      "kevinwibe",
+      "excsise",
+      "pira_real"
+    ],
+    "sasavot": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "segal": [
+      "fl0m",
+      "tarik",
+      "buster",
+      "eslcs",
+      "ow_esports",
+      "cs2_paragon_ru",
+      "cs2_maincast",
+      "jynxzi"
+    ],
+    "shisheyu": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "shroud": [
+      "summit1g",
+      "tarik",
+      "tenz",
+      "pokimane"
+    ],
+    "slime": [
+      "ludwig",
+      "squeex",
+      "jschlatt",
+      "qtcinderella",
+      "willneff"
+    ],
+    "slimecicle": [
+      "jschlatt",
+      "quackity",
+      "wilbursoot",
+      "tubbo",
+      "charborg"
+    ],
+    "snailkick": [
+      "fl0m",
+      "tarik",
+      "buster",
+      "eslcs",
+      "ow_esports",
+      "cs2_paragon_ru",
+      "cs2_maincast",
+      "jynxzi"
+    ],
+    "sodapoppin": [
+      "mizkif",
+      "nmplol",
+      "xqc",
+      "staysafetv",
+      "anthonyz",
+      "eslcs",
+      "strogo",
+      "fl0m"
+    ],
+    "spilo": [
+      "rakattack",
+      "hadi_ow",
+      "imoh97_ow",
+      "sunshinebread",
+      "ocie_casts",
+      "tommathan",
+      "cooruja"
+    ],
+    "squchan": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "squeex": [
+      "ludwig",
+      "slime",
+      "qtcinderella",
+      "austinshow",
+      "willneff",
+      "aimsey"
+    ],
+    "stonedagecaveman": [
+      "ayangenius",
+      "lagerta_seeman",
+      "badge_insider",
+      "mrnosleep",
+      "mogtime",
+      "rezaraqna",
+      "g_old_man",
+      "dais"
+    ],
+    "streamdatabase": [
+      "jagex",
+      "piratesoftware",
+      "ditterbitter",
+      "badgeslibrary",
+      "gingerbeardie",
+      "moosfortune",
+      "triumphant",
+      "cauttyh"
+    ],
+    "strogo": [
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv",
+      "summit1g",
+      "peereira7"
+    ],
+    "summit1g": [
+      "shroud",
+      "lirik",
+      "sodapoppin",
+      "anthonyz",
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi"
+    ],
+    "sunshinebread": [
+      "rakattack",
+      "spilo",
+      "hadi_ow",
+      "imoh97_ow",
+      "ocie_casts",
+      "tommathan",
+      "cooruja"
+    ],
+    "sweetcampercs": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "syaazfnn": [
+      "couragejd",
+      "qlnek",
+      "mirwana",
+      "nezak_",
+      "coachboop",
+      "amar",
+      "gripey",
+      "at0m"
+    ],
+    "sykkuno": [
+      "pokimane",
+      "valkyrae",
+      "disguisedtoast",
+      "fuslie",
+      "quarterjade",
+      "ludwig"
+    ],
+    "sypherpk": [
+      "ninja",
+      "nickeh30",
+      "clix",
+      "aussieantics",
+      "nikof",
+      "happyhappygal",
+      "mrsavage",
+      "zemie"
+    ],
+    "tarik": [
+      "tenz",
+      "shroud",
+      "kyedae",
+      "sentinels",
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi"
+    ],
+    "tednivison": [
+      "jschlatt",
+      "slimecicle",
+      "charborg"
+    ],
+    "tenz": [
+      "tarik",
+      "kyedae",
+      "shroud",
+      "sentinels"
+    ],
+    "tommathan": [
+      "rakattack",
+      "spilo",
+      "hadi_ow",
+      "imoh97_ow",
+      "sunshinebread",
+      "ocie_casts",
+      "cooruja"
+    ],
+    "tommy": [
+      "badgebybadge",
+      "itsprezzyg",
+      "junesup38",
+      "badgecollectordrops",
+      "badgefarm",
+      "monkeygeegee",
+      "cedie",
+      "boosterosrs"
+    ],
+    "tommyinnit": [
+      "tubbo",
+      "ranboo",
+      "wilbursoot",
+      "ph1lza",
+      "quackity"
+    ],
+    "trainwreckstv": [
+      "xqc",
+      "nmplol",
+      "mizkif",
+      "sodapoppin"
+    ],
+    "trilluxe": [
+      "fl0m",
+      "tarik",
+      "buster",
+      "eslcs",
+      "ow_esports",
+      "cs2_paragon_ru",
+      "cs2_maincast",
+      "jynxzi"
+    ],
+    "triumphant": [
+      "jagex",
+      "piratesoftware",
+      "streamdatabase",
+      "ditterbitter",
+      "badgeslibrary",
+      "gingerbeardie",
+      "moosfortune",
+      "cauttyh"
+    ],
+    "trymacs": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129"
+    ],
+    "tubbo": [
+      "tommyinnit",
+      "ranboo",
+      "ph1lza",
+      "wilbursoot",
+      "quackity",
+      "slimecicle"
+    ],
+    "tyler1": [
+      "yassuo",
+      "loltyler1",
+      "iwilldominate"
+    ],
+    "valkyrae": [
+      "pokimane",
+      "sykkuno",
+      "fuslie",
+      "disguisedtoast"
+    ],
+    "watchfultv": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "summit1g"
+    ],
+    "whylollycry": [
+      "pokimane",
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "irissiri129",
+      "locklear"
+    ],
+    "wilbursoot": [
+      "ph1lza",
+      "tubbo",
+      "tommyinnit",
+      "quackity",
+      "slimecicle"
+    ],
+    "willneff": [
+      "squeex",
+      "ludwig",
+      "qtcinderella",
+      "slime",
+      "austinshow"
+    ],
+    "withmudmeee": [
+      "csyon",
+      "sansuay_ch",
+      "nisqyy",
+      "jaxxming",
+      "knister",
+      "kevinwibe",
+      "excsise",
+      "pira_real"
+    ],
+    "x9nium": [
+      "eslcs",
+      "strogo",
+      "fl0m",
+      "jynxzi",
+      "sodapoppin",
+      "tarik",
+      "watchfultv"
+    ],
+    "xari": [
+      "maya",
+      "dkincc",
+      "carola",
+      "shisheyu",
+      "kspksp",
+      "whylollycry",
+      "irissiri129",
+      "locklear"
+    ],
+    "xqc": [
+      "trainwreckstv",
+      "nmplol",
+      "mizkif",
+      "adeptthebest",
+      "sodapoppin",
+      "esfandtv"
+    ],
+    "yassuo": [
+      "tyler1",
+      "iwilldominate"
+    ],
+    "zemie": [
+      "clix",
+      "aussieantics",
+      "nikof",
+      "happyhappygal",
+      "mrsavage",
+      "sypherpk",
+      "nickeh30"
+    ]
+  }
+}

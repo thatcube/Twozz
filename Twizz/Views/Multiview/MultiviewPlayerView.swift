@@ -493,24 +493,17 @@ private struct MultiviewPaneTile: View {
         .opacity(pane.isLoading || pane.hasError ? 0 : 1)
 
       if pane.isLoading {
-        // Mask the initial load *and* quality-swap reloads with the channel's
-        // frame instead of a black tile, so promoting to the spotlight reads as
-        // a quick sharpen rather than a flash.
-        AsyncImage(url: pane.channel.thumbnailURL) { image in
-          image.resizable().scaledToFill()
-        } placeholder: {
-          Color.black
-        }
-        .allowsHitTesting(false)
-
-        statusOverlay {
-          ProgressView()
-          if style == .full {
-            Text(pane.channel.displayName)
-              .font(.headline)
-              .foregroundStyle(.secondary)
-          }
-        }
+        // Mask the initial load *and* quality-swap reloads with the shared
+        // loading surface (the channel's frame blurred behind a spinner) instead
+        // of a black tile, so promoting to the spotlight reads as a quick
+        // sharpen rather than a flash.
+        StreamLoadingView(
+          posterURL: pane.channel.thumbnailURL,
+          avatarURL: pane.channel.profileImageURL,
+          title: style == .full ? pane.channel.displayName : nil,
+          compact: style == .compact
+        )
+        .environment(\.themePalette, palette)
       } else if pane.hasError {
         statusOverlay {
           Text(pane.channel.displayName)

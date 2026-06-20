@@ -317,7 +317,7 @@ struct HomeView: View {
       }
     }
     .fullScreenCover(item: $selectedChannel) { channel in
-      PlayerView(channel: channel.login, auth: auth, goLive: goLive)
+      PlayerView(channel: channel.login, auth: auth, goLive: goLive, posterURL: channel.thumbnailURL)
         .environment(\.themePalette, resolvedPalette)
     }
     .fullScreenCover(item: $channelPageTarget, onDismiss: { presentPendingWatchIfNeeded() }) { target in

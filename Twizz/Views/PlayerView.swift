@@ -1572,24 +1572,22 @@ struct PlayerView: View {
       VideoSurface(player: player)
         .ignoresSafeArea()
 
-      // Seamless escalate: fill with the channel's frame while the full player
-      // spins up, then cross-fade to live video. Removes the black "Loading…"
-      // gap when opening a stream from a multiview pane. Letterboxed
-      // (scaledToFit) to match VideoSurface's .resizeAspect so the poster lands
-      // exactly where the live video will, and constrained to the video column
-      // so it never bleeds over the chat (whose width varies).
-      if let posterURL, errorMessage == nil, !isOffline {
-        AsyncImage(url: posterURL) { image in
-          image.resizable().scaledToFit()
-        } placeholder: {
-          Color.clear
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea()
-        .opacity(isLoading ? 1 : 0)
-        .allowsHitTesting(false)
-        .animation(.easeOut(duration: 0.45), value: isLoading)
-      }
+      // Shared loading surface: the stream's frame blurred behind the channel's
+      // avatar, name, and a native spinner. It fills the video column
+      // immediately and cross-fades to live video once playback starts, so
+      // opening a stream (or escalating from a multiview pane) reads as a quick
+      // sharpen instead of a black "Loading…" gap. Constrained to the video
+      // column so it never bleeds over the chat (whose width varies).
+      StreamLoadingView(
+        posterURL: posterURL,
+        avatarURL: channelAvatarURL,
+        title: isVOD ? vod?.title : offlineDisplayName
+      )
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .ignoresSafeArea()
+      .opacity(isLoading && errorMessage == nil && !isOffline ? 1 : 0)
+      .allowsHitTesting(false)
+      .animation(.easeOut(duration: 0.45), value: isLoading)
 
       if isAudioOnlyActive, !isLoading, errorMessage == nil, !isOffline {
         AudioVisualizerContainer(
@@ -1681,19 +1679,6 @@ struct PlayerView: View {
           .focusable()
           .focused($focus, equals: .video)
           .onTapGesture { revealControls(preferredFocus: .quality) }
-      }
-
-      if isLoading {
-        if posterURL != nil {
-          // Over a poster the full "Loading…" treatment reads as a stall; a bare
-          // spinner makes the hand-off feel like a quick transition instead.
-          ProgressView()
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        } else {
-          ProgressView(isVOD ? "Loading broadcast…" : "Loading \(activeChannel)…")
-            .font(.title3)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        }
       }
 
       if isOffline {

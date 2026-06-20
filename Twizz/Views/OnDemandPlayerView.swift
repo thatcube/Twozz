@@ -85,13 +85,7 @@ private struct ClipPlayerView: View {
 
       switch phase {
       case .loading:
-        VStack(spacing: 18) {
-          ProgressView()
-          Text("Loading \(title)…")
-            .font(.title3)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
+        StreamLoadingView(title: title)
       case .failed:
         VStack(spacing: 20) {
           Text("Couldn't play this clip right now.")

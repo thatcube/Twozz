@@ -523,6 +523,9 @@ struct PlayerView: View {
   // failing googlevideo URL is refreshed without hammering YouTube.
   @State var lastAltResolveAt = Date.distantPast
   @State var altResolveInFlight = false
+  // Caps automatic alt-source retries after a 403 so a blocked manifest doesn't
+  // trigger an endless re-resolve loop that gets the IP flagged by YouTube.
+  @State var altFailedRetries = 0
   var isPlaybackActive: Bool {
     get { mon.isPlaybackActive }
     nonmutating set { mon.isPlaybackActive = newValue }

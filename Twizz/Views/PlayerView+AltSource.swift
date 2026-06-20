@@ -41,6 +41,8 @@ extension PlayerView {
   func switchToAltYouTubeSource() async {
     guard !isVOD else { return }
     isUsingAltSource = true
+    altFailedRetries = 0
+    lastAltResolveAt = Date.distantPast
     stopRateController()
     stopPlaybackWatchdog()
     await resolveAndPlayAltSource(reason: "enable")
@@ -48,12 +50,13 @@ extension PlayerView {
 
   /// (Re)resolves a *fresh* YouTube HLS master and starts playing it. Always
   /// re-fetches the manifest rather than reusing `altYouTubeMasterURL`, because
-  /// googlevideo manifest/segment URLs are IP-bound and time-expiring — a reused
-  /// URL 403s. Throttled so the on-`.failed` auto-retry can't hammer YouTube.
+  /// googlevideo manifest/segment URLs are IP-bound and time-expiring. Heavily
+  /// throttled so a 403 can't drive a tight re-resolve loop (which gets the IP
+  /// soft-flagged by YouTube's anti-bot).
   func resolveAndPlayAltSource(reason: String) async {
     guard isUsingAltSource, !isVOD else { return }
     guard !altResolveInFlight else { return }
-    guard Date().timeIntervalSince(lastAltResolveAt) >= 4 else { return }
+    guard Date().timeIntervalSince(lastAltResolveAt) >= 10 else { return }
     altResolveInFlight = true
     lastAltResolveAt = Date()
     defer { altResolveInFlight = false }
@@ -117,11 +120,19 @@ extension PlayerView {
         let comment = last.errorComment ?? ""
         detail += " [\(code)\(comment.isEmpty ? "" : " \(comment)")]"
       }
-      // googlevideo URLs are IP-bound and expire (403/-12660). Auto-recover by
-      // re-resolving a fresh manifest; the throttle in resolveAndPlayAltSource
-      // keeps this from hammering YouTube.
-      altSourceStatus = detail + " · refreshing…"
-      Task { await resolveAndPlayAltSource(reason: "failed-retry") }
+      // googlevideo segment URLs are now PO-token gated and 403 without one. Try
+      // a single fresh re-resolve (the first manifest can be a transient dud),
+      // then stop — looping re-resolves only gets the IP soft-flagged.
+      if altFailedRetries < 1 {
+        altFailedRetries += 1
+        altSourceStatus = detail + " · retrying once…"
+        Task { await resolveAndPlayAltSource(reason: "failed-retry") }
+      } else {
+        altSourceStatus =
+          "YouTube blocked the live segments (HTTP 403). YouTube now requires a "
+          + "proof-of-origin token for these streams, so the simulcast path is "
+          + "currently unavailable. Switch back to Twitch; re-select YouTube to retry later."
+      }
     case .unknown:
       altSourceStatus = "YouTube: loading manifest…"
     case .readyToPlay:
@@ -131,6 +142,7 @@ extension PlayerView {
       let size = item.presentationSize
       let hasVideo = size.width > 0 && size.height > 0
       if playing, hasVideo {
+        altFailedRetries = 0
         altSourceStatus = "Playing YouTube simulcast · buffer \(ahead)"
       } else if playing, !hasVideo {
         altSourceStatus = "YouTube: audio-only? no video track (buffer \(ahead))"

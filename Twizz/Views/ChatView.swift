@@ -25,6 +25,7 @@ struct ChatView: View {
   var animatedEmotes: Bool = true
   var fontStyle: ChatFontStyle = ChatAppearance.defaultFontStyle
   var showBadges: Bool = ChatAppearance.defaultShowBadges
+  var showPlatformBadges: Bool = ChatAppearance.defaultShowPlatformBadges
   /// Master on/off for mention highlighting.
   var highlightEnabled: Bool = true
   /// Signed-in user's Twitch login (lowercase) and display name, used to detect
@@ -344,6 +345,7 @@ struct ChatView: View {
       animatedEmotes: animatedEmotes,
       fontStyle: fontStyle,
       showBadges: showBadges,
+      showPlatformBadges: showPlatformBadges,
       bodyColorOverride: isLightChatSurface ? palette.chatSidePrimaryText : nil
     )
 

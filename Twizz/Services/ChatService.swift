@@ -159,6 +159,11 @@ final class ChatService {
   var kickReceiveTask: Task<Void, Never>?
   var kickChatroomID: Int?
   var kickSubscribedChannel: String?
+  /// Canonical slug + liveness captured when the channel API last resolved, so
+  /// the status line can show *which* Kick channel we joined and whether it's
+  /// actually live (rather than just "connected").
+  var kickResolvedSlug: String?
+  var kickResolvedIsLive = false
   var kickSeenMessageIDs: Set<String> = []
   var kickSeenMessageOrder: [String] = []
   /// Rolling cap on retained chat lines. The live list backs a `LazyVStack`

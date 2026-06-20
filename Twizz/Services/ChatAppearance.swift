@@ -48,6 +48,7 @@ enum ChatAppearance {
   static let defaultAnimatedEmotes = true
   static let defaultFontStyle = ChatFontStyle.standard
   static let defaultShowBadges = true
+  static let defaultShowPlatformBadges = true
 
   // MARK: - Derived values
 

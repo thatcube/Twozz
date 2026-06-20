@@ -25,6 +25,8 @@ struct RichChatLineView: View {
     var fontStyle: ChatFontStyle = ChatAppearance.defaultFontStyle
     /// When false, per-user chat badges (mod/sub/etc.) are hidden.
     var showBadges: Bool = ChatAppearance.defaultShowBadges
+    /// When false, the platform-source badge (YouTube/Kick) is hidden.
+    var showPlatformBadges: Bool = ChatAppearance.defaultShowPlatformBadges
     /// Overrides the default white body color (used by the light side-chat).
     var bodyColorOverride: Color? = nil
 
@@ -52,7 +54,8 @@ struct RichChatLineView: View {
     }
 
     private var shouldShowSourceBadge: Bool {
-        message.source == .youtube || message.source == .kick
+        guard showPlatformBadges else { return false }
+        return message.source == .youtube || message.source == .kick
     }
 
     private var sourceBadgeFill: Color {
@@ -66,7 +69,8 @@ struct RichChatLineView: View {
     }
 
     private var sourceBadgeWidth: CGFloat {
-        badgeSize * 1.42
+        // Kick's mark is a square logo tile; YouTube's play badge is wider.
+        message.source == .kick ? badgeSize : badgeSize * 1.42
     }
 
     private var sourceBadgeCornerRadius: CGFloat {
@@ -216,12 +220,27 @@ struct RichChatLineView: View {
             RoundedRectangle(cornerRadius: sourceBadgeCornerRadius, style: .continuous)
                 .fill(sourceBadgeFill)
 
+            sourceBadgeSymbol
+        }
+        .frame(width: sourceBadgeWidth, height: badgeSize)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var sourceBadgeSymbol: some View {
+        switch message.source {
+        case .kick:
+            // Kick's logo is a bold black "K" on its green tile; mirror that here
+            // rather than reusing the generic play glyph.
+            Text("K")
+                .font(.system(size: badgeSize * 0.7, weight: .black, design: .rounded))
+                .foregroundStyle(sourceBadgeIconColor)
+                .minimumScaleFactor(0.5)
+        default:
             Icon(glyph: .playerPlayFilled, size: sourceBadgePlayIconSize)
                 .foregroundStyle(sourceBadgeIconColor)
                 .offset(x: 0.8)
         }
-        .frame(width: sourceBadgeWidth, height: badgeSize)
-        .accessibilityHidden(true)
     }
 
     private func badgeView(url: URL) -> some View {

@@ -645,6 +645,21 @@ extension PlayerView {
           .font(.caption2)
           .foregroundStyle(chatSettingsForeground.opacity(0.55))
           .fixedSize(horizontal: false, vertical: true)
+
+        settingsPill(
+          title: chatShowPlatformBadges ? "Platform Badges On" : "Platform Badges Off",
+          isSelected: chatShowPlatformBadges,
+          focusTag: .chatPlatformBadgesToggle
+        ) {
+          chatShowPlatformBadges.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+
+        Text("Hides the small YouTube and Kick markers on merged multistream chat lines.")
+          .font(.caption2)
+          .foregroundStyle(chatSettingsForeground.opacity(0.55))
+          .fixedSize(horizontal: false, vertical: true)
       }
 
       VStack(alignment: .leading, spacing: 10) {

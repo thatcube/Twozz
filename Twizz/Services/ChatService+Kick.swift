@@ -44,6 +44,8 @@ extension ChatService {
     kickConnection.cancel()
     kickChatroomID = nil
     kickSubscribedChannel = nil
+    kickResolvedSlug = nil
+    kickResolvedIsLive = false
     if clearStatus {
       kickStatusMessage = nil
     }
@@ -59,14 +61,16 @@ extension ChatService {
             continue
           }
 
-          guard let chatroomID = try await fetchKickChatroomID(slug: slug) else {
+          guard let info = try await Self.fetchKickChannelInfo(slug: slug) else {
             kickStatusMessage = "No Kick channel found for \(slug)."
             try? await Task.sleep(for: .seconds(10))
             continue
           }
 
-          kickChatroomID = chatroomID
-          kickStatusMessage = "Connecting Kick chat…"
+          kickChatroomID = info.chatroomID
+          kickResolvedSlug = info.slug
+          kickResolvedIsLive = info.isLive
+          kickStatusMessage = "Connecting to kick.com/\(info.slug)…"
         }
 
         guard let chatroomID = kickChatroomID else {
@@ -127,7 +131,7 @@ extension ChatService {
     case "pusher:ping":
       kickConnection.send(.string("{\"event\":\"pusher:pong\",\"data\":{}}"))
     case "pusher_internal:subscription_succeeded":
-      kickStatusMessage = "Kick chat connected."
+      kickStatusMessage = kickConnectedStatus()
     case let event where event.contains("ChatMessageEvent"):
       // Pusher nests the event payload as a JSON-encoded string in `data`.
       guard let payload = envelope["data"] as? String,
@@ -135,11 +139,28 @@ extension ChatService {
       else {
         return
       }
+      // A live chat message means the channel is active even if it was offline
+      // when we resolved it, so promote the status to reflect that.
+      if !kickResolvedIsLive {
+        kickResolvedIsLive = true
+        kickStatusMessage = kickConnectedStatus()
+      }
       let fresh = filterAndRememberKickMessages([entry])
       if !fresh.isEmpty { enqueue(fresh) }
     default:
       break
     }
+  }
+
+  /// Status line shown once subscribed: names the resolved channel (so a wrong
+  /// guess is visible) and whether it's live.
+  private func kickConnectedStatus() -> String {
+    let slug = kickResolvedSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let channelRef = slug.isEmpty ? "Kick chat" : "kick.com/\(slug)"
+    if kickResolvedIsLive {
+      return "Connected to \(channelRef) — live now."
+    }
+    return "Connected to \(channelRef) — currently offline."
   }
 
   private func sendKickSubscribe(chatroomID: Int) {
@@ -149,14 +170,25 @@ extension ChatService {
     kickSubscribedChannel = channel
   }
 
-  private func fetchKickChatroomID(slug: String) async throws -> Int? {
+  struct KickChannelInfo {
+    let chatroomID: Int
+    let slug: String
+    let username: String
+    let isLive: Bool
+  }
+
+  /// Fetches a Kick channel's public profile: chatroom id (needed to subscribe),
+  /// the canonical slug, the display username, and whether it's currently live.
+  /// Returns nil for a missing channel (HTTP 404) so callers can try the next
+  /// candidate instead of spinning on backoff.
+  static func fetchKickChannelInfo(slug: String) async throws -> KickChannelInfo? {
     guard let url = URL(string: "https://kick.com/api/v2/channels/\(slug)") else {
       return nil
     }
 
     var request = URLRequest(url: url)
     request.timeoutInterval = 20
-    request.setValue(youtubeUserAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue(kickAPIUserAgent, forHTTPHeaderField: "User-Agent")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
 
@@ -178,8 +210,18 @@ extension ChatService {
       return nil
     }
 
-    return id
+    let canonicalSlug = (root["slug"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? slug
+    let username = ((root["user"] as? [String: Any])?["username"] as? String)
+      .flatMap { $0.isEmpty ? nil : $0 } ?? canonicalSlug
+    // `livestream` is a non-null object only while the channel is broadcasting.
+    let isLive = root["livestream"] is [String: Any]
+
+    return KickChannelInfo(
+      chatroomID: id, slug: canonicalSlug, username: username, isLive: isLive)
   }
+
+  private static let kickAPIUserAgent =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
   private func filterAndRememberKickMessages(_ entries: [KickEntry]) -> [ChatMessage] {
     guard !entries.isEmpty else { return [] }

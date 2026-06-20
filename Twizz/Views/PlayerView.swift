@@ -266,6 +266,8 @@ struct PlayerView: View {
   @AppStorage("chatFontStyle") var chatFontStyleRaw = ChatAppearance.defaultFontStyle
     .rawValue
   @AppStorage("chatShowBadges") var chatShowBadges = ChatAppearance.defaultShowBadges
+  @AppStorage("chatShowPlatformBadges") var chatShowPlatformBadges = ChatAppearance
+    .defaultShowPlatformBadges
   /// Global on/off for highlighting chat lines that mention the signed-in user
   /// (and any user keywords below). On by default.
   @AppStorage("chatHighlightMentionsEnabled") var chatHighlightMentionsEnabled = true
@@ -984,6 +986,7 @@ struct PlayerView: View {
     case chatAnimatedToggle
     case chatFontOption(Int)
     case chatBadgesToggle
+    case chatPlatformBadgesToggle
     case chatHighlightToggle
     case chatHighlightKeywords
     case chatResetButton
@@ -2449,6 +2452,7 @@ struct PlayerView: View {
       .chatAnimatedToggle,
       .chatFontOption,
       .chatBadgesToggle,
+      .chatPlatformBadgesToggle,
       .chatHighlightToggle,
       .chatHighlightKeywords,
       .chatResetButton:
@@ -2497,6 +2501,7 @@ struct PlayerView: View {
         animatedEmotes: chatAnimatedEmotes,
         fontStyle: chatFontStyle,
         showBadges: chatShowBadges,
+        showPlatformBadges: chatShowPlatformBadges,
         highlightEnabled: chatHighlightMentionsEnabled,
         viewerLogin: auth.userLogin,
         viewerDisplayName: auth.userDisplayName,
@@ -3040,26 +3045,108 @@ struct PlayerView: View {
     applyExperimentalKickSettings()
   }
 
-  /// Makes an educated guess at a channel's Kick source from its Twitch profile,
-  /// scoring linked Kick channels against the streamer's Twitch identity. Falls
-  /// back to a Kick link in the bio, then a `<twitch-login>` guess.
+  /// Makes an educated guess at a channel's Kick source from its Twitch profile.
+  ///
+  /// Twitch surfaces YouTube links but routinely strips Kick (competitor) links,
+  /// so we can't rely on an explicit Kick link being present. Instead we gather
+  /// candidate slugs — an explicit Kick link if any, then the streamer's
+  /// *consensus* handle reused across their other socials + display name, then
+  /// the Twitch login — and verify each against Kick's channel API, preferring a
+  /// channel that actually exists (and is live) over a blind login guess. This
+  /// is what lets e.g. Twitch `zackrawrr` resolve to Kick `asmongold`.
   static func resolveKickTarget(forTwitchLogin login: String) async -> String {
     let fallback = login
     guard let profile = await ChannelProfileService.fetch(login: login) else {
       return fallback
     }
 
-    if let best = bestKickChannelURL(
-      among: profile.socialLinks,
-      twitchLogin: login,
-      displayName: profile.displayName
-    ) {
-      return best
+    let candidates = kickSlugCandidates(
+      login: login,
+      displayName: profile.displayName,
+      socialLinks: profile.socialLinks,
+      description: profile.description
+    )
+
+    var firstExisting: String?
+    for slug in candidates {
+      let info: ChatService.KickChannelInfo?
+      do {
+        info = try await ChatService.fetchKickChannelInfo(slug: slug)
+      } catch {
+        continue
+      }
+      guard let info else { continue }
+      if info.isLive { return info.slug }
+      if firstExisting == nil { firstExisting = info.slug }
     }
-    if let descLink = firstKickChannelURL(in: profile.description ?? "") {
-      return descLink
+    return firstExisting ?? fallback
+  }
+
+  /// Builds an ordered, de-duplicated list of Kick slug guesses for a streamer,
+  /// strongest first: an explicit Kick link, then the handle they reuse most
+  /// across their other social links and display name, then their Twitch login.
+  static func kickSlugCandidates(
+    login: String,
+    displayName: String,
+    socialLinks: [ChannelSocialLink],
+    description: String?
+  ) -> [String] {
+    var ordered: [String] = []
+    func add(_ raw: String?) {
+      guard let raw else { return }
+      let slug = normalizeKickSlug(raw)
+      guard slug.count >= 2, !ordered.contains(slug) else { return }
+      ordered.append(slug)
     }
-    return fallback
+
+    // 1. An explicit Kick link (profile panel or bio) is the strongest signal.
+    if let kickURL = bestKickChannelURL(
+      among: socialLinks, twitchLogin: login, displayName: displayName)
+      ?? firstKickChannelURL(in: description ?? ""),
+      let handle = kickHandle(from: kickURL)
+    {
+      add(handle)
+    }
+
+    // 2. Consensus handle: the brand name reused across the streamer's socials.
+    var counts: [String: Int] = [:]
+    var seen: [String] = []
+    func tally(_ raw: String?) {
+      guard let raw else { return }
+      let key = normalizeKickSlug(raw)
+      guard key.count >= 2 else { return }
+      if counts[key] == nil { seen.append(key) }
+      counts[key, default: 0] += 1
+    }
+    for link in socialLinks { tally(socialHandle(from: link.url)) }
+    tally(displayName)
+    for key in seen.sorted(by: { (counts[$0] ?? 0) > (counts[$1] ?? 0) }) { add(key) }
+
+    // 3. The Twitch login as a final fall-back.
+    add(login)
+
+    return ordered
+  }
+
+  /// Extracts a likely account handle from an arbitrary social URL (X, YouTube,
+  /// Instagram, TikTok, …) so it can be compared across platforms.
+  static func socialHandle(from urlString: String) -> String? {
+    let normalized = urlString.contains("://") ? urlString : "https://\(urlString)"
+    guard let comps = URLComponents(string: normalized) else { return nil }
+    let parts = comps.path.split(separator: "/").map(String.init)
+    if let at = parts.first(where: { $0.hasPrefix("@") }) {
+      return String(at.dropFirst())
+    }
+    let skip: Set<String> = ["channel", "c", "user", "invite", "intent", "watch", "playlist"]
+    guard let first = parts.first else { return nil }
+    if skip.contains(first.lowercased()), parts.count >= 2 { return parts[1] }
+    return first
+  }
+
+  /// Lowercases and keeps only characters valid in a Kick slug.
+  static func normalizeKickSlug(_ raw: String) -> String {
+    let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789_-")
+    return String(raw.lowercased().filter { allowed.contains($0) })
   }
 
   /// Picks the Kick channel link most likely to be the streamer's primary live
@@ -3556,6 +3643,7 @@ private struct ChatMessagesColumn: View {
   let animatedEmotes: Bool
   let fontStyle: ChatFontStyle
   let showBadges: Bool
+  let showPlatformBadges: Bool
   /// Highlight (mention) inputs, passed straight through to `ChatView`.
   var highlightEnabled: Bool = true
   var viewerLogin: String? = nil
@@ -3600,6 +3688,7 @@ private struct ChatMessagesColumn: View {
       animatedEmotes: animatedEmotes,
       fontStyle: fontStyle,
       showBadges: showBadges,
+      showPlatformBadges: showPlatformBadges,
       highlightEnabled: highlightEnabled,
       viewerLogin: viewerLogin,
       viewerDisplayName: viewerDisplayName,

@@ -34,7 +34,8 @@ final class PersonalizedRecommendationsService {
     follows: [FollowedChannel],
     followedCategories: [String: Int],
     followedLogins: Set<String>,
-    history: WatchHistoryService
+    history: WatchHistoryService,
+    feedback: RecommendationFeedback = .empty
   ) async {
     guard history.isEnabled else {
       channels = []
@@ -69,14 +70,26 @@ final class PersonalizedRecommendationsService {
       using: signals,
       seedLimit: 6,
       resultLimit: 18,
-      maxPerCategory: 3
+      maxPerCategory: 3,
+      feedback: feedback
     )
 
-    // Don't recommend channels the viewer already follows. Combine the full
-    // follow list (online + offline) with the currently-live follows so nothing
-    // they follow can slip into the rail.
-    let exclude = followedLogins.union(follows.map { $0.login.lowercased() })
+    // Don't recommend channels the viewer already follows or marked "Not
+    // interested". Combine the full follow list (online + offline) with the
+    // currently-live follows so nothing they follow can slip into the rail; the
+    // engine already drops blocked logins, but exclude them here too as a guard.
+    let exclude = followedLogins
+      .union(follows.map { $0.login.lowercased() })
+      .union(feedback.blockedLogins)
     channels = recommended.filter { !exclude.contains($0.login.lowercased()) }
+  }
+
+  /// Immediately drops a channel from the current rail without a network refresh,
+  /// so a "Not interested" tap removes the card instantly. A later refresh keeps
+  /// it gone via the blocklist.
+  func remove(login: String) {
+    let key = login.lowercased()
+    channels.removeAll { $0.login.lowercased() == key }
   }
 
   // MARK: - Taste profile

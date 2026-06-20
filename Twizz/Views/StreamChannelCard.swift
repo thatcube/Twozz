@@ -99,6 +99,9 @@ struct StreamChannelCard: View {
   var onWatch: ((FollowedChannel) -> Void)? = nil
   /// When provided, a press-and-hold context menu exposes "Go to Channel".
   var onGoToChannel: ((FollowedChannel) -> Void)? = nil
+  /// When provided, a press-and-hold context menu exposes "Not Interested",
+  /// letting the viewer banish a recommendation they don't want to see.
+  var onNotInterested: ((FollowedChannel) -> Void)? = nil
 
   @Environment(\.themePalette) private var palette
   @Environment(\.glassDisabled) private var glassDisabled
@@ -176,7 +179,8 @@ struct StreamChannelCard: View {
     .channelCardContextMenu(
       channel: channel,
       onWatch: onWatch,
-      onGoToChannel: onGoToChannel
+      onGoToChannel: onGoToChannel,
+      onNotInterested: onNotInterested
     )
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
@@ -408,9 +412,10 @@ private extension View {
   func channelCardContextMenu(
     channel: FollowedChannel,
     onWatch: ((FollowedChannel) -> Void)?,
-    onGoToChannel: ((FollowedChannel) -> Void)?
+    onGoToChannel: ((FollowedChannel) -> Void)?,
+    onNotInterested: ((FollowedChannel) -> Void)?
   ) -> some View {
-    if onWatch == nil && onGoToChannel == nil {
+    if onWatch == nil && onGoToChannel == nil && onNotInterested == nil {
       self
     } else {
       contextMenu {
@@ -426,6 +431,13 @@ private extension View {
             onGoToChannel(channel)
           } label: {
             Label("Go to Channel", systemImage: "person.crop.circle")
+          }
+        }
+        if let onNotInterested {
+          Button(role: .destructive) {
+            onNotInterested(channel)
+          } label: {
+            Label("Not Interested", systemImage: "hand.thumbsdown")
           }
         }
       }

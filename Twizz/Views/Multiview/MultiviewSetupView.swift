@@ -119,6 +119,8 @@ struct MultiviewSetupView: View {
       if glassDisabled {
         Capsule().fill(palette.chromeOpaqueSurface)
           .overlay(Capsule().strokeBorder(palette.chromeOpaqueBorder, lineWidth: 1))
+      } else if #available(tvOS 26.0, *) {
+        Capsule().glassEffect(.regular, in: Capsule())
       } else {
         Capsule().fill(.ultraThinMaterial)
       }

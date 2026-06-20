@@ -203,10 +203,16 @@ struct ChatView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
       }
       .onChange(of: autoScroll) { _, isOn in
-        // Resuming after a pause: snap back to the newest message.
-        guard isOn, let last = messages.last else { return }
+        // Cancel any throttled auto-scroll the moment the user pauses/scrolls.
+        // The work item scheduled in the `messages.last?.id` handler captures a
+        // *stale* `autoScroll` (SwiftUI views are value types), so its own guard
+        // can't see the live paused state — without this cancel, a message that
+        // landed in the ~100ms before the user grabbed the list would still yank
+        // it to the bottom and fight the scroll.
         pendingScrollWork?.cancel()
         pendingScrollWork = nil
+        // Resuming after a pause: snap back to the newest message.
+        guard isOn, let last = messages.last else { return }
         withAnimation(.easeOut(duration: 0.18)) {
           proxy.scrollTo(last.id, anchor: .bottom)
         }
@@ -351,8 +357,7 @@ struct ChatView: View {
           showUserLine: !message.text.isEmpty,
           seed: seed,
           icon: {
-            Image(systemName: "star.fill")
-              .font(fontStyle.font(size: textSize * 0.7, weight: .bold))
+            Icon(glyph: subscriptionGlyph(for: message.systemNoticeIcon), size: textSize * 0.9)
           },
           line: richLine
         )
@@ -375,6 +380,18 @@ struct ChatView: View {
       mentionHighlight(around: richLine, seed: seed)
     } else {
       richLine
+    }
+  }
+
+  /// Maps a notice's icon kind to the vendored Tabler glyph: Prime → crown,
+  /// gift subs → gift, ordinary paid subs → star. (Watch streaks have their own
+  /// case and use the flame glyph directly.)
+  private func subscriptionGlyph(for icon: SystemNoticeIcon) -> Glyph {
+    switch icon {
+    case .prime: return .crownFilled
+    case .gift: return .giftFilled
+    case .watchStreak: return .flame
+    case .sub: return .starFilled
     }
   }
 

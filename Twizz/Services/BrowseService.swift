@@ -21,8 +21,26 @@ final class BrowseService {
 
         do {
             categories = try await fetchTopCategories(limit: 40)
+            prewarmBoxArt(categories)
         } catch {
             categoryErrorMessage = "Could not load categories."
+        }
+    }
+
+    /// Warm the decoded-image cache for category box art right after the grid
+    /// loads, so flicking through the Browse grid paints each tile instantly
+    /// instead of decoding it on the fly as cards scroll in. Box art is static
+    /// artwork, so caching it ahead is safe (unlike live stream thumbnails, which
+    /// are never prewarmed). Best-effort and low priority; if the user scrolls
+    /// first, `CachedAsyncImage` still loads on demand.
+    private func prewarmBoxArt(_ categories: [TwitchCategory]) {
+        let urls = categories.compactMap(\.boxArtURL)
+        guard !urls.isEmpty else { return }
+        Task(priority: .utility) {
+            for url in urls {
+                if Task.isCancelled { return }
+                await ImageMemoryCache.shared.prewarm(url)
+            }
         }
     }
 

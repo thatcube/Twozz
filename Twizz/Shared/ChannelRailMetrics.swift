@@ -28,7 +28,7 @@ enum ChannelRailLayout {
 
   /// Base gap between cards before the size-aware scale is applied. Shared by
   /// the Browse grid so rails and grids tighten in lockstep.
-  static let baseCardSpacing: CGFloat = 24
+  static let baseCardSpacing: CGFloat = 20
 
   /// Subtly tightens the gap between cards as they get smaller (more cards
   /// across). Smaller cards don't need as wide a gutter, and reclaiming that
@@ -54,7 +54,7 @@ enum ChannelRailLayout {
     let n = CGFloat(max(visibleCardCount, 1))
     let peek = peekCardFraction
     let baseSpacing = max(18, min(32, visibleWidth * 0.012))
-    let spacing = min(baseSpacing + 4, 36) * spacingScale(forVisibleCardCount: visibleCardCount)
+    let spacing = min(baseSpacing, 32) * spacingScale(forVisibleCardCount: visibleCardCount)
     // visibleWidth = (n + peek) * outer + n * spacing  ->  solve for outer.
     let rawOuterCardWidth = (visibleWidth - (n * spacing)) / (n + peek)
     let minOuterCardWidth = minMediaWidth + (focusHorizontalInset * 2)

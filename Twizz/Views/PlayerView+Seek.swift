@@ -227,7 +227,14 @@ extension PlayerView {
   func commitScrubSeek(to seconds: Double) {
     scrubCommitTask?.cancel()
     let time = CMTime(seconds: seconds, preferredTimescale: 600)
-    player.currentItem?.seek(to: time, completionHandler: { [self] _ in
+    player.currentItem?.seek(to: time, completionHandler: { [self] finished in
+      // A frame-accurate live seek can take a second or two to land. If the
+      // viewer swipes again in the meantime, that gesture's seek supersedes this
+      // one (AVPlayer fires this completion with `finished == false`) or a fresh
+      // scrub is already underway. Either way a newer gesture now owns the
+      // playhead, so bailing here keeps its accumulated `scrubTargetSeconds`
+      // intact instead of wiping it back to the pre-seek position.
+      guard finished, !isScrubbing else { return }
       scrubTargetSeconds = nil
       if !isUserPaused { resumePlayback() }
       updateRewindReadout()

@@ -159,7 +159,7 @@ struct StreamChannelCard: View {
       palette: palette
     )
     .shadow(
-      color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? 0.36 : 0),
+      color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? focusedShadowOpacity : 0),
       radius: layout.usesFocusedShadow ? 20 : 0,
       y: layout.usesFocusedShadow ? 10 : 0
     )
@@ -272,6 +272,13 @@ struct StreamChannelCard: View {
 
   private var usesLiftFocusedText: Bool {
     twizzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
+  }
+
+  /// Focused drop-shadow strength. Light mode uses a softer shadow: against a
+  /// light page the dark shadow otherwise muddies into the focused card's
+  /// darkening tint, so the lift reads as a smudge rather than a float.
+  private var focusedShadowOpacity: Double {
+    palette.isLight ? 0.20 : 0.36
   }
 
   @MainActor

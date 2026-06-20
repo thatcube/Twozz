@@ -36,6 +36,16 @@ struct TwizzLiquidGlassCardModifier: ViewModifier {
           isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
           in: .rect(cornerRadius: cornerRadius)
         )
+        .background {
+          // A focused card casts a drop shadow. In Light mode the translucent
+          // glass lets that shadow bleed *through* the surface, reading as a
+          // muddy haze inside the card instead of a clean lift. Give the focused
+          // Light-theme card an opaque backing so the shadow stays behind it.
+          // Dark/OLED don't show this, so they keep the pure translucent glass.
+          if isFocused && palette.isLight {
+            shape.fill(palette.cardOpaqueSurface)
+          }
+        }
         .clipShape(shape)
     } else {
       content

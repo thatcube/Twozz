@@ -231,11 +231,15 @@ struct ThemePalette: Equatable {
   /// Tint blended into a focused content card's Liquid Glass so focus reads as a
   /// clear lightness shift — not just the scale bump — even before any live
   /// preview fades in. Dark/OLED brighten toward white; Light darkens toward
-  /// black, so the focused tile always separates from the page behind it. This
-  /// only affects the translucent-glass focus treatment; the Reduce Transparency
-  /// path keeps its opaque `liftSurface` fill.
+  /// black, so the focused tile always separates from the page behind it. OLED
+  /// uses a lighter wash than Dark because its pure-black background makes the
+  /// same white tint read stronger. This only affects the translucent-glass
+  /// focus treatment; the Reduce Transparency path keeps its opaque
+  /// `liftSurface` fill.
   var focusedCardGlassTint: Color {
-    isLight ? Color.black.opacity(0.16) : Color.white.opacity(0.22)
+    if isLight { return Color.black.opacity(0.15) }
+    if self == .oled { return Color.white.opacity(0.12) }
+    return Color.white.opacity(0.15)
   }
 }
 

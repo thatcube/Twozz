@@ -24,14 +24,17 @@ actor EmoteCatalogService {
         async let bttvChannel = fetchBTTVChannel(twitchUserID: userID)
         async let ffzChannel = fetchFFZChannel(channel: key)
 
-        let merged = (await twitchGlobal)
-            .merging(await sevenTVGlobal) { _, new in new }
-            .merging(await bttvGlobal) { _, new in new }
-            .merging(await ffzGlobal) { _, new in new }
-            .merging(await twitchChannel) { _, new in new }
-            .merging(await sevenTVChannel) { _, new in new }
-            .merging(await bttvChannel) { _, new in new }
-            .merging(await ffzChannel) { _, new in new }
+        // Accumulate into a single dictionary so we don't allocate a fresh
+        // intermediate copy per provider the way a `.merging(…).merging(…)`
+        // chain does. Later sources win on key conflicts (channel over global).
+        var merged = await twitchGlobal
+        merged.merge(await sevenTVGlobal) { _, new in new }
+        merged.merge(await bttvGlobal) { _, new in new }
+        merged.merge(await ffzGlobal) { _, new in new }
+        merged.merge(await twitchChannel) { _, new in new }
+        merged.merge(await sevenTVChannel) { _, new in new }
+        merged.merge(await bttvChannel) { _, new in new }
+        merged.merge(await ffzChannel) { _, new in new }
 
         cache[key] = merged
         return merged
@@ -48,10 +51,10 @@ actor EmoteCatalogService {
         async let bttvGlobal = fetchBTTVGlobal()
         async let ffzGlobal = fetchFFZGlobal()
 
-        let merged = (await twitchGlobal)
-            .merging(await sevenTVGlobal) { _, new in new }
-            .merging(await bttvGlobal) { _, new in new }
-            .merging(await ffzGlobal) { _, new in new }
+        var merged = await twitchGlobal
+        merged.merge(await sevenTVGlobal) { _, new in new }
+        merged.merge(await bttvGlobal) { _, new in new }
+        merged.merge(await ffzGlobal) { _, new in new }
 
         cache[key] = merged
         return merged

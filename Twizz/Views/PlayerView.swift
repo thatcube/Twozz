@@ -183,6 +183,20 @@ struct PlayerView: View {
     return true
   }
 
+  /// Whether the chat composer (and its send button) should be dropped from the
+  /// focus engine. Besides the rewind-bar case, we remove it while focus sits on a
+  /// control button that ISN'T its left neighbour (the chat-toggle): because the
+  /// other control buttons are pulled out of the engine during a swipe, the
+  /// composer would otherwise be the nearest focusable view to the right of the
+  /// row and a left→right swipe from, say, the channel button would fling straight
+  /// onto it (fighting `stepControl`). Only the chat-toggle — its actual neighbour
+  /// — is allowed to hand focus to it.
+  func chatInputFocusBlocked() -> Bool {
+    if focus == .rewindScrubber { return true }
+    if isControlRowButton(focus), focus != .chatToggle { return true }
+    return false
+  }
+
   /// Jump focus straight to `button` as the sole focusable control (no slide
   /// ghost). Used for reveals and deliberate cross-section jumps (e.g. dropping
   /// from the seek bar).
@@ -2654,7 +2668,7 @@ struct PlayerView: View {
           // likewise dropped from the focus engine, but only ever while the bar
           // is focused — never while the composer itself is focused — so focus
           // is never dropped.
-          .disabled(focus == .rewindScrubber)
+          .disabled(chatInputFocusBlocked())
           .focused($focus, equals: .chatInput)
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput && !chatIsFrozen)
           .onMoveCommand { direction in
@@ -2688,7 +2702,7 @@ struct PlayerView: View {
             .frame(width: chatComposerRowHeight, height: chatComposerRowHeight)
             // `.disabled` also doubles as the rewind-bar focus gate; see the
             // composer button above for why we avoid `.focusable` on a Button.
-            .disabled(isSendingChat || focus == .rewindScrubber)
+            .disabled(isSendingChat || chatInputFocusBlocked())
             .accessibilityLabel("Send message")
             .focused($focus, equals: .chatSend)
             .transition(.opacity)
@@ -2730,7 +2744,7 @@ struct PlayerView: View {
         // Rewind-bar focus gate, expressed via `.disabled` rather than
         // `.focusable` so the Button's Select action still fires on tvOS (see
         // the signed-in composer button for the full rationale).
-        .disabled(focus == .rewindScrubber)
+        .disabled(chatInputFocusBlocked())
         .focused($focus, equals: .chatInput)
         .onMoveCommand { direction in
           switch direction {

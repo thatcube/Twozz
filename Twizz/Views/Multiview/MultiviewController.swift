@@ -2,13 +2,17 @@ import AVKit
 import Foundation
 import Observation
 
-/// Maximum simultaneous panes. Four matches the multiview convention on other
-/// platforms (and is a sane decode/bandwidth ceiling for Apple TV 4K).
-let multiviewPaneLimit = 4
+/// Maximum simultaneous panes. Six lets big-screen users fill the wall while
+/// staying within the Apple TV 4K hardware-decode budget (~4-6 concurrent
+/// H.264 streams); our grid tiles run ~720p, which is light enough that six
+/// fit. If six ever overflows the decoder (black tiles), scale the grid tier's
+/// resolution down for high pane counts rather than lowering this ceiling.
+let multiviewPaneLimit = 6
 
 /// How the live panes are arranged on screen.
 enum MultiviewLayout {
-  /// Symmetric tiles (1, side-by-side, 1-big-plus-2, or 2×2).
+  /// Symmetric tiles (1, side-by-side, 1-big-plus-2, 2×2, or up to a 3-wide
+  /// two-row grid for five and six panes).
   case grid
   /// One large primary pane with the rest as a thumbnail filmstrip.
   case spotlight
@@ -25,8 +29,9 @@ enum MultiviewQualityTier {
   /// Full "Source" quality. Used only by the spotlight primary (the one large
   /// pane), so the heaviest rendition is decoded at most once at a time.
   case source
-  /// A large grid quadrant (2×2 / side-by-side): a ~720p rendition, sharp enough
-  /// not to look soft on a 4K panel while keeping four concurrent decodes sane.
+  /// A large grid quadrant (2×2 / side-by-side / 3-wide): a ~720p rendition,
+  /// sharp enough not to look soft on a 4K panel while keeping the handful of
+  /// concurrent decodes sane.
   case grid
   /// A spotlight filmstrip thumbnail: a light ~480p rendition, plenty for a tiny
   /// tile and cheap to decode.

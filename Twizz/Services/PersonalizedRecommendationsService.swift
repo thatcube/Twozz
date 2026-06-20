@@ -28,13 +28,24 @@ final class PersonalizedRecommendationsService {
   /// so they're heavily discounted — same rationale as the channel-DNA engine.
   private static let genericWeight = 0.15
 
+  /// At most this many "because you watch X" affinity picks lead the rail, so
+  /// they sharpen results without drowning out category-based discovery.
+  private static let maxAffinityPicks = 6
+  /// How many of the viewer's channels seed the affinity expansion, and how many
+  /// neighbor logins we'll check for being live — both bounded so the extra GQL
+  /// lookup stays cheap.
+  private static let maxAffinitySeeds = 10
+  private static let maxAffinityCandidates = 30
+
   /// Rebuilds recommendations from the current follows and watch history. Clears
   /// the rail when personalization is disabled or there isn't enough signal yet.
   func refresh(
     follows: [FollowedChannel],
     followedCategories: [String: Int],
     followedLogins: Set<String>,
-    history: WatchHistoryService
+    history: WatchHistoryService,
+    feedback: RecommendationFeedback = .empty,
+    affinity: StreamerAffinityMap = .empty
   ) async {
     guard history.isEnabled else {
       channels = []
@@ -50,11 +61,21 @@ final class PersonalizedRecommendationsService {
 
     let profile = Self.buildProfile(
       follows: follows, followedCategories: followedCategories, history: history)
-    guard !profile.categoryWeights.isEmpty else {
-      channels = []
-      return
-    }
 
+    // Channels the viewer already follows or marked "Not interested" never
+    // belong in the rail. Combine the full follow list (online + offline) with
+    // the currently-live follows so nothing they follow can slip in.
+    let exclude = followedLogins
+      .union(follows.map { $0.login.lowercased() })
+      .union(feedback.blockedLogins)
+
+    // Two parallel sources:
+    //  • Category engine — live peers that share the viewer's taste in *games*.
+    //  • Affinity expansion — similar streamers of the channels the viewer
+    //    actually watches, regardless of category (e.g. Ludwig → Squeex), from
+    //    the "viewers of X also watch Y" graph. This is what lets a variety
+    //    streamer surface a friend who streams something else entirely.
+    let seedLogins = Self.affinitySeedLogins(follows: follows, history: history)
     let signals = ChannelSignals(
       login: "",
       categoryWeights: profile.categoryWeights,
@@ -63,20 +84,88 @@ final class PersonalizedRecommendationsService {
       viewerTier: profile.viewerTier
     )
 
-    // Diversify: draw from more of the viewer's top categories and cap any single
-    // category, so the rail isn't swept by their strongest one (e.g. all GTA V).
-    let recommended = await SimilarChannelsEngine.recommend(
-      using: signals,
-      seedLimit: 6,
-      resultLimit: 18,
-      maxPerCategory: 3
-    )
+    async let categoryRecs: [FollowedChannel] = profile.categoryWeights.isEmpty
+      ? []
+      : SimilarChannelsEngine.recommend(
+          using: signals, seedLimit: 6, resultLimit: 18, maxPerCategory: 3, feedback: feedback)
+    async let affinityRecs: [FollowedChannel] = Self.affinityPicks(
+      seedLogins: seedLogins, affinity: affinity, exclude: exclude)
 
-    // Don't recommend channels the viewer already follows. Combine the full
-    // follow list (online + offline) with the currently-live follows so nothing
-    // they follow can slip into the rail.
-    let exclude = followedLogins.union(follows.map { $0.login.lowercased() })
-    channels = recommended.filter { !exclude.contains($0.login.lowercased()) }
+    let recommended = await categoryRecs
+    let picks = await affinityRecs
+
+    // Lead with affinity picks (capped so they don't swamp the rail), then fill
+    // with category-based peers, de-duplicating by login and dropping excludes.
+    var seen = exclude
+    var merged: [FollowedChannel] = []
+    for channel in picks.prefix(Self.maxAffinityPicks) + recommended {
+      let login = channel.login.lowercased()
+      guard seen.insert(login).inserted else { continue }
+      merged.append(channel)
+      if merged.count >= 18 { break }
+    }
+    channels = merged
+  }
+
+  /// Immediately drops a channel from the current rail without a network refresh,
+  /// so a "Not interested" tap removes the card instantly. A later refresh keeps
+  /// it gone via the blocklist.
+  func remove(login: String) {
+    let key = login.lowercased()
+    channels.removeAll { $0.login.lowercased() == key }
+  }
+
+  // MARK: - Affinity expansion ("viewers of X also watch Y")
+
+  /// The viewer's most-watched and most-followed channels — the seeds whose
+  /// similar streamers we expand into recommendations. Watched channels lead,
+  /// since actively choosing to watch is the stronger taste signal.
+  private static func affinitySeedLogins(
+    follows: [FollowedChannel], history: WatchHistoryService
+  ) -> [String] {
+    let watched = history.entries
+      .sorted { ($0.watchCount, $0.lastWatchedAt) > ($1.watchCount, $1.lastWatchedAt) }
+      .map { $0.login.lowercased() }
+    let followed = follows
+      .sorted { ($0.viewerCount ?? 0) > ($1.viewerCount ?? 0) }
+      .map { $0.login.lowercased() }
+
+    var seeds: [String] = []
+    var seen: Set<String> = []
+    for login in watched + followed {
+      guard !login.isEmpty, seen.insert(login).inserted else { continue }
+      seeds.append(login)
+      if seeds.count >= maxAffinitySeeds { break }
+    }
+    return seeds
+  }
+
+  /// Resolves the seeds' similar streamers (best-first, excluding follows/blocked)
+  /// to those who are **live right now**, preserving affinity-priority order.
+  private static func affinityPicks(
+    seedLogins: [String], affinity: StreamerAffinityMap, exclude: Set<String>
+  ) async -> [FollowedChannel] {
+    guard !affinity.isEmpty, !seedLogins.isEmpty else { return [] }
+    let seedSet = Set(seedLogins)
+
+    var candidateOrder: [String] = []
+    var seen: Set<String> = []
+    for seed in seedLogins {
+      for neighbor in affinity.similar(to: seed) {
+        guard !exclude.contains(neighbor), !seedSet.contains(neighbor),
+              seen.insert(neighbor).inserted
+        else { continue }
+        candidateOrder.append(neighbor)
+        if candidateOrder.count >= maxAffinityCandidates { break }
+      }
+      if candidateOrder.count >= maxAffinityCandidates { break }
+    }
+    guard !candidateOrder.isEmpty else { return [] }
+
+    let live = await SimilarChannelsEngine.liveChannels(forLogins: candidateOrder)
+    let byLogin = Dictionary(
+      live.map { ($0.login.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
+    return candidateOrder.compactMap { byLogin[$0] }
   }
 
   // MARK: - Taste profile

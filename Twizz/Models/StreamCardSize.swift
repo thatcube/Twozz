@@ -11,6 +11,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
   case large
   case medium
   case small
+  case extraSmall
 
   var id: String { rawValue }
 
@@ -20,6 +21,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
     case .large: return "Large"
     case .medium: return "Medium"
     case .small: return "Small"
+    case .extraSmall: return "Extra Small"
     }
   }
 
@@ -31,6 +33,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
     case .large: return 3
     case .medium: return 4
     case .small: return 5
+    case .extraSmall: return 6
     }
   }
 
@@ -45,6 +48,7 @@ enum StreamCardSize: String, CaseIterable, Identifiable {
     case .large: return "rectangle.grid.1x2"
     case .medium: return "square.grid.2x2"
     case .small: return "square.grid.3x3"
+    case .extraSmall: return "square.grid.4x3.fill"
     }
   }
 

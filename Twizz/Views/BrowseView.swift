@@ -117,13 +117,16 @@ struct CategoryStreamsView: View {
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
 
+  private var cardSpacing: CGFloat {
+    let count = StreamCardSize.resolve(streamCardSizeRaw).visibleCardCount
+    return ChannelRailLayout.baseCardSpacing * ChannelRailLayout.spacingScale(forVisibleCardCount: count)
+  }
   private var columns: [GridItem] {
     Array(
-      repeating: GridItem(.flexible(), spacing: 24),
+      repeating: GridItem(.flexible(), spacing: cardSpacing),
       count: StreamCardSize.resolve(streamCardSizeRaw).visibleCardCount
     )
   }
-  private let gridSpacing: CGFloat = 24
   private let gridBottomInset: CGFloat = 12
 
   var body: some View {
@@ -177,7 +180,7 @@ struct CategoryStreamsView: View {
               .frame(maxWidth: .infinity, alignment: .leading)
               .padding(.top, 8)
           } else {
-            LazyVGrid(columns: columns, spacing: gridSpacing) {
+            LazyVGrid(columns: columns, spacing: cardSpacing) {
               ForEach(service.categoryStreams) { channel in
                 let isFocused = focusedStreamID == channel.id
                 StreamChannelCard(

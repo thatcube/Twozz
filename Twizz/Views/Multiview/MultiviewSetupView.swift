@@ -18,7 +18,7 @@ struct MultiviewChannelSection: Identifiable {
 /// brings the thumbnail, hover-preview video, LIVE/viewer badge, avatar, and
 /// title for free — wrapped in a selection overlay that shows the pick order, a
 /// native focus-color ring when selected, and dims unselected cards once the
-/// four-pick limit is reached.
+/// pick limit is reached.
 struct MultiviewSetupView: View {
   let sections: [MultiviewChannelSection]
   var onStart: ([FollowedChannel]) -> Void

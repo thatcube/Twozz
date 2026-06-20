@@ -26,6 +26,19 @@ enum ChannelRailLayout {
   static let minMediaWidth: CGFloat = 220
   static let maxMediaWidth: CGFloat = 900
 
+  /// Base gap between cards before the size-aware scale is applied. Shared by
+  /// the Browse grid so rails and grids tighten in lockstep.
+  static let baseCardSpacing: CGFloat = 20
+
+  /// Subtly tightens the gap between cards as they get smaller (more cards
+  /// across). Smaller cards don't need as wide a gutter, and reclaiming that
+  /// space lets each card render a touch larger in the same width. Full base
+  /// spacing at 2-across, easing down to ~68% at 6-across.
+  static func spacingScale(forVisibleCardCount count: Int) -> CGFloat {
+    let clamped = CGFloat(min(max(count, 2), 6))
+    return 1.0 - (clamped - 2) * 0.08
+  }
+
   /// Solve the per-card width so `visibleCardCount` full cards (plus a peek of
   /// the next) fit across the available width. Mirrors the original Home math.
   static func metrics(
@@ -41,7 +54,7 @@ enum ChannelRailLayout {
     let n = CGFloat(max(visibleCardCount, 1))
     let peek = peekCardFraction
     let baseSpacing = max(18, min(32, visibleWidth * 0.012))
-    let spacing = min(baseSpacing + 4, 36)
+    let spacing = min(baseSpacing, 32) * spacingScale(forVisibleCardCount: visibleCardCount)
     // visibleWidth = (n + peek) * outer + n * spacing  ->  solve for outer.
     let rawOuterCardWidth = (visibleWidth - (n * spacing)) / (n + peek)
     let minOuterCardWidth = minMediaWidth + (focusHorizontalInset * 2)

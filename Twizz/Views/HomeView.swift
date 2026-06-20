@@ -17,6 +17,8 @@ struct HomeView: View {
   @State private var recommendations = RecommendationsService()
   @State private var personalized = PersonalizedRecommendationsService()
   @State private var watchHistory = WatchHistoryService()
+  @State private var feedback = RecommendationFeedbackService()
+  @State private var affinity = StreamerAffinityService()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
@@ -199,9 +201,15 @@ struct HomeView: View {
           auth: auth,
           follows: follows,
           goLiveSettings: goLiveSettings,
+          recommendationFeedback: feedback,
           onRequestSignIn: { showSignIn = true },
           onClearWatchHistory: {
             watchHistory.clear()
+            Task { await refreshPersonalizedIfNeeded(force: true) }
+          },
+          onResetNotInterested: {
+            feedback.clear()
+            recomputeTopStreams()
             Task { await refreshPersonalizedIfNeeded(force: true) }
           },
           onAccountChanged: {
@@ -501,7 +509,8 @@ struct HomeView: View {
                 ),
                 showsGameName: true,
                 onWatch: { selectedChannel = $0 },
-                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
+                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
+                onNotInterested: { markNotInterested($0) }
               )
               .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
               .focusable(true)
@@ -527,8 +536,12 @@ struct HomeView: View {
   private func recomputeTopStreams() {
     let followedIDs = Set(follows.channels.map(\.id))
     let personalizedLogins = Set(personalized.channels.map { $0.login.lowercased() })
+    let blocked = feedback.blockedLogins
     topStreams = recommendations.channels.filter {
-      !followedIDs.contains($0.id) && !personalizedLogins.contains($0.login.lowercased())
+      let login = $0.login.lowercased()
+      return !followedIDs.contains($0.id)
+        && !personalizedLogins.contains(login)
+        && !blocked.contains(login)
     }
   }
 
@@ -570,7 +583,8 @@ struct HomeView: View {
                 ),
                 showsGameName: true,
                 onWatch: { selectedChannel = $0 },
-                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
+                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
+                onNotInterested: { markNotInterested($0) }
               )
               .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
               .focusable(true)
@@ -741,12 +755,24 @@ struct HomeView: View {
 
   private func refreshPersonalizedIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshPersonalized() else { return }
+    await affinity.refreshIfNeeded()
     await personalized.refresh(
       follows: follows.channels,
       followedCategories: follows.followedCategories,
       followedLogins: follows.followedLogins,
-      history: watchHistory
+      history: watchHistory,
+      feedback: feedback.snapshot,
+      affinity: affinity.snapshot
     )
+  }
+
+  /// Banishes a recommended channel: records the "Not interested" feedback,
+  /// drops it from the rails immediately, and learns its title as a soft negative
+  /// signal so look-alikes stop resurfacing.
+  private func markNotInterested(_ channel: FollowedChannel) {
+    feedback.markNotInterested(channel)
+    personalized.remove(login: channel.login)
+    recomputeTopStreams()
   }
 
   private func publishTopShelfSnapshot() {

@@ -277,7 +277,7 @@ struct MultiviewPlayerView: View {
           paneView(panes[2], style: .full)
         }
       }
-    default:
+    case 4:
       VStack(spacing: 16) {
         HStack(spacing: 16) {
           paneView(panes[0], style: .full)
@@ -286,6 +286,36 @@ struct MultiviewPlayerView: View {
         HStack(spacing: 16) {
           paneView(panes[2], style: .full)
           paneView(panes[3], style: .full)
+        }
+      }
+    case 5:
+      // Top row of three, bottom row of two. The empty third slot keeps every
+      // tile the same 1/3 width so the wall reads as an even grid, not a ragged
+      // one with oversized bottom tiles.
+      VStack(spacing: 16) {
+        HStack(spacing: 16) {
+          paneView(panes[0], style: .full)
+          paneView(panes[1], style: .full)
+          paneView(panes[2], style: .full)
+        }
+        HStack(spacing: 16) {
+          paneView(panes[3], style: .full)
+          paneView(panes[4], style: .full)
+          Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+      }
+    default:
+      // Six (the max): a symmetric 3×2 wall.
+      VStack(spacing: 16) {
+        HStack(spacing: 16) {
+          paneView(panes[0], style: .full)
+          paneView(panes[1], style: .full)
+          paneView(panes[2], style: .full)
+        }
+        HStack(spacing: 16) {
+          paneView(panes[3], style: .full)
+          paneView(panes[4], style: .full)
+          paneView(panes[5], style: .full)
         }
       }
     }

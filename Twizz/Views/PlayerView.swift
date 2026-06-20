@@ -332,6 +332,9 @@ struct PlayerView: View {
   @AppStorage("showGoalEvents") var showGoalEvents = true
 
   @State var chat = ChatService()
+  /// Twitch login -> Kick slug overrides for streamers whose Kick name differs
+  /// from their Twitch login and isn't derivable from their profile.
+  @State var kickAliases = KickAliasService()
   /// Drives chat replay when in VOD mode (reveals comments up to the playhead).
   @State var replay = VODChatReplayService()
   /// Periodic player time observer used in VOD mode to sync chat replay + the
@@ -3039,7 +3042,9 @@ struct PlayerView: View {
   func refreshKickAutoTarget() async {
     let login = activeChannel
     guard !login.isEmpty else { return }
-    let resolved = await Self.resolveKickTarget(forTwitchLogin: login)
+    await kickAliases.refreshIfNeeded()
+    let alias = kickAliases.kickSlug(forTwitchLogin: login)
+    let resolved = await Self.resolveKickTarget(forTwitchLogin: login, aliasSlug: alias)
     guard login == activeChannel else { return }
     kickAutoResolvedTarget = resolved
     applyExperimentalKickSettings()
@@ -3054,8 +3059,19 @@ struct PlayerView: View {
   /// the Twitch login — and verify each against Kick's channel API, preferring a
   /// channel that actually exists (and is live) over a blind login guess. This
   /// is what lets e.g. Twitch `zackrawrr` resolve to Kick `asmongold`.
-  static func resolveKickTarget(forTwitchLogin login: String) async -> String {
+  static func resolveKickTarget(forTwitchLogin login: String, aliasSlug: String?) async -> String {
     let fallback = login
+
+    // A curated/CI-validated alias is authoritative for streamers whose Kick
+    // name shares nothing with their Twitch identity (e.g. zackrawrr ->
+    // asmongold), which profile-based guessing can't derive. Use it whenever the
+    // aliased channel still exists.
+    if let aliasSlug, !aliasSlug.isEmpty {
+      if let info = try? await ChatService.fetchKickChannelInfo(slug: aliasSlug) {
+        return info.slug
+      }
+    }
+
     guard let profile = await ChannelProfileService.fetch(login: login) else {
       return fallback
     }

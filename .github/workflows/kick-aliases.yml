@@ -1,0 +1,68 @@
+name: Refresh Kick aliases
+
+# Regenerates the Twitch -> Kick channel alias table used to merge Kick chat for
+# streamers whose Kick name differs from their Twitch login (e.g. zackrawrr ->
+# asmongold), and publishes it to the `data` branch, where the app fetches it
+# from raw.githubusercontent.com. Runs monthly; can also be triggered by hand.
+# Everything here is free on a public repo (Actions minutes + GitHub Models).
+
+on:
+  schedule:
+    - cron: "0 6 1 * *" # 06:00 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: write # push the regenerated file to the `data` branch
+  models: read # call GitHub Models for the alias mapping
+
+concurrency:
+  group: kick-aliases
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate alias table
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KICK_ALIASES_OUTPUT: ${{ runner.temp }}/kick-aliases.json
+        run: node tools/kick-aliases/generate.mjs
+
+      - name: Publish to data branch
+        env:
+          OUTPUT: ${{ runner.temp }}/kick-aliases.json
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Work in a throwaway worktree so we never disturb the current branch.
+          tmp="$(mktemp -d)"
+          if git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+            git fetch origin data
+            git worktree add "$tmp" origin/data
+            git -C "$tmp" checkout -B data
+          else
+            git worktree add --detach "$tmp"
+            git -C "$tmp" checkout --orphan data
+            git -C "$tmp" rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          cp "$OUTPUT" "$tmp/kick-aliases.json"
+          git -C "$tmp" add kick-aliases.json
+          if git -C "$tmp" diff --cached --quiet; then
+            echo "No changes to publish."
+          else
+            git -C "$tmp" commit -m "chore: refresh Kick alias table"
+            git -C "$tmp" push origin data
+          fi
+          git worktree remove --force "$tmp"

@@ -4306,6 +4306,16 @@ final class ScrubInputCoordinator {
       }
 
     case .momentum:
+      // A new finger-down during the coast means the viewer is continuing to
+      // scrub. Cancel the momentum tail and pick the live swipe back up
+      // immediately rather than swallowing it until the coast decays — that
+      // dropped-second-swipe is what felt unresponsive.
+      if sample.touching {
+        phase = .tracking
+        lastX = sample.x
+        velocity = 0
+        break
+      }
       velocity *= momentumDecay
       if abs(velocity) < momentumStop {
         phase = .idle

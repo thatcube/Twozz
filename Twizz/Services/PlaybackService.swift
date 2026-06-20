@@ -64,6 +64,7 @@ struct PlaybackService {
     private static let accessTokenHash = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
     private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     private static let previewURLCache = PreviewURLCache()
+    private static let qualitiesCache = QualitiesCache()
     private static let previewURLCacheTTL: TimeInterval = 120
     private static let previewTargetBitrate = 1_500_000
     private static let previewMaxBitrate = 2_200_000
@@ -127,6 +128,45 @@ struct PlaybackService {
             expiresAt: Date().addingTimeInterval(previewURLCacheTTL)
         )
         return selected
+    }
+
+    /// Returns a *pinned* media-playlist URL for a single rendition, so AVPlayer
+    /// plays exactly that quality with no adaptive down-switching (an ABR ceiling
+    /// on the master is only advisory and routinely serves a lower rendition).
+    /// `targetBitrate <= 0` pins the highest "Source" rendition; otherwise the
+    /// highest rendition at or below the target is chosen (falling back to the
+    /// lowest available). The parsed variant list is cached per channel so
+    /// repeated tier swaps in multiview don't re-hit the network.
+    static func pinnedHLSURL(for channel: String, targetBitrate: Int) async throws -> URL {
+        let normalized = channel.lowercased()
+        let qualities = try await cachedQualities(for: normalized)
+        let video = qualities.filter { !$0.isAudioOnly }
+        guard !video.isEmpty else { return try await hlsURL(for: normalized) }
+
+        let pick: StreamQuality
+        if targetBitrate <= 0 {
+            pick = video.max { $0.bitrate < $1.bitrate }!
+        } else {
+            let atOrBelow = video.filter { $0.bitrate <= targetBitrate }
+            pick = atOrBelow.max { $0.bitrate < $1.bitrate }
+                ?? video.min { $0.bitrate < $1.bitrate }!
+        }
+        return pick.url
+    }
+
+    /// Resolve and cache a channel's parsed quality variants (TTL-bounded), so the
+    /// multiview wall can pick a pinned rendition per tile without re-resolving.
+    private static func cachedQualities(for channel: String) async throws -> [StreamQuality] {
+        if let cached = await qualitiesCache.value(for: channel, now: Date()) {
+            return cached
+        }
+        let playback = try await resolve(for: channel)
+        await qualitiesCache.insert(
+            playback.qualities,
+            for: channel,
+            expiresAt: Date().addingTimeInterval(previewURLCacheTTL)
+        )
+        return playback.qualities
     }
 
     /// Best-effort fetch of the current live stream title for overlay UI.
@@ -510,6 +550,30 @@ struct PlaybackService {
 
         func insert(_ url: URL, for channel: String, expiresAt: Date) {
             entries[channel] = Entry(url: url, expiresAt: expiresAt)
+        }
+    }
+
+    /// TTL cache of a channel's parsed quality variants, so multiview can pin a
+    /// rendition per tile (and re-pin on tier changes) without re-resolving.
+    private actor QualitiesCache {
+        private struct Entry {
+            let qualities: [StreamQuality]
+            let expiresAt: Date
+        }
+
+        private var entries: [String: Entry] = [:]
+
+        func value(for channel: String, now: Date) -> [StreamQuality]? {
+            guard let entry = entries[channel] else { return nil }
+            guard entry.expiresAt > now else {
+                entries[channel] = nil
+                return nil
+            }
+            return entry.qualities
+        }
+
+        func insert(_ qualities: [StreamQuality], for channel: String, expiresAt: Date) {
+            entries[channel] = Entry(qualities: qualities, expiresAt: expiresAt)
         }
     }
 }

@@ -493,9 +493,9 @@ private struct MultiviewPaneTile: View {
         .opacity(pane.isLoading || pane.hasError ? 0 : 1)
 
       if pane.isLoading {
-        // Mask the initial load *and* quality-swap reloads with the channel's
-        // frame instead of a black tile, so promoting to the spotlight reads as
-        // a quick sharpen rather than a flash.
+        // Mask the initial cold load with the channel's frame instead of a black
+        // tile. Quality *changes* don't pass through here — they swap to a
+        // pre-rendered player (make-before-break), so they never show a poster.
         AsyncImage(url: pane.channel.thumbnailURL) { image in
           image.resizable().scaledToFill()
         } placeholder: {

@@ -14,6 +14,20 @@ enum SystemNoticeStyle {
     case watchStreak
 }
 
+/// Which glyph a highlighted subscription/event notice line shows. Lets us
+/// distinguish Prime, gift, and ordinary paid subs at a glance instead of one
+/// generic star for every kind of sub.
+enum SystemNoticeIcon {
+    /// Ordinary paid sub / resub (filled star).
+    case sub
+    /// Twitch Prime sub or Prime-paid upgrade (filled crown).
+    case prime
+    /// Gift sub(s): subgift, anon/mystery gifts, gift upgrades (filled gift).
+    case gift
+    /// Shared watch-streak milestone (flame).
+    case watchStreak
+}
+
 /// A single chat line parsed from Twitch IRC or YouTube Live Chat.
 struct ChatMessage: Identifiable {
     let id = UUID()
@@ -48,6 +62,9 @@ struct ChatMessage: Identifiable {
     /// Styling for the highlighted notice when `systemMessage` is set. Ignored
     /// for ordinary chat lines.
     var systemNoticeStyle: SystemNoticeStyle = .subscription
+    /// Which glyph to show on the highlighted notice (Prime/gift/sub/streak).
+    /// Ignored for ordinary chat lines.
+    var systemNoticeIcon: SystemNoticeIcon = .sub
     /// Twitch login of the user this line replies to, from the IRC
     /// `reply-parent-user-login` tag (threaded replies only). Used as a robust
     /// secondary signal for "this line mentions me" highlighting, alongside the
@@ -206,10 +223,23 @@ extension ChatMessage {
 
         guard let msgID = tags["msg-id"] else { return nil }
         let noticeStyle: SystemNoticeStyle
+        let noticeIcon: SystemNoticeIcon
         if Self.subscriptionMsgIDs.contains(msgID) {
             noticeStyle = .subscription
+            // Pick a glyph per sub kind: gifts (subgift/anonsubgift/
+            // submysterygift/giftpaidupgrade/anongiftpaidupgrade) → gift,
+            // Prime subs / prime-paid upgrades → crown, everything else (paid
+            // sub/resub) → star.
+            if msgID.contains("gift") {
+                noticeIcon = .gift
+            } else if msgID == "primepaidupgrade" || tags["msg-param-sub-plan"] == "Prime" {
+                noticeIcon = .prime
+            } else {
+                noticeIcon = .sub
+            }
         } else if msgID == "viewermilestone", tags["msg-param-category"] == "watch-streak" {
             noticeStyle = .watchStreak
+            noticeIcon = .watchStreak
         } else {
             return nil
         }
@@ -250,6 +280,7 @@ extension ChatMessage {
         self.source = .twitch
         self.systemMessage = systemMsg
         self.systemNoticeStyle = noticeStyle
+        self.systemNoticeIcon = noticeIcon
         self.timestamp = Date()
     }
 

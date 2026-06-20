@@ -135,33 +135,25 @@ struct PlayerView: View {
   /// immediately re-pause the replay.
   var chatScrollExitFocus: Focusable { isVOD ? .chatToggle : .chatInput }
 
-  /// The seek bar is only reachable by an explicit up-press from a control-row
-  /// button (each button's `onMoveCommand` assigns focus here). It is focusable
-  /// only while focus already sits inside the control cluster (or on the bar
-  /// itself), which means:
-  ///   • from rest (`.video`) or chat it is NOT focusable, so it can't act as a
-  ///     geometric magnet that steals focus the instant the chrome appears
-  ///     (which made up/left/down from rest jump to the bar), and
-  ///   • moving off the bar onto a sibling control keeps it focusable, so it
-  ///     doesn't drop out of the focus engine mid-move and scramble focus to the
-  ///     leftmost control (the channel-button "teleport").
+  /// The seek bar is reachable ONLY by an explicit up-press from a control-row
+  /// button (`requestSeekBarFocus`, which sets `seekBarRequested`). It is
+  /// focusable only while it actually holds focus or has just been requested,
+  /// which means it never sits in the focus engine as a silent neighbour above
+  /// the control row — so a horizontal swipe that carries a little upward drift
+  /// can't fling focus onto it, and from rest/chat it isn't a magnet either.
   var scrubberFocusable: Bool {
-    switch focus {
-    case .rewindScrubber, .streamInfo, .quality, .chatSettingsButton, .chatToggle:
-      return true
-    default:
-      return false
-    }
+    focus == .rewindScrubber || seekBarRequested
   }
 
-  /// Cooldown after a control-row step during which the other buttons are pulled
-  /// out of the focus engine, so one trackpad swipe advances a single button.
-  /// Longer = stickier / more deliberate (like the system transport controls).
-  var controlSwipeThrottle: TimeInterval { 0.7 }
+  /// How long a control-row step is held off after the previous one. With only a
+  /// single control button ever focusable (see `controlButtonRemoved`), the focus
+  /// engine can't walk the row on its own — every move comes through
+  /// `navigateControl`, so this interval alone decides swipe sensitivity: a quick
+  /// flick advances one button, a long full swipe a couple. Bigger = stickier.
+  var controlStepInterval: TimeInterval { 0.22 }
 
-  /// The four focusable buttons that make up the control row, in visual order.
-  /// Used to detect a row→row focus step (which engages the swipe lock) and to
-  /// decide which buttons to drop from the focus engine during the cooldown.
+  /// The control-row buttons in visual order. Used to keep `controlRowActiveButton`
+  /// in sync whenever focus lands on one of them.
   func isControlRowButton(_ f: Focusable?) -> Bool {
     switch f {
     case .streamInfo, .quality, .chatSettingsButton, .chatToggle:
@@ -171,50 +163,47 @@ struct PlayerView: View {
     }
   }
 
-  /// Whether `button` should be removed from the focus engine right now because
-  /// the swipe lock is engaged and it isn't the button that currently holds
-  /// focus. Keeping only the focused button live is what actually prevents the
-  /// engine from walking focus further across the row during a single swipe.
-  func controlButtonFocusBlocked(_ button: Focusable) -> Bool {
-    controlNavLocked && focus != button
+  /// Whether `button` should be dropped from the focus engine right now. Only the
+  /// single "active" control button (or whichever one currently holds focus) stays
+  /// focusable; the rest are removed. That's what actually throttles swiping:
+  /// because the engine has no other focusable button to walk to, a fast swipe
+  /// can't fling focus across the row — it can only fire `onMoveCommand` on the
+  /// focused button, which we rate-limit. Expressed as "removed" so we apply
+  /// `.focusable(false)` (never `.focusable(true)`, which hijacks a Button's
+  /// Select press on tvOS).
+  func controlButtonRemoved(_ button: Focusable) -> Bool {
+    if isChatScrolling { return true }
+    return controlRowActiveButton != button && focus != button
   }
 
-  /// Engage the swipe lock and schedule it to clear after the cooldown. Re-arming
-  /// (a deliberate second swipe lands a step, which re-engages) keeps each lift of
-  /// the finger to one button.
-  func engageControlNavLock() {
-    controlNavLocked = true
-    controlNavUnlockTask?.cancel()
-    controlNavUnlockTask = Task { @MainActor in
-      try? await Task.sleep(for: .seconds(controlSwipeThrottle))
-      if Task.isCancelled { return }
-      controlNavLocked = false
-    }
+  /// Make `button` the single focusable control and move focus to it. Used for
+  /// reveals and any deliberate jump into the row so the target is focusable in
+  /// the same render that focus is assigned.
+  func activateControl(_ button: Focusable) {
+    controlRowActiveButton = button
+    focus = button
   }
 
-  /// Immediately release the swipe lock (focus left the row entirely).
-  func releaseControlNavLock() {
-    controlNavUnlockTask?.cancel()
-    controlNavUnlockTask = nil
-    if controlNavLocked { controlNavLocked = false }
-  }
-
-  /// Step focus to a neighbouring control button. The heavy lifting that makes
-  /// this feel deliberate is done by the focusability lock (`controlNavLocked`):
-  /// while it's engaged the sibling buttons aren't in the focus engine, so this
-  /// is a no-op and the engine can't move either. Outside the lock it advances
-  /// exactly one button, and the resulting focus change engages the lock.
+  /// Step focus to a neighbouring control button, rate-limited to one step per
+  /// `controlStepInterval`. Moves inside the window are swallowed; because the
+  /// siblings aren't focusable the engine can't move on its own either, so the
+  /// row genuinely holds until enough time passes (or the finger lifts and
+  /// swipes again).
   func navigateControl(from source: Focusable, to target: Focusable) {
-    guard !controlNavLocked else { return }
-    focus = target
+    let now = Date()
+    if let last = lastControlStepAt, now.timeIntervalSince(last) < controlStepInterval {
+      return
+    }
+    lastControlStepAt = now
+    activateControl(target)
   }
 
-  /// Handle an up-press from a control button. Moves focus to the seek bar, but
-  /// only when it's available and we're not mid-swipe across the row — a trackpad
-  /// swipe between buttons often carries a stray vertical component that would
-  /// otherwise yank focus onto the bar.
+  /// Handle an up-press from a control button: reveal the seek bar. Setting
+  /// `seekBarRequested` makes the bar focusable for this assignment (it's
+  /// otherwise kept out of the engine so it can't be a vertical magnet).
   func requestSeekBarFocus() {
-    guard rewindAvailable, !controlNavLocked else { return }
+    guard rewindAvailable else { return }
+    seekBarRequested = true
     focus = .rewindScrubber
   }
 
@@ -673,16 +662,21 @@ struct PlayerView: View {
   /// Reasserts focus onto the composer after leaving a chat scroll; see
   /// `resumeChatLive(restoreFocus:)`.
   @State var chatExitFocusTask: Task<Void, Never>?
-  /// True for a short cooldown after focus steps from one control-row button to
-  /// another. While set, every control button EXCEPT the one that currently holds
-  /// focus is dropped from the focus engine (`.focusable(false)`), so the engine
-  /// physically cannot keep walking focus across the row — that's the only way to
-  /// stop a single fast trackpad swipe from flinging across every button, since
-  /// `onMoveCommand` can't veto the engine's native focus move. One step lands,
-  /// the row locks, and the viewer must lift and swipe again to advance further.
-  @State var controlNavLocked = false
-  /// Clears `controlNavLocked` once the swipe-cooldown window elapses.
-  @State var controlNavUnlockTask: Task<Void, Never>?
+  /// The single control-row button that is currently allowed in the focus engine.
+  /// Keeping exactly one button focusable (see `controlButtonRemoved`) is what
+  /// prevents a fast trackpad swipe from flinging focus across the whole row —
+  /// the engine has nowhere to walk, so every step is driven (and rate-limited)
+  /// by `navigateControl`. Kept in sync with `focus` in the body's onChange.
+  @State var controlRowActiveButton: Focusable = .quality
+  /// Timestamp of the last accepted control-row step, for the swipe rate limit.
+  @State var lastControlStepAt: Date?
+  /// True only when the viewer deliberately asked for the seek bar via an
+  /// up-press from a control button. The bar is otherwise kept out of the focus
+  /// engine so it can't act as a vertical magnet — a swipe between control
+  /// buttons with a slight upward component would otherwise drift focus onto it
+  /// (the engine moves focus natively; our up-press guard can't veto that). Reset
+  /// the moment focus leaves the bar.
+  @State var seekBarRequested = false
   /// A just-activated settings control to briefly defend against tvOS's
   /// transient focus jump when toggling an option resizes the panel.
   @State var chatFocusPin: Focusable?
@@ -1356,9 +1350,11 @@ struct PlayerView: View {
         switch direction {
         case .up:
           pendingControlFocus = .quality
+          controlRowActiveButton = .quality
           revealControls(preferredFocus: .quality)
         case .left:
           pendingControlFocus = .streamInfo
+          controlRowActiveButton = .streamInfo
           revealControls(preferredFocus: .streamInfo)
         case .right:
           if !showChat {
@@ -1369,11 +1365,13 @@ struct PlayerView: View {
           // the row's default at the collapse button so a later move into the
           // row from chat is sensible.
           pendingControlFocus = .chatToggle
+          controlRowActiveButton = .chatToggle
           revealControls(preferredFocus: chatFocusAnchor)
         case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
           handleChatDownPress()
         default:
           pendingControlFocus = .quality
+          controlRowActiveButton = .quality
           revealControls(preferredFocus: .quality)
         }
       } else {
@@ -1381,15 +1379,17 @@ struct PlayerView: View {
       }
     }
     .onChange(of: focus) { oldFocus, newFocus in
-      // Swipe lock: a step from one control-row button to another engages a
-      // short cooldown during which the sibling buttons drop out of the focus
-      // engine, so a single trackpad swipe can't keep walking focus across the
-      // whole row. Leaving the row clears the lock so it never strands.
-      if isControlRowButton(oldFocus), isControlRowButton(newFocus),
-         oldFocus != newFocus {
-        engageControlNavLock()
-      } else if !isControlRowButton(newFocus) {
-        releaseControlNavLock()
+      // Keep the single focusable control button in sync with wherever focus
+      // actually lands (reveals, menu dismissals, hide-chat, etc.), so the
+      // focusability gate always matches reality.
+      if isControlRowButton(newFocus), let newFocus, controlRowActiveButton != newFocus {
+        controlRowActiveButton = newFocus
+      }
+      // The seek bar is only focusable while requested/held; once focus leaves it
+      // (e.g. a down-press back to a control) drop it out of the engine again so
+      // it can't be a vertical magnet on the next swipe.
+      if oldFocus == .rewindScrubber, newFocus != .rewindScrubber, seekBarRequested {
+        seekBarRequested = false
       }
       // Start/stop precision trackpad scrubbing as the rewind bar gains/loses
       // focus. The analog jog (GameController + display link) only runs while the
@@ -1869,7 +1869,7 @@ struct PlayerView: View {
           case .right:
             if !isScrubbing { rewindStep(rewindStepSeconds) }
           case .down:
-            focus = .quality
+            activateControl(.quality)
           default:
             break
           }
@@ -1927,8 +1927,7 @@ struct PlayerView: View {
         // it. We remove rather than `.focusable(false/true)`-toggle so the button
         // keeps its own native focus styling when it IS reachable. Exit via Back
         // or by scrolling to the live bottom, which re-enables the row.
-        .focusRemoved(isChatScrolling)
-        .focusRemoved(controlButtonFocusBlocked(.streamInfo))
+        .focusRemoved(controlButtonRemoved(.streamInfo))
         .focused($focus, equals: .streamInfo)
         .onMoveCommand { direction in
           switch direction {
@@ -2000,8 +1999,7 @@ struct PlayerView: View {
           onSelectSleep: { selectSleepTimer(at: $0) }
         )
         .equatable()
-        .focusRemoved(isChatScrolling)
-        .focusRemoved(controlButtonFocusBlocked(.quality))
+        .focusRemoved(controlButtonRemoved(.quality))
         .focused($focus, equals: .quality)
         .onMoveCommand { direction in
           switch direction {
@@ -2030,8 +2028,7 @@ struct PlayerView: View {
               .frame(minWidth: 52)
               .accessibilityLabel("Playback Speed")
           }
-          .focusRemoved(isChatScrolling)
-          .focusRemoved(controlButtonFocusBlocked(.quality))
+          .focusRemoved(controlButtonRemoved(.quality))
           .focused($focus, equals: .quality)
           .onMoveCommand { direction in
             switch direction {
@@ -2053,8 +2050,7 @@ struct PlayerView: View {
           Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
             .accessibilityLabel("Chat Settings")
         }
-        .focusRemoved(isChatScrolling)
-        .focusRemoved(controlButtonFocusBlocked(.chatSettingsButton))
+        .focusRemoved(controlButtonRemoved(.chatSettingsButton))
         .focused($focus, equals: .chatSettingsButton)
         .onMoveCommand { direction in
           switch direction {
@@ -2079,8 +2075,7 @@ struct PlayerView: View {
           Icon(glyph: showChat ? .sidebarRightCollapse : .sidebarRightExpand)
             .accessibilityLabel(showChat ? "Hide Chat" : "Show Chat")
         }
-        .focusRemoved(isChatScrolling)
-        .focusRemoved(controlButtonFocusBlocked(.chatToggle))
+        .focusRemoved(controlButtonRemoved(.chatToggle))
         .focused($focus, equals: .chatToggle)
         .onMoveCommand { direction in
           switch direction {
@@ -2088,7 +2083,7 @@ struct PlayerView: View {
             navigateControl(from: .chatToggle, to: .chatSettingsButton)
           case .right:
             if showChat {
-              navigateControl(from: .chatToggle, to: chatFocusAnchor)
+              focus = chatFocusAnchor
             }
           case .up:
             requestSeekBarFocus()

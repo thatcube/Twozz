@@ -360,6 +360,7 @@ extension PlayerView {
     // when the row rejoins, the worst case lands one button away from chat rather
     // than flinging all the way to the far-side channel button.
     pendingControlFocus = .chatToggle
+    controlRowActiveButton = .chatToggle
     chatExitFocusTask?.cancel()
     chatExitFocusTask = Task { @MainActor in
       // Render B (next runloop): re-enable the control row now that focus is

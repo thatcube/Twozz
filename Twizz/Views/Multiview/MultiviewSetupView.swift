@@ -223,22 +223,22 @@ struct MultiviewSetupView: View {
 
   /// Unselected (addable) indicator: an empty circle that exactly matches the
   /// numbered badge's size and position, so every selectable stream advertises
-  /// the same tap target. A liquid-glass disc with a hairline ring in the
-  /// selection color; falls back to a translucent palette fill when Reduce
-  /// Transparency is on so it stays legible without the blur.
+  /// the same tap target. Just a liquid-glass ring (no blurred fill) with a
+  /// hairline in the selection color for definition; the ring becomes a solid
+  /// stroke when Reduce Transparency is on.
   private var selectionPlaceholder: some View {
     Circle()
-      .fill(placeholderFill)
+      .strokeBorder(ringStyle, lineWidth: 5)
       .overlay {
-        Circle().strokeBorder(selectionColor.opacity(0.9), lineWidth: 3)
+        Circle().strokeBorder(selectionColor.opacity(0.4), lineWidth: 1)
       }
       .frame(width: 52, height: 52)
       .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
   }
 
-  private var placeholderFill: AnyShapeStyle {
+  private var ringStyle: AnyShapeStyle {
     glassDisabled
-      ? AnyShapeStyle(palette.chromeOpaqueSurface)
+      ? AnyShapeStyle(selectionColor.opacity(0.9))
       : AnyShapeStyle(.ultraThinMaterial)
   }
 

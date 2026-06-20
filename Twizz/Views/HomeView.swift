@@ -4,13 +4,11 @@ struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
   private let channelRailVerticalPadding: CGFloat = 20
-  private let peekCardFraction: CGFloat = 0.08
-  private let focusHorizontalInset: CGFloat = 18
   private let focusVerticalInset: CGFloat = 18
+  /// Mirror of the shared rail inset so the card-render sites keep one name.
+  private var focusHorizontalInset: CGFloat { ChannelRailLayout.focusHorizontalInset }
   private let cardCornerRadius: CGFloat = 30
   private let mediaCornerRadius: CGFloat = 18
-  private let minMediaWidth: CGFloat = 220
-  private let maxMediaWidth: CGFloat = 900
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
 
   @State private var selectedSidebarTab: SidebarTab = .home
@@ -104,10 +102,6 @@ struct HomeView: View {
       .filter { $0.isLive && seen.insert($0.id).inserted }
   }
 
-  private var targetVisibleCards: CGFloat {
-    CGFloat(streamCardSize.visibleCardCount)
-  }
-
   enum SidebarTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case multiview = "Multiview"
@@ -130,12 +124,6 @@ struct HomeView: View {
     /// Asset-catalog name for the vendored Tabler template image, so tab items
     /// use the same icon library as the rest of the app.
     var tablerImageName: String { "tb-\(glyph.rawValue)" }
-  }
-
-  private struct ChannelRailMetrics {
-    let spacing: CGFloat
-    let mediaWidth: CGFloat
-    let mediaHeight: CGFloat
   }
 
   var body: some View {
@@ -648,32 +636,10 @@ struct HomeView: View {
   }
 
   private func channelRailMetrics(for availableWidth: CGFloat, trailingSafeArea: CGFloat = 0) -> ChannelRailMetrics {
-    // `availableWidth` is the safe-area width. Cards begin at the left page
-    // gutter, but because the horizontal rails disable scroll clipping they
-    // paint rightward past the safe area, through the trailing overscan, all
-    // the way to the true screen edge. The real visible span is therefore the
-    // safe width, minus the single left gutter, plus the trailing overscan the
-    // cards bleed into. Without adding that overscan back, a fixed ~overscan
-    // slice of the next card always shows (a larger fraction on smaller cards).
-    let visibleWidth = max(availableWidth - AppLayout.horizontalPadding + trailingSafeArea, 1)
-    let n = targetVisibleCards
-    let peek = peekCardFraction
-    let baseSpacing = max(18, min(32, visibleWidth * 0.012))
-    let spacing = min(baseSpacing + 4, 36)
-    // Fit `n` full cards plus a `peek` sliver of the next one, with a full
-    // spacing gap before each of those following cards (n gaps total). Solving
-    // visibleWidth = (n + peek) * outer + n * spacing for `outer`.
-    let rawOuterCardWidth = (visibleWidth - (n * spacing)) / (n + peek)
-    let minOuterCardWidth = minMediaWidth + (focusHorizontalInset * 2)
-    let maxOuterCardWidth = maxMediaWidth + (focusHorizontalInset * 2)
-    let outerCardWidth = min(max(rawOuterCardWidth, minOuterCardWidth), maxOuterCardWidth)
-    let mediaWidth = outerCardWidth - (focusHorizontalInset * 2)
-    let mediaHeight = mediaWidth * 9 / 16
-
-    return ChannelRailMetrics(
-      spacing: spacing,
-      mediaWidth: mediaWidth,
-      mediaHeight: mediaHeight
+    ChannelRailLayout.metrics(
+      availableWidth: availableWidth,
+      trailingSafeArea: trailingSafeArea,
+      visibleCardCount: streamCardSize.visibleCardCount
     )
   }
 

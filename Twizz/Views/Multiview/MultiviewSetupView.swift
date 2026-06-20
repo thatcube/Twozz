@@ -26,6 +26,9 @@ struct MultiviewSetupView: View {
 
   @Environment(\.themePalette) private var palette
   @Environment(\.glassDisabled) private var glassDisabled
+  /// Global stream-card size preference, shared with Home/Browse so the picker
+  /// honours the same "N across" choice instead of a fixed width.
+  @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   /// Selected channel ids, in pick order — that order drives grid placement.
   @State private var selectedIDs: [String] = []
   /// Set when the user activates a tile that's already at the pick limit; drives
@@ -34,9 +37,7 @@ struct MultiviewSetupView: View {
   @State private var limitToastToken: UUID?
   @FocusState private var focusedID: String?
 
-  /// Each card's media is a 16:9 thumbnail; this width keeps roughly three
-  /// cards visible per rail on a 1080/4K tvOS layout.
-  private let cardWidth: CGFloat = 440
+  private var cardSize: StreamCardSize { StreamCardSize.resolve(streamCardSizeRaw) }
 
   /// Live channels per section, deduped so a channel that appears in several
   /// pools is only offered once (in its highest-priority section).
@@ -66,40 +67,48 @@ struct MultiviewSetupView: View {
   }
 
   var body: some View {
-    ZStack {
-      AppBackground(palette: palette).ignoresSafeArea()
+    GeometryReader { proxy in
+      let rail = ChannelRailLayout.metrics(
+        availableWidth: proxy.size.width,
+        trailingSafeArea: proxy.safeAreaInsets.trailing,
+        visibleCardCount: cardSize.visibleCardCount
+      )
 
-      VStack(alignment: .leading, spacing: 0) {
-        header
+      ZStack {
+        AppBackground(palette: palette).ignoresSafeArea()
 
-        if !hasChannels {
-          emptyState
-        } else {
-          ScrollView {
-            LazyVStack(alignment: .leading, spacing: 36) {
-              ForEach(resolvedSections) { section in
-                sectionRail(section)
+        VStack(alignment: .leading, spacing: 0) {
+          header
+
+          if !hasChannels {
+            emptyState
+          } else {
+            ScrollView {
+              LazyVStack(alignment: .leading, spacing: 36) {
+                ForEach(resolvedSections) { section in
+                  sectionRail(section, rail: rail)
+                }
               }
+              .padding(.vertical, 28)
             }
-            .padding(.vertical, 28)
           }
         }
       }
-    }
-    .overlay(alignment: .bottom) {
-      if limitToastToken != nil {
-        limitToast
-          .padding(.bottom, 56)
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+      .overlay(alignment: .bottom) {
+        if limitToastToken != nil {
+          limitToast
+            .padding(.bottom, 56)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
       }
+      .animation(.spring(response: 0.35, dampingFraction: 0.85), value: limitToastToken)
+      .task(id: limitToastToken) {
+        guard limitToastToken != nil else { return }
+        try? await Task.sleep(for: .seconds(2.4))
+        limitToastToken = nil
+      }
+      .onExitCommand(perform: onCancel)
     }
-    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: limitToastToken)
-    .task(id: limitToastToken) {
-      guard limitToastToken != nil else { return }
-      try? await Task.sleep(for: .seconds(2.4))
-      limitToastToken = nil
-    }
-    .onExitCommand(perform: onCancel)
   }
 
   /// Lightweight, non-focusable toast shown when the viewer tries to pick a 5th
@@ -174,7 +183,7 @@ struct MultiviewSetupView: View {
 
   // MARK: Section rail
 
-  private func sectionRail(_ section: MultiviewChannelSection) -> some View {
+  private func sectionRail(_ section: MultiviewChannelSection, rail: ChannelRailMetrics) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       Text(section.title)
         .font(.system(size: 30, weight: .bold))
@@ -182,10 +191,10 @@ struct MultiviewSetupView: View {
         .padding(.horizontal, AppLayout.horizontalPadding)
 
       ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 28) {
+        HStack(spacing: rail.spacing) {
           ForEach(section.channels) { channel in
             tile(channel)
-              .frame(width: cardWidth)
+              .frame(width: rail.outerCardWidth)
           }
         }
         .padding(.horizontal, AppLayout.horizontalPadding)

@@ -131,8 +131,8 @@ struct SettingsView: View {
 
   private var streamCardRow: some View {
     settingRow(
-      title: "Stream Cards",
-      subtitle: "Card size on Home and Browse."
+      title: "Stream card size",
+      subtitle: nil
     ) {
       ForEach(StreamCardSize.allCases) { size in
         Button {

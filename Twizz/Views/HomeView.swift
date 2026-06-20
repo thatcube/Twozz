@@ -206,9 +206,14 @@ struct HomeView: View {
       goLive.notificationSettings = goLiveSettings
       goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
-      await refreshFollowedChannelsIfNeeded(force: true)
+      // Followed channels and (anonymous) recommendations are independent, so
+      // load them concurrently. Personalized recs read follows.channels, so they
+      // run after the followed refresh resolves.
+      async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: true)
+      async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: true)
+      await followedDone
       recomputeLiveFollowed()
-      await refreshRecommendationsIfNeeded(force: true)
+      await recommendationsDone
       await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
@@ -235,8 +240,10 @@ struct HomeView: View {
     .onChange(of: selectedSidebarTab) { _, tab in
       guard tab == .home else { return }
       Task {
-        await refreshFollowedChannelsIfNeeded(force: false)
-        await refreshRecommendationsIfNeeded(force: false)
+        async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: false)
+        async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: false)
+        await followedDone
+        await recommendationsDone
         await refreshPersonalizedIfNeeded(force: false)
       }
     }
@@ -708,9 +715,11 @@ struct HomeView: View {
     guard refreshToast == nil else { return }
     Task {
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = .refreshing }
-      await refreshFollowedChannelsIfNeeded(force: true)
+      async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: true)
+      async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: true)
+      await followedDone
       recomputeLiveFollowed()
-      await refreshRecommendationsIfNeeded(force: true)
+      await recommendationsDone
       await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = .done }

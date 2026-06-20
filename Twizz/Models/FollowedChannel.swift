@@ -13,6 +13,14 @@ struct FollowedChannel: Identifiable, Hashable {
     let isLive: Bool
     let isMature: Bool
 
+    /// The same streamer's live YouTube presence, when they're a dual-platform
+    /// streamer who is currently also live on YouTube. `nil` means "no known
+    /// YouTube live presence" — the card then renders Twitch-only as before.
+    /// Populated after the Twitch fetch by `FollowedChannelsService`'s YouTube
+    /// enrichment; deliberately outside the memberwise `init` so every existing
+    /// call site keeps compiling unchanged.
+    var youtube: YouTubePresence? = nil
+
     init(
         id: String,
         login: String,

@@ -38,6 +38,35 @@ final class FollowedChannelsService {
   private(set) var directoryErrorMessage: String?
   private(set) var directoryLoadedAt: Date?
 
+  /// Merges live YouTube presence into the current Twitch-followed channels and
+  /// directory so a dual-platform streamer shows as one card with both Twitch
+  /// and YouTube viewers. Called after `refresh`/`loadDirectory` from the view
+  /// layer, which owns the (downloaded, parameter-free) alias + snapshot
+  /// services. A streamer with no known YouTube mapping, or who isn't currently
+  /// live on YouTube, has its `youtube` presence cleared so stale data never
+  /// lingers.
+  func applyYouTubePresence(
+    aliases: TwitchYouTubeAliasService,
+    live: YouTubeLiveSnapshotService
+  ) {
+    func enrich(_ channel: FollowedChannel) -> FollowedChannel {
+      var updated = channel
+      if let channelID = aliases.youtubeChannelID(forTwitchLogin: channel.login),
+        let presence = live.presence(forChannelID: channelID),
+        presence.isLive {
+        updated.youtube = presence
+      } else {
+        updated.youtube = nil
+      }
+      return updated
+    }
+
+    channels = channels.map(enrich)
+    if !directory.isEmpty {
+      directory = directory.map(enrich)
+    }
+  }
+
   func refresh(using auth: TwitchAuthSession) async {
     isLoading = true
     errorMessage = nil

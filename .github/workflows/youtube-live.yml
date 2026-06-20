@@ -1,0 +1,74 @@
+name: Refresh YouTube live snapshot
+
+# Publishes which catalogued YouTube channels are live (and their viewers) plus
+# the Twitch->YouTube alias map to the `data` branch, where the app fetches them
+# from raw.githubusercontent.com. Lets a stream card show a streamer's YouTube
+# presence next to Twitch without any per-device YouTube API calls.
+#
+# Quota is per-project, so this single job replaces N per-user calls. Tune the
+# cron to your catalog size: cost ≈ a few hundred units/run for ~150 channels
+# against the 10k/day default. Requires a YOUTUBE_API_KEY repo secret (a plain
+# YouTube Data API key — no OAuth); without it the job writes valid empty files.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # every 30 minutes — adjust for catalog size/quota
+  workflow_dispatch:
+
+permissions:
+  contents: write # push the regenerated files to the `data` branch
+
+concurrency:
+  group: youtube-live
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate snapshot
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_LIVE_OUTPUT: ${{ runner.temp }}/youtube-live.json
+          TWITCH_YOUTUBE_ALIASES_OUTPUT: ${{ runner.temp }}/twitch-youtube-aliases.json
+        run: node tools/youtube-live/generate.mjs
+
+      - name: Publish to data branch
+        env:
+          LIVE_OUTPUT: ${{ runner.temp }}/youtube-live.json
+          ALIAS_OUTPUT: ${{ runner.temp }}/twitch-youtube-aliases.json
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Work in a throwaway worktree so we never disturb the current branch.
+          tmp="$(mktemp -d)"
+          if git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+            git fetch origin data
+            git worktree add "$tmp" origin/data
+            git -C "$tmp" checkout -B data
+          else
+            git worktree add --detach "$tmp"
+            git -C "$tmp" checkout --orphan data
+            git -C "$tmp" rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          cp "$LIVE_OUTPUT" "$tmp/youtube-live.json"
+          cp "$ALIAS_OUTPUT" "$tmp/twitch-youtube-aliases.json"
+          git -C "$tmp" add youtube-live.json twitch-youtube-aliases.json
+          if git -C "$tmp" diff --cached --quiet; then
+            echo "No changes to publish."
+          else
+            git -C "$tmp" commit -m "chore: refresh YouTube live snapshot"
+            git -C "$tmp" push origin data
+          fi
+          git worktree remove --force "$tmp"

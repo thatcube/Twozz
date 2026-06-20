@@ -19,6 +19,8 @@ struct HomeView: View {
   @State private var watchHistory = WatchHistoryService()
   @State private var feedback = RecommendationFeedbackService()
   @State private var affinity = StreamerAffinityService()
+  @State private var youtubeAliases = TwitchYouTubeAliasService()
+  @State private var youtubeLive = YouTubeLiveSnapshotService()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
@@ -744,7 +746,17 @@ struct HomeView: View {
   private func refreshFollowedChannelsIfNeeded(force: Bool) async {
     guard force || shouldAutoRefreshFollowedChannels() else { return }
     await follows.refresh(using: auth)
+    await refreshYouTubePresence()
     publishTopShelfSnapshot()
+  }
+
+  /// Pulls the latest Twitch→YouTube alias table and live snapshot (both public,
+  /// parameter-free downloads) and merges any live YouTube presence into the
+  /// followed channels so dual-platform streamers render as one combined card.
+  private func refreshYouTubePresence() async {
+    await youtubeAliases.refreshIfNeeded()
+    await youtubeLive.refreshIfNeeded()
+    follows.applyYouTubePresence(aliases: youtubeAliases, live: youtubeLive)
   }
 
   private func refreshRecommendationsIfNeeded(force: Bool) async {

@@ -1,0 +1,4 @@
+{
+  "_comment": "Curated catalog of streamers who broadcast on BOTH Twitch and YouTube. The poller (tools/youtube-live/generate.mjs) reads this to publish youtube-live.json + twitch-youtube-aliases.json to the data branch. Each entry needs a twitchLogin (lowercased) and either a youtubeHandle (preferred, e.g. \"@channel\") or a youtubeChannelId (UC...). Handles are resolved to IDs at build time. Verify each mapping points at the SAME person before adding. See README.md.",
+  "channels": []
+}

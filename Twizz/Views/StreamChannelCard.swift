@@ -201,6 +201,13 @@ struct StreamChannelCard: View {
     if channel.isLive, let viewerCount = channel.viewerCount {
       parts.append("\(viewerCount) watching")
     }
+    if let youtube = channel.youtube, youtube.isLive {
+      if let youtubeViewers = youtube.viewerCount {
+        parts.append("Also live on YouTube, \(youtubeViewers) watching")
+      } else {
+        parts.append("Also live on YouTube")
+      }
+    }
     return Text(parts.joined(separator: ", "))
   }
 
@@ -227,7 +234,7 @@ struct StreamChannelCard: View {
         endPoint: .bottom
       )
 
-      LiveBadge(isLive: channel.isLive, viewerCount: channel.viewerCount)
+      MultiPlatformLiveBadge(channel: channel)
         .padding(12)
     }
     .frame(width: layout.mediaWidth, height: layout.mediaHeight)

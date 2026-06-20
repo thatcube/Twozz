@@ -38,6 +38,10 @@ enum Glyph: String {
   case flame
   case targetArrow = "target-arrow"
   case broadcast
+  // Subscription / event notice glyphs.
+  case crownFilled = "crown-filled"
+  case giftFilled = "gift-filled"
+  case starFilled = "star-filled"
   // Brand glyphs for channel social links.
   case brandYoutube = "brand-youtube"
   case brandInstagram = "brand-instagram"

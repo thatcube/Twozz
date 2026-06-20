@@ -1539,13 +1539,17 @@ struct PlayerView: View {
 
       // Seamless escalate: fill with the channel's frame while the full player
       // spins up, then cross-fade to live video. Removes the black "Loading…"
-      // gap when opening a stream from a multiview pane.
+      // gap when opening a stream from a multiview pane. Letterboxed
+      // (scaledToFit) to match VideoSurface's .resizeAspect so the poster lands
+      // exactly where the live video will, and constrained to the video column
+      // so it never bleeds over the chat (whose width varies).
       if let posterURL, errorMessage == nil, !isOffline {
         AsyncImage(url: posterURL) { image in
-          image.resizable().scaledToFill()
+          image.resizable().scaledToFit()
         } placeholder: {
-          Color.black
+          Color.clear
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
         .opacity(isLoading ? 1 : 0)
         .allowsHitTesting(false)

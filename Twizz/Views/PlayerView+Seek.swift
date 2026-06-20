@@ -23,36 +23,90 @@ extension PlayerView {
   /// Mirrors the player's real seekable window into the observed `rewindReadout`
   /// so only the transport bar leaf re-renders (not the whole player) per tick.
   func updateRewindReadout() {
-    if isVOD {
-      guard let window = currentSeekWindow() else {
-        rewindReadout.isVOD = true
-        rewindReadout.elapsedSeconds = 0
-        rewindReadout.totalSeconds = 0
-        rewindReadout.update(
-          positionFraction: 0, behindLiveSeconds: 0, windowSeconds: 0,
-          isPaused: isUserPaused, isAtLiveEdge: false)
-        return
-      }
-      let span = max(window.end - window.start, 0.001)
-      let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
-      let elapsed = position - window.start
+    // A live-launched session presents ONE continuous timeline — the in-memory DVR
+    // window and the in-progress broadcast VOD behind it are a single bar — so the
+    // seam into the VOD (and back to live) is invisible on the transport. A pure
+    // channel-page VOD keeps its own elapsed/total bar.
+    if isLiveSession {
+      updateLiveSessionReadout()
+    } else {
+      updatePureVODReadout()
+    }
+  }
+
+  /// The elapsed/total transport for a recorded-broadcast session opened from the
+  /// channel page (`vod`). Neutral track, no LIVE edge.
+  private func updatePureVODReadout() {
+    guard let window = currentSeekWindow() else {
       rewindReadout.isVOD = true
-      rewindReadout.elapsedSeconds = elapsed
-      rewindReadout.totalSeconds = span
+      rewindReadout.elapsedSeconds = 0
+      rewindReadout.totalSeconds = 0
       rewindReadout.update(
-        positionFraction: elapsed / span,
-        behindLiveSeconds: max(span - elapsed, 0),
-        windowSeconds: span,
-        isPaused: isUserPaused,
-        isAtLiveEdge: false)
+        positionFraction: 0, behindLiveSeconds: 0, windowSeconds: 0,
+        isPaused: isUserPaused, isAtLiveEdge: false)
       return
     }
+    let span = max(window.end - window.start, 0.001)
+    let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
+    let elapsed = position - window.start
+    rewindReadout.isVOD = true
+    rewindReadout.elapsedSeconds = elapsed
+    rewindReadout.totalSeconds = span
+    rewindReadout.update(
+      positionFraction: elapsed / span,
+      behindLiveSeconds: max(span - elapsed, 0),
+      windowSeconds: span,
+      isPaused: isUserPaused,
+      isAtLiveEdge: false)
+  }
+
+  /// Unified live transport: one bar spanning the whole broadcast
+  /// (`broadcastStart … live edge`). The same "behind live" / LIVE semantics apply
+  /// whether the playhead is in the in-memory DVR window or has handed off into the
+  /// in-progress VOD, so the two read as a single continuous timeline.
+  private func updateLiveSessionReadout() {
+    rewindReadout.isVOD = false
     guard streamRewindEnabled, let window = currentSeekWindow() else {
       rewindReadout.update(
         positionFraction: 1, behindLiveSeconds: 0, windowSeconds: 0,
         isPaused: isUserPaused, isAtLiveEdge: true)
       return
     }
+
+    // Full-broadcast timeline when the in-progress VOD is known: place the playhead
+    // by its wall-clock instant against `broadcastStart … now`, so the DVR window
+    // and the VOD share one bar. `now` stands in for the live edge (the broadcast
+    // is ongoing); the few seconds of live latency are negligible across a
+    // broadcast-length bar.
+    if let broadcastStart = liveVODHandoff?.broadcast.broadcastStart {
+      let now = Date()
+      let total = max(now.timeIntervalSince(broadcastStart), 1)
+      let currentWallClock: Date
+      if isVOD {
+        let raw = scrubTargetSeconds ?? CMTimeGetSeconds(player.currentItem?.currentTime() ?? .zero)
+        let offset = raw.isFinite ? max(0, raw) : 0
+        currentWallClock = broadcastStart.addingTimeInterval(offset)
+      } else if pinnedToLive, !isUserPaused {
+        currentWallClock = now
+      } else {
+        let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
+        currentWallClock = wallClock(atPlayerTime: position) ?? now
+      }
+      let elapsed = min(max(currentWallClock.timeIntervalSince(broadcastStart), 0), total)
+      let behind = max(total - elapsed, 0)
+      // Only the true live edge (playing live and pinned) reads as LIVE.
+      let atLive = !isVOD && pinnedToLive && !isUserPaused
+      rewindReadout.update(
+        positionFraction: elapsed / total,
+        behindLiveSeconds: behind,
+        windowSeconds: total,
+        isPaused: isUserPaused,
+        isAtLiveEdge: atLive)
+      return
+    }
+
+    // Fallback (in-progress VOD not resolved/available): show only the in-memory
+    // DVR window, as before.
     let span = max(window.end - window.start, 0.001)
     // While following live, pin the orb to the right edge and show LIVE rather than
     // tracking the real (segment-quantized) playhead. The furthest-forward point
@@ -95,6 +149,7 @@ extension PlayerView {
     if !isVOD { pinnedToLive = target >= liveCap - 0.5 }
     scrubTargetSeconds = target
     updateRewindReadout()
+    checkVODSeamTransitions(target: target, window: window)
     throttledScrubSeek(to: target)
     scheduleScrubCommit()
     scheduleHide()
@@ -192,6 +247,7 @@ extension PlayerView {
     if !isVOD { pinnedToLive = target >= liveCap - 0.5 }
     scrubTargetSeconds = target
     updateRewindReadout()
+    checkVODSeamTransitions(target: target, window: window)
     throttledScrubSeek(to: target)
   }
 

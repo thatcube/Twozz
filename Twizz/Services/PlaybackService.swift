@@ -249,6 +249,90 @@ struct PlaybackService {
         return streamObj == nil ? .offline : .live
     }
 
+    /// The channel's in-progress recording: the VOD that backs the *current* live
+    /// broadcast. Used by Stream Rewind to continue rewinding past the in-memory
+    /// DVR window into the recorded broadcast.
+    struct LiveBroadcastVOD: Equatable {
+        let id: String
+        /// Wall-clock instant the current broadcast began. The VOD timeline's
+        /// zero maps to this instant, so a live rewind position's wall clock minus
+        /// this is its offset into the VOD.
+        let broadcastStart: Date
+        /// Recorded length so far, in seconds (advances as the broadcast continues).
+        let lengthSeconds: Int
+        /// Whether the VOD is still actively recording (the live broadcast hasn't
+        /// ended). A finished broadcast no longer needs a live handoff.
+        let isRecording: Bool
+    }
+
+    /// Resolves the channel's in-progress broadcast VOD — the newest ARCHIVE video
+    /// while the channel is live, which Twitch exposes with status `RECORDING`.
+    /// Returns `nil` when the channel isn't live, hasn't enabled past-broadcast
+    /// storage, or the VOD isn't available yet (sub-only/processing/lagging), in
+    /// which case Stream Rewind simply keeps its hard DVR floor.
+    static func currentBroadcastVOD(for channel: String) async -> LiveBroadcastVOD? {
+        var req = TwitchAPIClient.graphQLRequest(
+            clientID: clientID, clientIDField: "Client-ID", userAgent: userAgent)
+
+        let query = """
+            query CurrentBroadcastVOD($login: String!) {
+              user(login: $login) {
+                stream { id createdAt }
+                videos(first: 1, sort: TIME, type: ARCHIVE) {
+                  edges { node { id status lengthSeconds createdAt publishedAt } }
+                }
+              }
+            }
+            """
+        req.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["query": query, "variables": ["login": channel.lowercased()]])
+
+        guard let (data, response) = try? await networkSession.data(for: req) else { return nil }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              json["errors"] == nil,
+              let dataObj = json["data"] as? [String: Any],
+              let user = dataObj["user"] as? [String: Any],
+              let stream = user["stream"] as? [String: Any],
+              let node = (((user["videos"] as? [String: Any])?["edges"] as? [[String: Any]])?
+                .first?["node"]) as? [String: Any],
+              let id = node["id"] as? String, !id.isEmpty
+        else { return nil }
+
+        // The newest archive only corresponds to the *current* broadcast while it
+        // is actively recording. Any other status means the latest archive is a
+        // finished past broadcast, not this live session — so there's nothing to
+        // hand off to.
+        let recording = (node["status"] as? String)?.uppercased() == "RECORDING"
+        guard recording else { return nil }
+
+        // Broadcast start: prefer the live stream's start (authoritative for this
+        // session); fall back to the VOD's own timestamps.
+        let start = parseDate(stream["createdAt"])
+            ?? parseDate(node["createdAt"])
+            ?? parseDate(node["publishedAt"])
+        guard let broadcastStart = start else { return nil }
+
+        return LiveBroadcastVOD(
+            id: id,
+            broadcastStart: broadcastStart,
+            lengthSeconds: node["lengthSeconds"] as? Int ?? 0,
+            isRecording: recording)
+    }
+
+    /// Parses an ISO-8601 timestamp (with or without fractional seconds) from a
+    /// JSON value, the format Twitch's GraphQL returns for broadcast timestamps.
+    private static func parseDate(_ raw: Any?) -> Date? {
+        guard let raw = raw as? String, !raw.isEmpty else { return nil }
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFraction.date(from: raw) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: raw)
+    }
+
     // MARK: - On-demand (clips + VODs)
 
     /// Resolves a clip slug to a directly-playable MP4 URL (highest quality),

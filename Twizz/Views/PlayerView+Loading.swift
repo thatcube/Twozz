@@ -49,6 +49,13 @@ extension PlayerView {
         startPlaybackWatchdog()
         consecutiveLoadFailures = 0
         isLoading = false
+        // Eagerly resolve the channel's in-progress broadcast VOD so the rewind
+        // transport can present one continuous broadcast-length timeline (DVR
+        // window + VOD) from the start. Non-blocking; falls back to the DVR-only
+        // bar until/unless it resolves.
+        if streamRewindEnabled {
+          Task { await resolveBroadcastVODIfNeeded() }
+        }
         return
       } catch {
         lastError = error

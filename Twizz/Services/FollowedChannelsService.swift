@@ -10,7 +10,9 @@ final class FollowedChannelsService {
     TwitchConfig.webPublicClientID
   ]
 
-  private(set) var channels: [FollowedChannel] = []
+  private(set) var channels: [FollowedChannel] = [] {
+    didSet { prewarmAvatars(channels) }
+  }
   /// Category name -> number of followed channels (online **and** offline) whose
   /// last/current broadcast was in that category. Drives the personalized
   /// recommendation profile so it reflects the whole follow list, not just whoever
@@ -29,7 +31,9 @@ final class FollowedChannelsService {
   /// **and** offline — sorted live-first. Populated lazily by `loadDirectory`
   /// when the directory screen opens, so its heavier multi-batch fetch never
   /// runs as part of the Home refresh.
-  private(set) var directory: [FollowedChannel] = []
+  private(set) var directory: [FollowedChannel] = [] {
+    didSet { prewarmAvatars(directory) }
+  }
   private(set) var isLoadingDirectory = false
   private(set) var directoryErrorMessage: String?
   private(set) var directoryLoadedAt: Date?
@@ -133,6 +137,24 @@ final class FollowedChannelsService {
     }
   }
 
+  /// Warm the decoded-image cache for followed channels' *static* avatars
+  /// whenever the followed list or the full Following directory updates, so the
+  /// Home "Followed" rail and the directory grid paint each avatar instantly
+  /// instead of decoding it on the fly while scrolling. Live stream preview
+  /// thumbnails (`FollowedChannel.thumbnailURL`) are deliberately never
+  /// prewarmed: they must always reflect the current moment. Best-effort and low
+  /// priority; idempotent and bounded by the shared `NSCache`.
+  private func prewarmAvatars(_ channels: [FollowedChannel]) {
+    let urls = channels.compactMap(\.profileImageURL)
+    guard !urls.isEmpty else { return }
+    Task(priority: .utility) {
+      for url in urls {
+        if Task.isCancelled { return }
+        await ImageMemoryCache.shared.prewarm(url)
+      }
+    }
+  }
+
   /// Loads the full Following directory — every followed channel, live and
   /// offline — into `directory`, sorted live-first. Lazy and idempotent: a cached
   /// result is reused unless `force` is set. Requires a real authenticated
@@ -193,12 +215,19 @@ final class FollowedChannelsService {
     guard !broadcasters.isEmpty else { return [] }
 
     let ids = broadcasters.map(\.broadcasterID)
-    let liveByID = try await fetchLiveStreamsForBroadcasterIDs(
+    // These three lookups all key off the same broadcaster ids and don't depend
+    // on one another, so run them concurrently instead of waiting for each in
+    // turn — it cuts the directory load from three sequential round-trip groups
+    // (each up to N/100 batches) down to one wall-clock group.
+    async let liveByIDTask = fetchLiveStreamsForBroadcasterIDs(
       clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
-    let usersByID = try await fetchUsersByID(
+    async let usersByIDTask = fetchUsersByID(
       clientID: clientID, accessToken: accessToken, userIDs: ids)
-    let infoByID = try await fetchChannelInfoByID(
+    async let infoByIDTask = fetchChannelInfoByID(
       clientID: clientID, accessToken: accessToken, broadcasterIDs: ids)
+    let liveByID = try await liveByIDTask
+    let usersByID = try await usersByIDTask
+    let infoByID = try await infoByIDTask
 
     let channels: [FollowedChannel] = broadcasters.map { broadcaster in
       let user = usersByID[broadcaster.broadcasterID]
@@ -474,16 +503,20 @@ final class FollowedChannelsService {
           return []
         }
 
-        let liveByBroadcasterID = try await fetchLiveStreamsByBroadcasterID(
+        // Live streams and profile images both derive only from `follows`, so
+        // fetch them concurrently rather than back to back.
+        async let liveByBroadcasterIDTask = fetchLiveStreamsByBroadcasterID(
           clientID: clientID,
           accessToken: accessToken,
           broadcasterIDs: follows.map(\.broadcasterID)
         )
-        let profileImagesByUserID = try await fetchProfileImagesByUserID(
+        async let profileImagesByUserIDTask = fetchProfileImagesByUserID(
           clientID: clientID,
           accessToken: accessToken,
           userIDs: follows.map(\.broadcasterID)
         )
+        let liveByBroadcasterID = try await liveByBroadcasterIDTask
+        let profileImagesByUserID = try await profileImagesByUserIDTask
 
         return follows.compactMap { followed in
           guard let stream = liveByBroadcasterID[followed.broadcasterID] else {

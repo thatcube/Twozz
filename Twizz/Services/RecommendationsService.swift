@@ -28,8 +28,28 @@ final class RecommendationsService {
             let (loadedChannels, loadedCategories) = try await (channelsTask, categoriesTask)
             channels = loadedChannels
             categories = loadedCategories
+            prewarmStaticArtwork(channels: loadedChannels, categories: loadedCategories)
         } catch {
             errorMessage = "Could not load recommendations right now."
+        }
+    }
+
+    /// Warm the decoded-image cache for the *static* artwork the recommendation
+    /// rails show — channel avatars and category box art — so those tiles paint
+    /// instantly as the Home screen scrolls instead of decoding on the fly. Live
+    /// stream preview thumbnails (`FollowedChannel.thumbnailURL`) are deliberately
+    /// never prewarmed: they must always reflect the current moment. Best-effort
+    /// and low priority; `CachedAsyncImage` still loads on demand if the user
+    /// scrolls before the warm pass finishes.
+    private func prewarmStaticArtwork(channels: [FollowedChannel], categories: [TwitchCategory]) {
+        let urls = channels.compactMap(\.profileImageURL)
+            + categories.compactMap(\.boxArtURL)
+        guard !urls.isEmpty else { return }
+        Task(priority: .utility) {
+            for url in urls {
+                if Task.isCancelled { return }
+                await ImageMemoryCache.shared.prewarm(url)
+            }
         }
     }
 

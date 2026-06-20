@@ -84,6 +84,9 @@ extension ChatMessage {
     init?(ircLine line: String) {
         var rest = Substring(line)
         var tags: [String: String] = [:]
+        // A tagged PRIVMSG carries ~12-16 IRC tags; pre-size so the dictionary
+        // doesn't rehash several times while parsing every message.
+        tags.reserveCapacity(16)
 
         // Tags section: "@key=value;key=value " (present because we request twitch.tv/tags).
         if rest.first == "@" {
@@ -212,6 +215,7 @@ extension ChatMessage {
 
         // Tags section: "@key=value;key=value ".
         var tags: [String: String] = [:]
+        tags.reserveCapacity(24)
         if line.first == "@", let spaceIdx = line.firstIndex(of: " ") {
             let tagString = line[line.index(after: line.startIndex)..<spaceIdx]
             for pair in tagString.split(separator: ";") {

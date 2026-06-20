@@ -1,5 +1,19 @@
 import Foundation
 
+/// Deterministic, allocation-free tiebreak between two message UUIDs. The sort
+/// tiebreakers below only need a stable, reproducible order for messages that
+/// share a timestamp; comparing the raw 16 bytes does that without allocating
+/// the two 36-character `uuidString`s the previous `<` comparison built on every
+/// tie.
+private func uuidPrecedes(_ a: UUID, _ b: UUID) -> Bool {
+  withUnsafeBytes(of: a.uuid) { pa in
+    withUnsafeBytes(of: b.uuid) { pb in
+      for i in 0..<16 where pa[i] != pb[i] { return pa[i] < pb[i] }
+      return false
+    }
+  }
+}
+
 /// Stream-sync delay and message-release scheduling for `ChatService`: holds
 /// incoming messages so chat lines up with the delayed video, eases the delay in
 /// during a warm-up window, trickles large bursts in so they read like live
@@ -25,7 +39,7 @@ extension ChatService {
   func enqueue(_ incoming: [ChatMessage]) {
     let sorted = incoming.sorted { lhs, rhs in
       if lhs.timestamp == rhs.timestamp {
-        return lhs.id.uuidString < rhs.id.uuidString
+        return uuidPrecedes(lhs.id, rhs.id)
       }
       return lhs.timestamp < rhs.timestamp
     }
@@ -67,7 +81,7 @@ extension ChatService {
 
     let visibleNow = (backlog + immediate).sorted { lhs, rhs in
       if lhs.timestamp == rhs.timestamp {
-        return lhs.id.uuidString < rhs.id.uuidString
+        return uuidPrecedes(lhs.id, rhs.id)
       }
       return lhs.timestamp < rhs.timestamp
     }
@@ -79,7 +93,7 @@ extension ChatService {
       syncBuffer.sort { lhs, rhs in
         if lhs.releaseAt == rhs.releaseAt {
           if lhs.message.timestamp == rhs.message.timestamp {
-            return lhs.message.id.uuidString < rhs.message.id.uuidString
+            return uuidPrecedes(lhs.message.id, rhs.message.id)
           }
           return lhs.message.timestamp < rhs.message.timestamp
         }
@@ -142,11 +156,16 @@ extension ChatService {
         continue
       }
 
-      var released: [ChatMessage] = []
-      while let first = syncBuffer.first, first.releaseAt <= now {
-        released.append(first.message)
-        syncBuffer.removeFirst()
+      // syncBuffer is kept sorted by releaseAt, so the releasable messages are a
+      // contiguous prefix. Count them and drop them in one shot — repeatedly
+      // calling removeFirst() shifts the whole array each time (O(n²) when a big
+      // burst drains at once).
+      var releaseCount = 0
+      while releaseCount < syncBuffer.count, syncBuffer[releaseCount].releaseAt <= now {
+        releaseCount += 1
       }
+      let released = syncBuffer.prefix(releaseCount).map(\.message)
+      syncBuffer.removeFirst(releaseCount)
       appendVisible(released)
       pendingSyncMessageCount = syncBuffer.count
     }

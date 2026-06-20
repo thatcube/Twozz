@@ -180,7 +180,7 @@ struct ThemePalette: Equatable {
     playerBackdrop: .white,
     chatSideSurface: Color(white: 1.0).opacity(0.98),
     chatSidePrimaryText: Color(white: 0.12),
-    topGlow: ThemePalette.brandPurple.opacity(0.05)
+    topGlow: ThemePalette.brandPurple.opacity(0.14)
   )
 
   /// Twitch brand purple (#9146FF).

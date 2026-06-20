@@ -295,7 +295,7 @@ final class HermesEventService {
           "type": "pubsub",
           "pubsub": ["topic": topic],
         ],
-        "timestamp": ISO8601DateFormatter().string(from: Date()),
+        "timestamp": Self.isoFractional.string(from: Date()),
       ]
       guard let data = try? JSONSerialization.data(withJSONObject: frame),
         let text = String(data: data, encoding: .utf8)

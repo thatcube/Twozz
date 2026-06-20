@@ -13,18 +13,28 @@ struct ChannelProfileService {
     return URLSession(configuration: config)
   }()
 
+  /// ISO8601 parsers are reused across calls: each `ISO8601DateFormatter()` is
+  /// expensive to allocate, and a single profile fetch parses several timestamps
+  /// (`createdAt`, stream/broadcast `startedAt`, …). The formatters are immutable
+  /// once configured, so sharing them is safe.
+  private nonisolated(unsafe) static let withFractionFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+  }()
+
+  private nonisolated(unsafe) static let plainFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+  }()
+
   /// Parses Twitch's ISO-8601 timestamps, which sometimes include fractional
   /// seconds (e.g. `2012-11-03T15:50:32.87847Z`) and sometimes don't.
   private static func parseDate(_ raw: String?) -> Date? {
     guard let raw, !raw.isEmpty else { return nil }
-
-    let withFraction = ISO8601DateFormatter()
-    withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = withFraction.date(from: raw) { return date }
-
-    let plain = ISO8601DateFormatter()
-    plain.formatOptions = [.withInternetDateTime]
-    return plain.date(from: raw)
+    if let date = withFractionFormatter.date(from: raw) { return date }
+    return plainFormatter.date(from: raw)
   }
 
   static func fetch(login: String) async -> ChannelProfile? {

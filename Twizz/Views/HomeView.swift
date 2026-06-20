@@ -41,6 +41,11 @@ struct HomeView: View {
   /// source lists changes, so we don't rebuild the lookup sets and refilter on
   /// every HomeView body pass (focus changes, scrolling, animations).
   @State private var topStreams: [FollowedChannel] = []
+  /// Followed channels that are live right now — the pool multiview draws from.
+  /// Memoized (rather than a computed `filter` over `follows.channels`) so the
+  /// large HomeView body doesn't re-filter the whole follow list on every focus
+  /// move and animation frame. Recomputed only when `follows.channels` changes.
+  @State private var liveFollowedChannels: [FollowedChannel] = []
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedEnabled = true
@@ -62,8 +67,8 @@ struct HomeView: View {
   }
 
   /// Followed channels that are live right now — the pool multiview draws from.
-  private var liveFollowedChannels: [FollowedChannel] {
-    follows.channels.filter(\.isLive)
+  private func recomputeLiveFollowed() {
+    liveFollowedChannels = follows.channels.filter(\.isLive)
   }
 
   private var targetVisibleCards: CGFloat {
@@ -201,14 +206,21 @@ struct HomeView: View {
       goLive.notificationSettings = goLiveSettings
       goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
-      await refreshFollowedChannelsIfNeeded(force: true)
-      await refreshRecommendationsIfNeeded(force: true)
+      // Followed channels and (anonymous) recommendations are independent, so
+      // load them concurrently. Personalized recs read follows.channels, so they
+      // run after the followed refresh resolves.
+      async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: true)
+      async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: true)
+      await followedDone
+      recomputeLiveFollowed()
+      await recommendationsDone
       await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)
+      recomputeLiveFollowed()
       recomputeTopStreams()
     }
     .onChange(of: recommendations.channels) { _, _ in
@@ -228,8 +240,10 @@ struct HomeView: View {
     .onChange(of: selectedSidebarTab) { _, tab in
       guard tab == .home else { return }
       Task {
-        await refreshFollowedChannelsIfNeeded(force: false)
-        await refreshRecommendationsIfNeeded(force: false)
+        async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: false)
+        async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: false)
+        await followedDone
+        await recommendationsDone
         await refreshPersonalizedIfNeeded(force: false)
       }
     }
@@ -341,37 +355,39 @@ struct HomeView: View {
 
         Spacer()
 
-        if liveFollowedChannels.count >= 2 {
-          Button {
-            showingMultiview = true
-          } label: {
-            Label {
-              Text("Multiview")
-                .font(.system(size: 24, weight: .semibold))
-            } icon: {
-              Icon(glyph: .layoutGrid, size: 26)
+        HStack(spacing: 8) {
+          if liveFollowedChannels.count >= 2 {
+            Button {
+              showingMultiview = true
+            } label: {
+              Label {
+                Text("Multiview")
+                  .font(.system(size: 24, weight: .semibold))
+              } icon: {
+                Icon(glyph: .layoutGrid, size: 26)
+              }
             }
+            .accessibilityLabel("Watch multiple channels at once")
           }
-          .accessibilityLabel("Watch multiple channels at once")
-        }
 
-        if !follows.isUsingDemoData {
+          if !follows.isUsingDemoData {
+            Button {
+              showingFollowingDirectory = true
+            } label: {
+              Text("See All")
+                .font(.system(size: 24, weight: .semibold))
+            }
+            .accessibilityLabel("See all followed channels")
+          }
+
           Button {
-            showingFollowingDirectory = true
+            performManualRefresh()
           } label: {
-            Text("See All")
-              .font(.system(size: 24, weight: .semibold))
+            Image(systemName: "arrow.clockwise")
+              .font(.system(size: 28, weight: .semibold))
           }
-          .accessibilityLabel("See all followed channels")
+          .accessibilityLabel("Refresh")
         }
-
-        Button {
-          performManualRefresh()
-        } label: {
-          Image(systemName: "arrow.clockwise")
-            .font(.system(size: 28, weight: .semibold))
-        }
-        .accessibilityLabel("Refresh")
       }
 
       if let errorMessage = follows.errorMessage {
@@ -699,8 +715,11 @@ struct HomeView: View {
     guard refreshToast == nil else { return }
     Task {
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = .refreshing }
-      await refreshFollowedChannelsIfNeeded(force: true)
-      await refreshRecommendationsIfNeeded(force: true)
+      async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: true)
+      async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: true)
+      await followedDone
+      recomputeLiveFollowed()
+      await recommendationsDone
       await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = .done }

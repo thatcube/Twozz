@@ -6,6 +6,14 @@ import Observation
 /// platforms (and is a sane decode/bandwidth ceiling for Apple TV 4K).
 let multiviewPaneLimit = 4
 
+/// How the live panes are arranged on screen.
+enum MultiviewLayout {
+  /// Symmetric tiles (1, side-by-side, 1-big-plus-2, or 2×2).
+  case grid
+  /// One large primary pane with the rest as a thumbnail filmstrip.
+  case spotlight
+}
+
 /// One tile in a multiview grid: a channel bound to its own `AVPlayer`.
 ///
 /// Every pane decodes a *preview-bitrate* HLS variant (the same low-bitrate
@@ -42,15 +50,32 @@ final class MultiviewPane: Identifiable {
 
 /// Owns the set of panes for one multiview session and the single "audible"
 /// selection. Created with up to ``multiviewPaneLimit`` channels; extra
-/// channels are dropped.
+/// channels are dropped. Panes can be added or removed live, and the session can
+/// switch between a symmetric grid and a spotlight (one large + filmstrip)
+/// arrangement.
 @MainActor
 @Observable
 final class MultiviewController {
-  let panes: [MultiviewPane]
+  private(set) var panes: [MultiviewPane]
   private(set) var audiblePaneID: String?
+
+  /// Active on-screen arrangement.
+  var layout: MultiviewLayout = .grid
+  /// In spotlight mode, the pane shown large. `nil` falls back to the first
+  /// pane. Always points at a pane that still exists.
+  private(set) var primaryPaneID: String?
 
   init(channels: [FollowedChannel]) {
     self.panes = channels.prefix(multiviewPaneLimit).map(MultiviewPane.init)
+    self.primaryPaneID = panes.first?.id
+  }
+
+  /// True when another channel can still be added.
+  var canAddPane: Bool { panes.count < multiviewPaneLimit }
+
+  /// The pane currently in the spotlight primary slot (or the first pane).
+  var primaryPane: MultiviewPane? {
+    panes.first { $0.id == primaryPaneID } ?? panes.first
   }
 
   /// Resolve and begin playback for every pane.
@@ -94,6 +119,52 @@ final class MultiviewController {
         pane.hasError = true
         pane.isLoading = false
       }
+    }
+  }
+
+  /// Add a channel as a new pane and start it, if under the pane limit and not
+  /// already present. Returns the new pane's id, or `nil` if it was rejected.
+  @discardableResult
+  func addPane(_ channel: FollowedChannel) -> String? {
+    guard canAddPane else { return nil }
+    guard !panes.contains(where: { $0.id == channel.id }) else { return nil }
+    let pane = MultiviewPane(channel: channel)
+    panes.append(pane)
+    load(pane)
+    return pane.id
+  }
+
+  /// Remove a pane, tearing down its player. Keeps at least one pane alive.
+  /// Re-points the primary/audible selections if they referenced it.
+  func removePane(_ paneID: String) {
+    guard panes.count > 1 else { return }
+    guard let index = panes.firstIndex(where: { $0.id == paneID }) else { return }
+    let pane = panes[index]
+    pane.resolveTask?.cancel()
+    pane.resolveTask = nil
+    pane.player.pause()
+    pane.player.replaceCurrentItem(with: nil)
+    panes.remove(at: index)
+
+    if primaryPaneID == paneID {
+      primaryPaneID = panes.first?.id
+    }
+    if audiblePaneID == paneID {
+      setAudiblePane(panes.first?.id)
+    }
+  }
+
+  /// Promote a pane to the spotlight primary slot.
+  func makePrimary(_ paneID: String) {
+    guard panes.contains(where: { $0.id == paneID }) else { return }
+    primaryPaneID = paneID
+  }
+
+  /// Flip between the grid and spotlight arrangements.
+  func toggleLayout() {
+    layout = (layout == .grid) ? .spotlight : .grid
+    if layout == .spotlight, primaryPane == nil {
+      primaryPaneID = panes.first?.id
     }
   }
 

@@ -170,7 +170,7 @@ struct PlayerView: View {
   /// focus halo *sliding* across instead of hard-cutting (the teleport that made
   /// stepping feel glitchy). Kept just under `controlStepInterval` so it clears
   /// before the next step is allowed, collapsing back to a single focusable button.
-  var controlSlideDuration: TimeInterval { 0.24 }
+  var controlSlideDuration: TimeInterval { 0.2 }
 
   func isControlRowButton(_ f: Focusable?) -> Bool {
     guard let f else { return false }
@@ -193,16 +193,16 @@ struct PlayerView: View {
   }
 
   /// Whether the chat composer (and its send button) should be dropped from the
-  /// focus engine. Besides the rewind-bar case, we remove it while focus sits on a
-  /// control button that ISN'T its left neighbour (the chat-toggle): because the
-  /// other control buttons are pulled out of the engine during a swipe, the
-  /// composer would otherwise be the nearest focusable view to the right of the
-  /// row and a left→right swipe from, say, the channel button would fling straight
-  /// onto it (fighting `stepControl`). Only the chat-toggle — its actual neighbour
-  /// — is allowed to hand focus to it.
+  /// focus engine. Besides the rewind-bar case, we remove it whenever focus sits
+  /// on a control button UNLESS we've just armed a deliberate hop into it
+  /// (`chatInputArmed`). Because the other control buttons are pulled out of the
+  /// engine during a swipe, the composer would otherwise be the nearest focusable
+  /// view to the right of the row, so a swipe would fling onto it (or sail past
+  /// the collapse button into chat). Keeping it out until an armed, throttled hop
+  /// makes collapse→chat as deliberate as every other step.
   func chatInputFocusBlocked() -> Bool {
     if focus == .rewindScrubber { return true }
-    if isControlRowButton(focus), focus != .chatToggle { return true }
+    if isControlRowButton(focus) { return !chatInputArmed }
     return false
   }
 
@@ -216,31 +216,53 @@ struct PlayerView: View {
     focus = button
   }
 
-  /// Take one horizontal step from `source` to `target`. Discrete presses (D-pad
+  /// The shared rate limiter for every horizontal move. Discrete presses (D-pad
   /// clicks or a fresh gesture — anything arriving more than `controlSwipeBurstGap`
-  /// after the previous move event) go through immediately, so pressing left/right
-  /// repeatedly is snappy. A continuous swipe fires move events in a rapid burst;
-  /// those are rate-limited to one per `controlStepInterval` so the row can't be
-  /// crossed in a single fling. `source` is held focusable for `controlSlideDuration`
-  /// so tvOS animates the halo sliding across, then we collapse back to one.
-  func stepControl(to target: Focusable, from source: Focusable) {
+  /// after the previous move event) return `true` immediately, so pressing
+  /// left/right repeatedly is snappy. A continuous swipe fires move events in a
+  /// rapid burst; those are limited to one accepted step per `controlStepInterval`
+  /// so the row can't be crossed in a single fling.
+  func controlStepAllowed() -> Bool {
     let now = Date()
     let sinceLastMove = lastControlMoveAt.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
     lastControlMoveAt = now
     let isSwipeBurst = sinceLastMove < controlSwipeBurstGap
     if isSwipeBurst, let last = lastControlStepAt, now.timeIntervalSince(last) < controlStepInterval {
-      return
+      return false
     }
     lastControlStepAt = now
+    return true
+  }
+
+  /// Hold `source` focusable for the slide window so tvOS animates the focus halo
+  /// across, then collapse back to a single focusable button.
+  func scheduleControlSlide(from source: Focusable) {
     controlStepFrom = source
-    controlRowActiveButton = target
-    focus = target
     controlStepClearTask?.cancel()
     controlStepClearTask = Task { @MainActor in
       try? await Task.sleep(for: .seconds(controlSlideDuration))
       if Task.isCancelled { return }
       controlStepFrom = nil
     }
+  }
+
+  /// Take one rate-limited horizontal step from `source` to `target`. `source` is
+  /// held focusable for `controlSlideDuration` so tvOS animates the halo sliding.
+  func stepControl(to target: Focusable, from source: Focusable) {
+    guard controlStepAllowed() else { return }
+    controlRowActiveButton = target
+    focus = target
+    scheduleControlSlide(from: source)
+  }
+
+  /// The deliberate hop from the collapse button into the chat input, rate-limited
+  /// exactly like a normal control step (so a swipe can't sail past collapse into
+  /// chat) and arming the composer into the focus engine for this move.
+  func stepToChatInput(from source: Focusable) {
+    guard showChat, controlStepAllowed() else { return }
+    chatInputArmed = true
+    focus = chatFocusAnchor
+    scheduleControlSlide(from: source)
   }
 
   /// Handle an up-press from a control button: reveal the seek bar. Setting
@@ -725,6 +747,11 @@ struct PlayerView: View {
   /// since this tells `stepControl` whether the current move is part of a rapid
   /// swipe burst (throttle) or a discrete press (allow immediately).
   @State var lastControlMoveAt: Date?
+  /// Set for the duration of a deliberate, throttled hop from the collapse button
+  /// into the chat input, which momentarily admits the composer to the focus
+  /// engine. Cleared as soon as focus returns to a control button so a plain swipe
+  /// across the row can never fling into chat.
+  @State var chatInputArmed = false
   /// True only when the viewer deliberately asked for the seek bar via an
   /// up-press from a control button. The bar is otherwise kept out of the focus
   /// engine so it can't act as a vertical magnet — a swipe between control
@@ -1440,6 +1467,11 @@ struct PlayerView: View {
       if isControlRowButton(newFocus), let newFocus, controlRowActiveButton != newFocus {
         controlRowActiveButton = newFocus
       }
+      // Disarm the chat-input hop the moment focus is back on a control button, so
+      // the composer drops out of the engine again and a plain swipe can't reach it.
+      if isControlRowButton(newFocus), chatInputArmed {
+        chatInputArmed = false
+      }
       // The seek bar is only focusable while requested/held; once focus leaves it
       // (e.g. a down-press back to a control) drop it out of the engine again so
       // it can't be a vertical magnet on the next swipe.
@@ -2137,9 +2169,7 @@ struct PlayerView: View {
           case .left:
             stepControl(to: .chatSettingsButton, from: .chatToggle)
           case .right:
-            if showChat {
-              focus = chatFocusAnchor
-            }
+            stepToChatInput(from: .chatToggle)
           case .up:
             requestSeekBarFocus()
           default:

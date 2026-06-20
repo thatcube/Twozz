@@ -15,6 +15,11 @@ struct SimilarChannelsEngine {
   private static let languageWeight = 0.20
   private static let tagWeight = 0.20
   private static let tierWeight = 0.15
+  /// How hard a title that echoes streams the viewer rejected is pushed down.
+  /// Deliberately conservative: a strong title match roughly cancels a perfect
+  /// category match, enough to bury a rejected look-alike without nuking an
+  /// otherwise great recommendation over one shared word.
+  private static let titlePenaltyWeight = 0.5
 
   private static let seedCategoryCount = 3
   private static let candidatesPerCategory = 40
@@ -30,6 +35,8 @@ struct SimilarChannelsEngine {
   ///   - maxPerCategory: When set, no single category may occupy more than this
   ///     many slots — diversifying rails that would otherwise be swept by the
   ///     viewer's single strongest category. `nil` keeps the pure score ranking.
+  ///   - feedback: The viewer's "Not interested" signal. Blocklisted channels are
+  ///     dropped outright; titles echoing rejected streams are down-ranked.
   ///
   /// Results are always filtered to the viewer's `StreamLanguagePreference` (a
   /// hard filter — unlike the soft language *score*), so an English-only viewer
@@ -38,7 +45,8 @@ struct SimilarChannelsEngine {
     using signals: ChannelSignals,
     seedLimit: Int = seedCategoryCount,
     resultLimit: Int = maxResults,
-    maxPerCategory: Int? = nil
+    maxPerCategory: Int? = nil,
+    feedback: RecommendationFeedback = .empty
   ) async -> [FollowedChannel] {
     // Seed the search from the channel's most defining categories. Prefer its
     // *specific* niches over generic catch-alls (Just Chatting, etc.) so a
@@ -63,11 +71,12 @@ struct SimilarChannelsEngine {
     }
 
     // Dedupe by login, keeping the higher-viewer instance, and drop the channel
-    // itself.
+    // itself plus any channels the viewer marked "Not interested".
     var byLogin: [String: CandidateStream] = [:]
     for candidate in pool {
       let key = candidate.login.lowercased()
       guard key != signals.login.lowercased() else { continue }
+      guard !feedback.blockedLogins.contains(key) else { continue }
       if let existing = byLogin[key], existing.viewers >= candidate.viewers { continue }
       byLogin[key] = candidate
     }
@@ -83,7 +92,7 @@ struct SimilarChannelsEngine {
     }
 
     let ranking = candidates
-      .map { (candidate: $0, score: score($0, against: signals)) }
+      .map { (candidate: $0, score: score($0, against: signals, feedback: feedback)) }
       .sorted { $0.score > $1.score }
 
     let selected = select(from: ranking, limit: resultLimit, maxPerCategory: maxPerCategory)
@@ -123,15 +132,33 @@ struct SimilarChannelsEngine {
 
   // MARK: - Scoring
 
-  private static func score(_ candidate: CandidateStream, against signals: ChannelSignals) -> Double {
+  private static func score(
+    _ candidate: CandidateStream,
+    against signals: ChannelSignals,
+    feedback: RecommendationFeedback
+  ) -> Double {
     let category = categoryAffinity(candidate, signals)
     let language = languageMatch(candidate, signals)
     let tags = tagOverlap(candidate, signals)
     let tier = tierSimilarity(candidate, signals)
-    return category * categoryWeight
+    let positive = category * categoryWeight
       + language * languageWeight
       + tags * tagWeight
       + tier * tierWeight
+    return positive - titlePenalty(candidate, feedback) * titlePenaltyWeight
+  }
+
+  /// How strongly the candidate's title echoes streams the viewer rejected
+  /// (0...1). Saturates at three shared distinctive words so a single coincidental
+  /// match nudges rather than buries, while a title that clearly mirrors a
+  /// rejected one is fully penalized.
+  private static func titlePenalty(_ candidate: CandidateStream, _ feedback: RecommendationFeedback) -> Double {
+    guard !feedback.mutedTitleTokens.isEmpty, !candidate.title.isEmpty else { return 0 }
+    let tokens = RecommendationFeedbackService.tokens(in: candidate.title)
+    guard !tokens.isEmpty else { return 0 }
+    let matches = tokens.filter { feedback.mutedTitleTokens[$0] != nil }.count
+    guard matches > 0 else { return 0 }
+    return min(1, Double(matches) / 3.0)
   }
 
   /// How central the candidate's current game is to the target's DNA (0...1).
@@ -168,6 +195,67 @@ struct SimilarChannelsEngine {
   }
 
   // MARK: - Candidate fetch
+
+  /// Looks up which of `logins` are **live right now** and returns them as
+  /// recommendation cards. Used by affinity expansion ("because you watch X")
+  /// to surface a watched channel's similar streamers regardless of category.
+  /// Applies the same hard `StreamLanguagePreference` filter as the main engine.
+  static func liveChannels(forLogins logins: [String]) async -> [FollowedChannel] {
+    let unique = Array(Set(logins.map { $0.lowercased() }.filter { !$0.isEmpty })).prefix(90)
+    guard !unique.isEmpty else { return [] }
+
+    let query = """
+      query AffinityLive($logins: [String!]) {
+        users(logins: $logins) {
+          login displayName
+          profileImageURL(width: 70)
+          broadcastSettings { language }
+          stream {
+            id title viewersCount
+            previewImageURL(width: 320, height: 180)
+            game { name displayName }
+            freeformTags { name }
+          }
+        }
+      }
+      """
+
+    guard
+      let data = try? await ChannelContentService.perform(
+        query: query, variables: ["logins": Array(unique)]),
+      let decoded = try? JSONDecoder().decode(UsersEnvelope.self, from: data),
+      let users = decoded.data?.users
+    else { return [] }
+
+    let requiredLanguage = StreamLanguagePreference.currentToken()
+
+    return users.compactMap { user -> FollowedChannel? in
+      guard let user,
+            let login = user.login?.trimmingCharacters(in: .whitespaces), !login.isEmpty,
+            let stream = user.stream
+      else { return nil }
+
+      if let required = requiredLanguage,
+         user.broadcastSettings?.language?.uppercased() != required {
+        return nil
+      }
+
+      let title = stream.title?.trimmingCharacters(in: .whitespaces) ?? ""
+      return FollowedChannel(
+        id: stream.id ?? login,
+        login: login,
+        displayName: user.displayName?.trimmingCharacters(in: .whitespaces) ?? login,
+        title: title.isEmpty ? "Live now" : title,
+        gameName: stream.game?.displayName?.trimmingCharacters(in: .whitespaces)
+          ?? stream.game?.name?.trimmingCharacters(in: .whitespaces) ?? "Live",
+        viewerCount: stream.viewersCount,
+        thumbnailURL: stream.previewImageURL.flatMap(URL.init(string:)),
+        profileImageURL: user.profileImageURL.flatMap(URL.init(string:)),
+        isLive: true,
+        isMature: false
+      )
+    }
+  }
 
   private static func fetchCandidates(inCategory category: String) async -> [CandidateStream] {
     let query = """
@@ -277,4 +365,22 @@ struct SimilarChannelsEngine {
   private struct BroadcastSettings: Decodable { let language: String? }
   private struct Game: Decodable { let name: String?; let displayName: String? }
   private struct Tag: Decodable { let name: String? }
+
+  private struct UsersEnvelope: Decodable { let data: UsersData? }
+  private struct UsersData: Decodable { let users: [AffinityUser?]? }
+  private struct AffinityUser: Decodable {
+    let login: String?
+    let displayName: String?
+    let profileImageURL: String?
+    let broadcastSettings: BroadcastSettings?
+    let stream: AffinityStream?
+  }
+  private struct AffinityStream: Decodable {
+    let id: String?
+    let title: String?
+    let viewersCount: Int?
+    let previewImageURL: String?
+    let game: Game?
+    let freeformTags: [Tag]?
+  }
 }

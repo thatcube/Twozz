@@ -13,14 +13,17 @@ struct SettingsView: View {
   let auth: TwitchAuthSession
   var follows: FollowedChannelsService
   var goLiveSettings: GoLiveNotificationSettings
+  var recommendationFeedback: RecommendationFeedbackService
   var onRequestSignIn: () -> Void = {}
   var onClearWatchHistory: () -> Void = {}
+  var onResetNotInterested: () -> Void = {}
   var onAccountChanged: () -> Void = {}
   var onRepublishTopShelf: () -> Void = {}
 
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
   @State private var showClearHistoryConfirm = false
+  @State private var showResetNotInterestedConfirm = false
   @State private var topShelfStatus = TopShelfStore.diagnosticsSummary()
   @FocusState private var focusedTheme: AppTheme?
   @FocusState private var focusedCardSize: StreamCardSize?
@@ -205,6 +208,15 @@ struct SettingsView: View {
         SettingPill(title: "Clear History", isSelected: false)
       }
       .settingPillStyle(isSelected: false)
+
+      if recommendationFeedback.hasFeedback {
+        Button {
+          showResetNotInterestedConfirm = true
+        } label: {
+          SettingPill(title: "Reset Not Interested", isSelected: false)
+        }
+        .settingPillStyle(isSelected: false)
+      }
     }
     .confirmationDialog(
       "Clear watch history?",
@@ -217,6 +229,18 @@ struct SettingsView: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("This permanently removes the watch history stored on this device.")
+    }
+    .confirmationDialog(
+      "Reset “Not Interested”?",
+      isPresented: $showResetNotInterestedConfirm,
+      titleVisibility: .visible
+    ) {
+      Button("Reset", role: .destructive) {
+        onResetNotInterested()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Channels you marked “Not interested” can be recommended again.")
     }
   }
 

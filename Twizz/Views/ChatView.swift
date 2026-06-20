@@ -92,11 +92,36 @@ struct ChatView: View {
   }
 
   private var isLightChatSurface: Bool {
+    // Bridging to UIColor and reading its luminance isn't free, and this is hit
+    // multiple times per chat line (name color + body color override). The result
+    // only depends on the surface inputs, not the message, so memoize it in a
+    // single-entry cache keyed by those inputs — N bridges per render collapse to
+    // one when the signature is unchanged.
+    let signature = LightSurfaceSignature(
+      palette: palette,
+      glassDisabled: glassDisabled,
+      isSideLayout: isSideLayout,
+      useLighterOverlayBackground: useLighterOverlayBackground
+    )
+    if let memo = Self.lightSurfaceMemo, memo.signature == signature {
+      return memo.value
+    }
     var white: CGFloat = 0
     var alpha: CGFloat = 0
     UIColor(chatSurfaceColor).getWhite(&white, alpha: &alpha)
-    return white > 0.5
+    let value = white > 0.5
+    Self.lightSurfaceMemo = (signature, value)
+    return value
   }
+
+  private struct LightSurfaceSignature: Equatable {
+    let palette: ThemePalette
+    let glassDisabled: Bool
+    let isSideLayout: Bool
+    let useLighterOverlayBackground: Bool
+  }
+
+  private static var lightSurfaceMemo: (signature: LightSurfaceSignature, value: Bool)?
 
   private var messageSpacingValue: CGFloat {
     messageSpacing
@@ -291,6 +316,7 @@ struct ChatView: View {
 
   @ViewBuilder
   private func line(for message: ChatMessage) -> some View {
+    let seed = message.id.hashValue
     let richLine = RichChatLineView(
       message: message,
       nameColor: color(for: message),
@@ -316,6 +342,7 @@ struct ChatView: View {
           accent: subscriptionAccent,
           readableAccent: readableSubscriptionAccent,
           showUserLine: !message.text.isEmpty,
+          seed: seed,
           icon: {
             Image(systemName: "star.fill")
               .font(fontStyle.font(size: textSize * 0.7, weight: .bold))
@@ -328,6 +355,7 @@ struct ChatView: View {
           accent: watchStreakAccent,
           readableAccent: readableWatchStreakAccent,
           showUserLine: !message.text.isEmpty,
+          seed: seed,
           icon: {
             Icon(glyph: .flame, size: textSize * 0.9)
           },
@@ -335,9 +363,9 @@ struct ChatView: View {
         )
       }
     } else if message.isFirstMessage {
-      firstMessageHighlight(around: richLine)
+      firstMessageHighlight(around: richLine, seed: seed)
     } else if shouldHighlight(message) {
-      mentionHighlight(around: richLine)
+      mentionHighlight(around: richLine, seed: seed)
     } else {
       richLine
     }
@@ -446,8 +474,8 @@ struct ChatView: View {
 
   /// Wraps an ordinary chat line in the gold mention treatment using the shared
   /// rounded highlight card.
-  private func mentionHighlight<Content: View>(around line: Content) -> some View {
-    highlightCard(accent: mentionAccent) { line }
+  private func mentionHighlight<Content: View>(around line: Content, seed: Int) -> some View {
+    highlightCard(accent: mentionAccent, seed: seed) { line }
   }
 
   // MARK: - Shared highlight card
@@ -465,6 +493,7 @@ struct ChatView: View {
   @ViewBuilder
   private func highlightCard<Content: View>(
     accent: Color,
+    seed: Int,
     @ViewBuilder content: () -> Content
   ) -> some View {
     let barWidth: CGFloat = 4
@@ -475,6 +504,7 @@ struct ChatView: View {
     // the accent bar floats in that margin, left of the text, like Twitch.
     let cardInset: CGFloat = 5
     let margin = max(barWidth + 8, horizontalPadding - cardInset)
+    let glow = highlightGlow(seed: seed)
 
     content()
       .padding(.vertical, max(verticalPadding - 2, 3))
@@ -482,13 +512,19 @@ struct ChatView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .background {
         ZStack(alignment: .leading) {
-          LinearGradient(
+          // A soft radial glow whose origin + spread vary per message (seeded by
+          // the line) so highlights don't all read as the same left-to-right ramp.
+          // The center stays biased toward the leading edge, anchoring the glow to
+          // the accent bar. EllipticalGradient costs about the same as a linear one
+          // and uses relative radii, so it needs no GeometryReader.
+          EllipticalGradient(
             colors: [
-              accent.opacity(isSideLayout ? 0.20 : 0.30),
-              accent.opacity(isSideLayout ? 0.05 : 0.09),
+              accent.opacity(isSideLayout ? 0.24 : 0.34),
+              accent.opacity(isSideLayout ? 0.04 : 0.07),
             ],
-            startPoint: .leading,
-            endPoint: .trailing
+            center: glow.center,
+            startRadiusFraction: 0,
+            endRadiusFraction: glow.endRadiusFraction
           )
           Capsule(style: .continuous)
             .fill(accent)
@@ -509,6 +545,18 @@ struct ChatView: View {
       // Bleed back out so the text inside lands on the normal chat keyline while
       // the card keeps a small inset from the panel edge.
       .padding(.horizontal, -margin)
+  }
+
+  /// Stable per-line variation for the highlight glow, derived from the message's
+  /// hash so each card differs but stays the same across re-renders. The center is
+  /// kept near the leading edge (where the accent bar sits) with a varying vertical
+  /// position and spread. Pure integer math — effectively free per line.
+  private func highlightGlow(seed: Int) -> (center: UnitPoint, endRadiusFraction: CGFloat) {
+    let r = UInt(bitPattern: seed)
+    let cx = 0.02 + CGFloat(r % 26) / 100.0           // 0.02 ... 0.27 (hug the bar)
+    let cy = 0.16 + CGFloat((r / 26) % 68) / 100.0     // 0.16 ... 0.83
+    let endRadius = 0.85 + CGFloat((r / 7) % 50) / 100.0 // 0.85 ... 1.34
+    return (UnitPoint(x: cx, y: cy), endRadius)
   }
 
   /// Small rounded "chip" used for highlight labels (e.g. FIRST MESSAGE) — a
@@ -572,12 +620,13 @@ struct ChatView: View {
     accent: Color,
     readableAccent: Color,
     showUserLine: Bool,
+    seed: Int,
     @ViewBuilder icon: () -> IconContent,
     line: Content
   ) -> some View {
     let badgeSize = max(20, textSize * 0.95)
 
-    return highlightCard(accent: accent) {
+    return highlightCard(accent: accent, seed: seed) {
       VStack(alignment: .leading, spacing: 3) {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
           icon()
@@ -608,10 +657,10 @@ struct ChatView: View {
   /// Wraps a chat line in the highlighted "first message" treatment: the shared
   /// rounded card with a small "FIRST MESSAGE" pill above the text — mirroring
   /// Twitch's affordance in a more tvOS-native form.
-  private func firstMessageHighlight<Content: View>(around line: Content) -> some View {
+  private func firstMessageHighlight<Content: View>(around line: Content, seed: Int) -> some View {
     let labelSize = max(11, textSize * 0.44)
 
-    return highlightCard(accent: firstMessageAccent) {
+    return highlightCard(accent: firstMessageAccent, seed: seed) {
       VStack(alignment: .leading, spacing: 3) {
         highlightChip(
           "FIRST MESSAGE",

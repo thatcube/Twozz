@@ -480,6 +480,16 @@ private struct MultiviewPaneTile: View {
         .opacity(pane.isLoading || pane.hasError ? 0 : 1)
 
       if pane.isLoading {
+        // Mask the initial load *and* quality-swap reloads with the channel's
+        // frame instead of a black tile, so promoting to the spotlight reads as
+        // a quick sharpen rather than a flash.
+        AsyncImage(url: pane.channel.thumbnailURL) { image in
+          image.resizable().scaledToFill()
+        } placeholder: {
+          Color.black
+        }
+        .allowsHitTesting(false)
+
         statusOverlay {
           ProgressView()
           if style == .full {
@@ -535,7 +545,7 @@ private struct MultiviewPaneTile: View {
   private func statusOverlay<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
     VStack(spacing: 12) { content() }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(Color.black)
+      .background(Color.black.opacity(0.45))
   }
 
   /// Auto-hiding metadata (focused pane only) plus the persistent audio cue.

@@ -14,28 +14,18 @@ enum MultiviewLayout {
   case spotlight
 }
 
-/// Quality budget for a single pane, chosen by how large it renders so we spend
-/// bandwidth/decode where it shows. Every pane loads the same master playlist
-/// (so all renditions are available); the tier only sets the bitrate cap, which
-/// lets a pane move between renditions live — promoting to the spotlight raises
-/// the cap and ABR climbs in place, no reload.
+/// Quality budget for a single pane. Each tier pins a *specific* rendition's
+/// media playlist (not the master), because pinning is the only thing that makes
+/// a quality stick on Twitch/AVPlayer — selecting Source on the master and
+/// capping `preferredPeakBitRate` is just a ceiling, so ABR keeps serving a
+/// lower rendition. The spotlight primary pins Source; everything else pins a
+/// light, low-bitrate rendition.
 enum MultiviewQualityTier {
-  /// Spotlight primary: no bitrate cap (adapt up to the source).
+  /// Spotlight primary: the highest "Source" rendition, full sharpness.
   case source
-  /// A grid tile (up to a quarter of the screen): mid cap.
-  case standard
-  /// A tiny spotlight filmstrip thumbnail: low cap.
-  case thumbnail
-
-  /// `0` means "unlimited" — `AVPlayerItem.preferredPeakBitRate` treats 0 as no
-  /// cap, letting the player adapt up to the source rendition.
-  var peakBitRate: Double {
-    switch self {
-    case .source: return 0
-    case .standard: return 2_200_000
-    case .thumbnail: return 800_000
-    }
-  }
+  /// A small tile (grid quadrant or spotlight filmstrip thumbnail): a light,
+  /// low-bitrate rendition that stays cheap to decode.
+  case light
 }
 
 /// One tile in a multiview grid: a channel bound to its own `AVPlayer`.
@@ -58,10 +48,9 @@ final class MultiviewPane: Identifiable {
   var hasError = false
   /// Whether this pane currently owns audio (mirrors the focused pane).
   var isAudible = false
-  /// Which quality budget this pane is currently loaded at, chosen by how large
-  /// it renders. The spotlight primary uses the full source playlist; grid tiles
-  /// use a mid preview cap; tiny spotlight filmstrip thumbnails use the lowest.
-  @ObservationIgnored var qualityTier: MultiviewQualityTier = .standard
+  /// Which rendition this pane is currently pinned to. The spotlight primary
+  /// pins Source; every other tile pins the light, low-bitrate rendition.
+  @ObservationIgnored var qualityTier: MultiviewQualityTier = .light
 
   @ObservationIgnored fileprivate var resolveTask: Task<Void, Never>?
 
@@ -112,11 +101,12 @@ final class MultiviewController {
     for pane in panes { load(pane) }
   }
 
-  /// (Re)resolve a single pane's stream URL and start it muted. Every pane loads
-  /// the full master playlist so all renditions are available; the per-tile
-  /// bitrate cap (set here and adjustable live in ``refreshQuality``) keeps the
-  /// small tiles light while letting the spotlight primary climb to source
-  /// quality without a reload.
+  /// (Re)resolve a single pane's stream and start it muted. Each tier pins a
+  /// specific rendition's media playlist: the spotlight primary pins Source for
+  /// real sharpness, while small tiles pin a light, low-bitrate rendition so a
+  /// 2×2 wall stays cheap. Changing tier swaps the item (a quick reload that the
+  /// tile masks with the channel thumbnail), which is the only way to actually
+  /// move quality — an ABR ceiling on the master never climbs to Source.
   func load(_ pane: MultiviewPane) {
     pane.isLoading = true
     pane.hasError = false
@@ -125,7 +115,10 @@ final class MultiviewController {
     pane.resolveTask = Task { [weak pane] in
       guard let pane else { return }
       do {
-        let url = try await PlaybackService.hlsURL(for: pane.channel.login)
+        let url = switch tier {
+        case .source: try await PlaybackService.sourceHLSURL(for: pane.channel.login)
+        case .light: try await PlaybackService.lightHLSURL(for: pane.channel.login)
+        }
         guard !Task.isCancelled else { return }
         let asset = AVURLAsset(
           url: url,
@@ -133,8 +126,6 @@ final class MultiviewController {
         )
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = 1.0
-        // Cap the starting rendition by tier; 0 = unlimited for the spotlight.
-        item.preferredPeakBitRate = tier.peakBitRate
         pane.player.replaceCurrentItem(with: item)
         pane.player.isMuted = !pane.isAudible
         pane.player.play()
@@ -218,12 +209,11 @@ final class MultiviewController {
     refreshQuality()
   }
 
-  /// The quality tier a pane should currently run at, by how large it renders:
-  /// the spotlight primary gets the full source; its small filmstrip thumbnails
-  /// get the lowest tier; grid tiles get the mid tier.
+  /// The tier a pane should run at: only the spotlight primary gets Source;
+  /// every other tile (grid quadrant or filmstrip thumbnail) stays light. In
+  /// grid mode there is no primary, so all panes are light.
   private func desiredTier(for pane: MultiviewPane) -> MultiviewQualityTier {
-    guard layout == .spotlight else { return .standard }
-    return pane.id == primaryPane?.id ? .source : .thumbnail
+    layout == .spotlight && pane.id == primaryPane?.id ? .source : .light
   }
 
   /// Recompute each pane's desired quality tier without reloading anything.
@@ -231,21 +221,17 @@ final class MultiviewController {
     for pane in panes { pane.qualityTier = desiredTier(for: pane) }
   }
 
-  /// Re-evaluate quality tiers and apply them. Because every pane already holds
-  /// the full master playlist, a tier change is just a new bitrate cap on the
-  /// live item — AVPlayer's ABR adapts up/down within a few segments with no
-  /// reload or black flash. Only panes that never started (or errored) are
-  /// reloaded.
+  /// Re-evaluate quality tiers and reload only the panes whose tier changed.
+  /// Quality is pinned per rendition, so a change means a different media
+  /// playlist — that requires swapping the item. Only the promoted/demoted pane
+  /// reloads (the rest keep playing), and the tile masks the swap with the
+  /// channel thumbnail so there's no black flash.
   private func refreshQuality() {
     for pane in panes {
       let desired = desiredTier(for: pane)
       guard desired != pane.qualityTier else { continue }
       pane.qualityTier = desired
-      if pane.player.currentItem != nil, !pane.hasError {
-        pane.player.currentItem?.preferredPeakBitRate = desired.peakBitRate
-      } else {
-        load(pane)
-      }
+      load(pane)
     }
   }
 

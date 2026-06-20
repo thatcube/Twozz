@@ -64,7 +64,12 @@ struct PlaybackService {
     private static let accessTokenHash = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
     private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     private static let previewURLCache = PreviewURLCache()
+    private static let variantURLCache = PreviewURLCache()
     private static let previewURLCacheTTL: TimeInterval = 120
+    /// Target bitrate for the light multiview tile rendition (~480p). Low enough
+    /// that four concurrent decodes stay cheap and the small tiles read as
+    /// clearly lighter than the spotlight's Source rendition.
+    private static let multiviewLightTargetBitrate = 800_000
     private static let previewTargetBitrate = 1_500_000
     private static let previewMaxBitrate = 2_200_000
     private static let previewMinBitrate = 350_000
@@ -108,6 +113,55 @@ struct PlaybackService {
         let master = buildUsherURL(channel: channel, token: token)
         let qualities = try await fetchQualities(master)
         return StreamPlayback(master: master, qualities: qualities)
+    }
+
+    /// Pinned media-playlist URL for the highest "Source" rendition. Multiview's
+    /// spotlight primary uses this so it is genuinely sharp: selecting Source on
+    /// the *master* and capping `preferredPeakBitRate` only sets a ceiling, so
+    /// ABR keeps serving a lower rendition (the same reason the main player pins
+    /// Source instead of trusting the master).
+    static func sourceHLSURL(for channel: String) async throws -> URL {
+        try await pinnedVariantURL(for: channel, target: .max)
+    }
+
+    /// Pinned media-playlist URL for a light, low-bitrate rendition used by the
+    /// small multiview tiles (grid quadrants and spotlight filmstrip thumbnails),
+    /// so they stay cheap to decode and visibly lighter than the spotlight.
+    static func lightHLSURL(for channel: String) async throws -> URL {
+        try await pinnedVariantURL(for: channel, target: multiviewLightTargetBitrate)
+    }
+
+    /// Resolves a channel and pins the single video rendition closest to
+    /// `target` bits/sec (or the highest when `target == .max`). Pinning the
+    /// rendition's own media playlist — rather than the master — is what makes
+    /// the chosen quality stick, since a media playlist carries one rendition and
+    /// leaves ABR nothing to downshift to. Cached briefly per channel+target.
+    private static func pinnedVariantURL(for channel: String, target: Int) async throws -> URL {
+        let normalized = channel.lowercased()
+        let key = "\(normalized)#\(target)"
+        if let cached = await variantURLCache.value(for: key, now: Date()) {
+            return cached
+        }
+
+        let playback = try await resolve(for: normalized)
+        let videos = playback.qualities.filter { !$0.isAudioOnly }
+        let selected: URL
+        if target == .max {
+            // qualities are sorted bitrate-descending, so the first is Source.
+            selected = videos.first?.url ?? playback.master
+        } else if let best = videos.min(by: {
+            abs($0.bitrate - target) < abs($1.bitrate - target)
+        }) {
+            selected = best.url
+        } else {
+            selected = playback.master
+        }
+        await variantURLCache.insert(
+            selected,
+            for: key,
+            expiresAt: Date().addingTimeInterval(previewURLCacheTTL)
+        )
+        return selected
     }
 
     /// Returns a lower-bitrate live stream URL tailored for lightweight previews

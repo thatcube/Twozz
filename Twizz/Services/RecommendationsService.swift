@@ -23,7 +23,7 @@ final class RecommendationsService {
         }
 
         do {
-            async let channelsTask = fetchRecommendedChannels(limit: 24)
+            async let channelsTask = fetchRecommendedChannels(limit: 30)
             async let categoriesTask = fetchRecommendedCategories(limit: 20)
             let (loadedChannels, loadedCategories) = try await (channelsTask, categoriesTask)
             channels = loadedChannels
@@ -55,6 +55,12 @@ final class RecommendationsService {
 
     // MARK: - GQL: Recommended Channels (top live streams)
 
+    /// Fetches the most-viewed live channels in viewer-count order, with the
+    /// viewer's language filter applied server-side. Twitch's `streams`
+    /// connection caps `first` at 30 per request, and paginating past that
+    /// requires an integrity token the anonymous public client can't mint — so
+    /// this is the full ranked page for the chosen language. "Top streams" then
+    /// only hides channels the viewer marked "Not interested".
     private func fetchRecommendedChannels(limit: Int) async throws -> [FollowedChannel] {
         struct StreamNode: Decodable {
             let id: String?

@@ -36,10 +36,11 @@ struct HomeView: View {
   @State private var refreshToast: RefreshToastState?
   @State private var goLive = GoLiveWatcher()
   @State private var goLiveSettings = GoLiveNotificationSettings()
-  /// "Top streams" recommendations with already-followed and personalized
-  /// channels filtered out. Cached here and recomputed only when one of the
-  /// source lists changes, so we don't rebuild the lookup sets and refilter on
-  /// every HomeView body pass (focus changes, scrolling, animations).
+  /// "Top streams" — the most-viewed live channels (after the language filter),
+  /// in viewer-count order, with only "Not interested" channels removed. Cached
+  /// here and recomputed only when the source list or block list changes, so we
+  /// don't rebuild the filter on every HomeView body pass (focus changes,
+  /// scrolling, animations).
   @State private var topStreams: [FollowedChannel] = []
   /// Followed channels that are live right now — the pool multiview draws from.
   /// Memoized (rather than a computed `filter` over `follows.channels`) so the
@@ -76,7 +77,11 @@ struct HomeView: View {
   /// `MultiviewSetupView` filters each to live and dedupes across sections.
   private var multiviewSections: [MultiviewChannelSection] {
     var sections: [MultiviewChannelSection] = [
-      MultiviewChannelSection(id: "following", title: "Following", channels: liveFollowedChannels)
+      MultiviewChannelSection(
+        id: "following",
+        title: follows.isUsingDemoData ? "Trending" : "Following",
+        channels: liveFollowedChannels
+      )
     ]
     if personalizedEnabled, !personalized.channels.isEmpty {
       sections.append(
@@ -534,14 +539,9 @@ struct HomeView: View {
   }
 
   private func recomputeTopStreams() {
-    let followedIDs = Set(follows.channels.map(\.id))
-    let personalizedLogins = Set(personalized.channels.map { $0.login.lowercased() })
     let blocked = feedback.blockedLogins
     topStreams = recommendations.channels.filter {
-      let login = $0.login.lowercased()
-      return !followedIDs.contains($0.id)
-        && !personalizedLogins.contains(login)
-        && !blocked.contains(login)
+      !blocked.contains($0.login.lowercased())
     }
   }
 

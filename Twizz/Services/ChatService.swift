@@ -149,7 +149,14 @@ final class ChatService {
   let youtubePollMinDelayMs: UInt64 = 900
   let youtubeUserAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-  let maxBufferedMessages = 1800
+  /// Rolling cap on retained chat lines. The live list backs a `LazyVStack`
+  /// whose `ForEach` is diffed on every append, and both `visibleChatMessages`
+  /// and the gesture scroll loop scan/copy this array (the loop does so up to
+  /// 60×/sec while swiping). All of that scales with the count, so on a busy or
+  /// raided channel a large buffer is a steady scroll-cost tax. 500 keeps a
+  /// generous scrollback window (~3× Twitch web's ~150) while staying light on
+  /// the Apple TV's modest CPU.
+  let maxBufferedMessages = 500
 
   func configureExperimentalYouTubeMerge(enabled: Bool, channelOrURL: String) {
     youtubeMergeEnabled = enabled

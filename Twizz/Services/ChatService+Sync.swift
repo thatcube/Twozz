@@ -142,11 +142,16 @@ extension ChatService {
         continue
       }
 
-      var released: [ChatMessage] = []
-      while let first = syncBuffer.first, first.releaseAt <= now {
-        released.append(first.message)
-        syncBuffer.removeFirst()
+      // syncBuffer is kept sorted by releaseAt, so the releasable messages are a
+      // contiguous prefix. Count them and drop them in one shot — repeatedly
+      // calling removeFirst() shifts the whole array each time (O(n²) when a big
+      // burst drains at once).
+      var releaseCount = 0
+      while releaseCount < syncBuffer.count, syncBuffer[releaseCount].releaseAt <= now {
+        releaseCount += 1
       }
+      let released = syncBuffer.prefix(releaseCount).map(\.message)
+      syncBuffer.removeFirst(releaseCount)
       appendVisible(released)
       pendingSyncMessageCount = syncBuffer.count
     }

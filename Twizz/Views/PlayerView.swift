@@ -1439,16 +1439,16 @@ struct PlayerView: View {
         errorMessage == nil, !isOffline
       {
         VStack {
-          HStack {
-            if !isVOD {
-              PlayerInfoBadge(
-                latency: latencyReadout,
-                hermes: hermes,
-                showLatency: showLatencyBadge,
-                showViewerCount: showViewerCount
-              )
-            }
-            Spacer()
+          HStack(alignment: .top) {
+            PlayerTitleHeader(
+              title: streamTitle.isEmpty ? channelDisplayName : streamTitle,
+              latency: latencyReadout,
+              hermes: hermes,
+              showSubheader: !isVOD,
+              showLatency: showLatencyBadge,
+              showViewerCount: showViewerCount
+            )
+            Spacer(minLength: 24)
             if let remaining = sleepRemainingSeconds {
               SleepCountdownBadge(text: SleepCountdownBadge.format(seconds: remaining))
             } else if sleepUntilStreamEnds {
@@ -1466,7 +1466,22 @@ struct PlayerView: View {
         }
         .padding(.top, 36)
         .padding(.leading, 40)
-        .padding(.trailing, 40)
+        .padding(.trailing, controlsTrailingInset)
+        .background(
+          LinearGradient(
+            stops: [
+              .init(color: .black.opacity(1.0), location: 0.0),
+              .init(color: .black.opacity(0.72), location: 0.44),
+              .init(color: .clear, location: 1.0),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+          )
+          .frame(maxWidth: .infinity)
+          .frame(height: 280)
+          .allowsHitTesting(false),
+          alignment: .top
+        )
       }
 
       // Only expose the video focus target while controls are hidden.
@@ -1648,41 +1663,89 @@ struct PlayerView: View {
 
   var bottomOverlay: some View {
     VStack(spacing: 18) {
+      if rewindAvailable {
+        Button {
+          toggleRewindPlayPause()
+        } label: {
+          RewindScrubBar(readout: rewindReadout, isFocused: focus == .rewindScrubber)
+        }
+        .buttonStyle(ScrubBarButtonStyle())
+        // Mutually exclusive focusability with the chat composer: while a chat
+        // field is focused the bar removes itself from the focus engine, so a
+        // left-press out of chat can't land here (it goes to the collapse
+        // button instead). Combined with the composer doing the reverse, the
+        // engine never treats the two as neighbors — no sideways escape, no
+        // focus flash, no after-the-fact reverts.
+        .focusable(scrubberFocusable)
+        .focused($focus, equals: .rewindScrubber)
+        .accessibilityLabel(rewindReadout.isVOD ? "Timeline" : "Live timeline")
+        .accessibilityValue(rewindAccessibilityValue)
+        .accessibilityHint("Swipe up or down to seek ten seconds")
+        .accessibilityAdjustableAction { direction in
+          guard !isScrubbing else { return }
+          switch direction {
+          case .increment: rewindStep(rewindStepSeconds)
+          case .decrement: rewindStep(-rewindStepSeconds)
+          @unknown default: break
+          }
+        }
+        .onMoveCommand { direction in
+          // Left/right step the timeline. Down drops to the control row (the bar
+          // now sits *above* the buttons); up is left to the focus engine.
+          switch direction {
+          case .left:
+            if !isScrubbing { rewindStep(-rewindStepSeconds) }
+          case .right:
+            if !isScrubbing { rewindStep(rewindStepSeconds) }
+          case .down:
+            focus = .quality
+          default:
+            break
+          }
+        }
+        .focusSection()
+        .frame(maxWidth: .infinity)
+      }
+
       HStack(alignment: .center, spacing: 24) {
-      HStack(alignment: .center, spacing: 12) {
         Button {
           presentChannelPage()
         } label: {
-          Group {
-            if let channelAvatarURL {
-              CachedAsyncImage(url: channelAvatarURL) { image in
-                image
-                  .resizable()
-                  .scaledToFill()
-              } placeholder: {
+          HStack(spacing: 12) {
+            Group {
+              if let channelAvatarURL {
+                CachedAsyncImage(url: channelAvatarURL) { image in
+                  image
+                    .resizable()
+                    .scaledToFill()
+                } placeholder: {
+                  ZStack {
+                    Circle().fill(.white.opacity(0.16))
+                    Icon(glyph: .userCircle, size: 44)
+                      .foregroundStyle(.white.opacity(0.85))
+                  }
+                }
+              } else {
                 ZStack {
                   Circle().fill(.white.opacity(0.16))
-                  Icon(glyph: .userCircle, size: 64)
+                  Icon(glyph: .userCircle, size: 44)
                     .foregroundStyle(.white.opacity(0.85))
                 }
               }
-            } else {
-              ZStack {
-                Circle().fill(.white.opacity(0.16))
-                Icon(glyph: .userCircle, size: 64)
-                  .foregroundStyle(.white.opacity(0.85))
-              }
             }
+            .frame(width: 46, height: 46)
+            .clipShape(Circle())
+            // Tuck the avatar toward the pill's leading cap so the rounded-left
+            // corner stays a crisp, near-equidistant inset around the circle.
+            .padding(.leading, -6)
+
+            Text(channelDisplayName.isEmpty ? activeChannel : channelDisplayName)
+              .font(.headline)
+              .lineLimit(1)
+              .truncationMode(.tail)
           }
-          .frame(width: 64, height: 64)
-          .clipShape(Circle())
-          // Let the avatar fill more of the button: the larger frame is pulled
-          // back with negative padding so the glass button keeps its original
-          // footprint, just with less empty space around the image.
-          .padding(-6)
         }
-        .TwizzControlButtonStyle(shape: .circle)
-        .buttonBorderShape(.circle)
+        .TwizzControlButtonStyle()
         .accessibilityLabel("Channel info")
         .accessibilityHint("Opens the channel page")
         .focused($focus, equals: .streamInfo)
@@ -1692,26 +1755,12 @@ struct PlayerView: View {
             focus = .quality
           case .left:
             focus = .streamInfo
-          case .down:
+          case .up:
             if rewindAvailable { focus = .rewindScrubber }
           default:
             break
           }
         }
-
-        Text(streamTitle.isEmpty ? channelDisplayName : streamTitle)
-          .font(.headline)
-          .foregroundStyle(.white)
-          .lineLimit(2)
-          .minimumScaleFactor(0.5)
-          .truncationMode(.tail)
-          .fixedSize(horizontal: false, vertical: true)
-          .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
-          // Cap the title to the buttons' height so a tall title centers against
-          // the buttons instead of growing the bottom-pinned row and pushing the
-          // buttons upward off their fixed position.
-          .frame(maxWidth: .infinity, maxHeight: controlButtonsHeight > 0 ? controlButtonsHeight : nil, alignment: .leading)
-      }
 
       Spacer(minLength: 18)
 
@@ -1779,7 +1828,7 @@ struct PlayerView: View {
             focus = .streamInfo
           case .right:
             focus = .chatSettingsButton
-          case .down:
+          case .up:
             if rewindAvailable { focus = .rewindScrubber }
           default:
             break
@@ -1807,7 +1856,7 @@ struct PlayerView: View {
               focus = .streamInfo
             case .right:
               focus = .chatSettingsButton
-            case .down:
+            case .up:
               if rewindAvailable { focus = .rewindScrubber }
             default:
               break
@@ -1828,7 +1877,7 @@ struct PlayerView: View {
             focus = .quality
           case .right:
             focus = .chatToggle
-          case .down:
+          case .up:
             if rewindAvailable { focus = .rewindScrubber }
           default:
             break
@@ -1854,7 +1903,7 @@ struct PlayerView: View {
             if showChat {
               focus = chatFocusAnchor
             }
-          case .down:
+          case .up:
             if rewindAvailable { focus = .rewindScrubber }
           default:
             break
@@ -1883,51 +1932,6 @@ struct PlayerView: View {
     // list) offers competing focus targets and a quick swipe can fling focus out of
     // the row or drop it entirely — which never happens with chat closed.
     .focusSection()
-
-      if rewindAvailable {
-        Button {
-          toggleRewindPlayPause()
-        } label: {
-          RewindScrubBar(readout: rewindReadout, isFocused: focus == .rewindScrubber)
-        }
-        .buttonStyle(ScrubBarButtonStyle())
-        // Mutually exclusive focusability with the chat composer: while a chat
-        // field is focused the bar removes itself from the focus engine, so a
-        // left-press out of chat can't land here (it goes to the collapse
-        // button instead). Combined with the composer doing the reverse, the
-        // engine never treats the two as neighbors — no sideways escape, no
-        // focus flash, no after-the-fact reverts.
-        .focusable(scrubberFocusable)
-        .focused($focus, equals: .rewindScrubber)
-        .accessibilityLabel(rewindReadout.isVOD ? "Timeline" : "Live timeline")
-        .accessibilityValue(rewindAccessibilityValue)
-        .accessibilityHint("Swipe up or down to seek ten seconds")
-        .accessibilityAdjustableAction { direction in
-          guard !isScrubbing else { return }
-          switch direction {
-          case .increment: rewindStep(rewindStepSeconds)
-          case .decrement: rewindStep(-rewindStepSeconds)
-          @unknown default: break
-          }
-        }
-        .onMoveCommand { direction in
-          // Left/right step the timeline. Up is intentionally left to the focus
-          // engine: forcing an explicit target here fought the engine's own
-          // upward move and produced a visible double-hop (it would land on the
-          // nearest control, then yank sideways to ours). Sideways escape to
-          // chat is prevented structurally (see .focusable above).
-          switch direction {
-          case .left:
-            if !isScrubbing { rewindStep(-rewindStepSeconds) }
-          case .right:
-            if !isScrubbing { rewindStep(rewindStepSeconds) }
-          default:
-            break
-          }
-        }
-        .focusSection()
-        .frame(maxWidth: .infinity)
-      }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.leading, 48)
@@ -2344,7 +2348,13 @@ struct PlayerView: View {
   /// Distance the bottom control row sits above the screen's bottom edge. Kept
   /// generous so the row (and the chat composer it aligns with) clears typical TV
   /// overscan instead of hugging the very bottom.
-  let controlsBottomPadding: CGFloat = 8
+  /// Bottom inset for the control cluster. Lifts the row 16pt off the very bottom
+  /// edge, and in floating Glass chat mode adds the pane's edge inset so the
+  /// buttons line up with the floating chat's bottom margin.
+  var controlsBottomPadding: CGFloat {
+    let glassLift = (chatLayoutMode == .glass && showChat) ? GlassChatPaneStyle.edgeInset : 0
+    return 24 + glassLift
+  }
   /// Measured height of the right-side control buttons row. The stream title is
   /// capped to this so a long (2-line) title can't grow the row and shove the
   /// buttons up off their fixed position — instead the title stays vertically
@@ -2524,9 +2534,9 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 16)
     .padding(.top, 12)
-    // Match the composer's bottom gap to the 16pt left/right inset so it sits
-    // evenly inside the glass pane's rounded corners.
-    .padding(.bottom, 16)
+    // Lift the composer off the pane's bottom edge: the base 16pt even inset plus
+    // an extra 16pt of breathing room so it doesn't crowd the bottom of the page.
+    .padding(.bottom, 32)
     .background(
       // In Glass mode the composer shares the chat message list's exact wash
       // (`chromeGlassTint(0.22)`) over the pane's glass, so "Send a message" reads
@@ -3682,76 +3692,74 @@ final class LatencyReadout {
   }
 }
 
-/// Top-left HUD info chip. Holds the live viewer count and/or the latency
-/// readout in a single frosted Liquid-Glass capsule (matching the player's other
-/// passive chips). Both segments are live-only and independently toggleable:
-/// viewer count is on by default, latency rides the Diagnostics Overlay setting.
+/// Top-left player header: the stream title in a large, left-aligned style with a
+/// theme-respecting scrim behind it (applied by the caller), plus a plain
+/// text + icon subheader holding the live viewer count and/or latency readout.
 /// Reads `hermes.viewerCount` and `latency` here (not in the player body) so this
 /// leaf re-renders in isolation as those values tick.
-private struct PlayerInfoBadge: View {
+private struct PlayerTitleHeader: View {
+  let title: String
   @Bindable var latency: LatencyReadout
   let hermes: HermesEventService
+  /// Whether the viewer/latency subheader may appear at all (live only).
+  let showSubheader: Bool
   let showLatency: Bool
   let showViewerCount: Bool
-  @Environment(\.glassDisabled) private var glassDisabled
-  @Environment(\.themePalette) private var palette
 
-  /// Foreground for text/dividers on the chip: dark on the Light-theme opaque
-  /// fill, white on the translucent glass over video.
-  private var chipForeground: Color {
-    palette.chromeOnOpaque
-  }
+  /// Title/subheader foreground. The header sits on the always-dark top scrim
+  /// (matching the bottom scrim), so white reads in every theme.
+  private var foreground: Color { .white }
 
-  /// Brick red from the requested reference, nudged just bright enough to stay
-  /// legible against the frosted material.
-  private static let viewerTint = Color(red: 0.74, green: 0.20, blue: 0.16)
+  /// Brick red from the requested reference, kept legible over the scrim.
+  private static let viewerTint = Color(red: 0.86, green: 0.26, blue: 0.22)
 
   var body: some View {
-    let viewers = showViewerCount ? hermes.viewerCount : nil
+    VStack(alignment: .leading, spacing: 10) {
+      Text(title)
+        .font(.title3.weight(.bold))
+        .foregroundStyle(foreground)
+        .lineLimit(2)
+        .minimumScaleFactor(0.6)
+        .fixedSize(horizontal: false, vertical: true)
+        .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
 
-    return Group {
-      if viewers != nil || showLatency {
-        HStack(spacing: 12) {
-          if let viewers {
-            HStack(spacing: 7) {
-              Icon(glyph: .user, size: 30)
-                .foregroundStyle(Self.viewerTint)
-              Text(viewers.formatted(.number))
-                .font(.footnote)
-                .fontWeight(.semibold)
-                .foregroundStyle(chipForeground)
-                .monospacedDigit()
-                .contentTransition(.numericText())
+      if showSubheader {
+        let viewers = showViewerCount ? hermes.viewerCount : nil
+        if viewers != nil || showLatency {
+          HStack(spacing: 16) {
+            if let viewers {
+              HStack(spacing: 8) {
+                Icon(glyph: .user, size: 24)
+                  .foregroundStyle(Self.viewerTint)
+                Text(viewers.formatted(.number))
+                  .font(.footnote)
+                  .fontWeight(.semibold)
+                  .foregroundStyle(foreground)
+                  .monospacedDigit()
+                  .contentTransition(.numericText())
+              }
+              .accessibilityElement(children: .ignore)
+              .accessibilityLabel("\(viewers.formatted(.number)) watching")
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(viewers.formatted(.number)) watching")
-          }
 
-          if viewers != nil && showLatency {
-            Capsule()
-              .fill(chipForeground.opacity(0.18))
-              .frame(width: 1, height: 16)
-          }
-
-          if showLatency {
-            HStack(spacing: 8) {
-              Circle()
-                .fill(latency.color)
-                .frame(width: 8, height: 8)
-              Text(latency.label)
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(chipForeground)
+            if showLatency {
+              HStack(spacing: 8) {
+                Circle()
+                  .fill(latency.color)
+                  .frame(width: 8, height: 8)
+                Text(latency.label)
+                  .font(.caption)
+                  .fontWeight(.semibold)
+                  .foregroundStyle(foreground)
+              }
             }
           }
+          .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 1)
+          .animation(.easeInOut(duration: 0.25), value: viewers)
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 18)
-        .padding(.vertical, 9)
-        .modifier(HUDChipGlassStyle())
-        .animation(.easeInOut(duration: 0.25), value: viewers)
       }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
@@ -3836,10 +3844,11 @@ private struct RewindScrubBar: View {
   @Environment(\.glassDisabled) private var glassDisabled
   @Environment(\.themePalette) private var palette
 
-  /// Foreground for the track/orb/label: dark on the Light-theme opaque fill,
-  /// white on the translucent glass over video.
+  /// Foreground for the track/orb/label. The bar is now chrome-less and floats
+  /// directly on the player's (always-dark) bottom scrim, so white reads in every
+  /// theme.
   private var chromeForeground: Color {
-    palette.chromeOnOpaque
+    .white
   }
 
   private func behindLabel() -> String {
@@ -3864,7 +3873,6 @@ private struct RewindScrubBar: View {
   }
 
   var body: some View {
-    let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
     let trackHeight: CGFloat = 6
     let orbSize: CGFloat = isFocused ? 30 : 16
     let fillColor = (readout.isAtLiveEdge && !readout.isVOD) ? Color.red : chromeForeground
@@ -3917,42 +3925,9 @@ private struct RewindScrubBar: View {
       }
       .frame(minWidth: 72, alignment: .trailing)
     }
-    .padding(.horizontal, 28)
-    .padding(.vertical, 16)
-    .modifier(ScrubBarGlassBackground(shape: shape, isFocused: isFocused))
-  }
-}
-
-/// Liquid Glass backing for the scrub bar pill. Stays the *same* subtle glass at
-/// rest and focused (a faint white-tint lift on focus), mirroring the chat pane
-/// glass, so the focus signal reads on the orb rather than the container. Falls
-/// back to `.ultraThinMaterial` on systems older than tvOS 26.
-private struct ScrubBarGlassBackground: ViewModifier {
-  let shape: RoundedRectangle
-  let isFocused: Bool
-  @Environment(\.glassDisabled) private var glassDisabled
-  @Environment(\.themePalette) private var palette
-
-  @ViewBuilder
-  func body(content: Content) -> some View {
-    if glassDisabled {
-      content
-        .background(palette.chromeOpaqueSurface, in: shape)
-        .overlay(shape.strokeBorder(palette.chromeOpaqueBorder.opacity(isFocused ? 1.6 : 1.0), lineWidth: 1))
-        .clipShape(shape)
-    } else if #available(tvOS 26.0, *) {
-      content
-        // Same translucent material as the Glass chat pane, with the stronger
-        // over-video wash so the bar reads as light as the chat over dark video.
-        .background(palette.chromeOverVideoTint(), in: shape)
-        .glassEffect(isFocused ? .regular.tint(.white.opacity(0.10)) : .regular, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.22 : 0.12), lineWidth: 1))
-    } else {
-      content
-        .background(.ultraThinMaterial, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(isFocused ? 0.22 : 0.10), lineWidth: 1))
-        .clipShape(shape)
-    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .shadow(color: .black.opacity(0.4), radius: 3, x: 0, y: 1)
   }
 }
 

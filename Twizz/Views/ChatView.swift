@@ -146,6 +146,7 @@ struct ChatView: View {
         // targets so the stream of updates reads as a smooth drag.
         guard let target else { return }
         pendingScrollWork?.cancel()
+        pendingScrollWork = nil
         if target.animated {
           withAnimation(.spring(response: 0.24, dampingFraction: 0.84)) {
             proxy.scrollTo(target.id, anchor: target.anchor)
@@ -154,7 +155,12 @@ struct ChatView: View {
           proxy.scrollTo(target.id, anchor: target.anchor)
         }
       }
-      .onChange(of: messages.count) {
+      .onChange(of: messages.last?.id) {
+        // Keyed off the newest message id rather than `messages.count`: the chat
+        // buffer is capped (see ChatService.maxBufferedMessages), so on a busy
+        // channel each new message trims one off the front and the count stays
+        // pinned at the cap forever. A count-based trigger would stop firing and
+        // auto-scroll would silently freeze; the last id changes on every message.
         guard autoScroll, let last = messages.last else { return }
         // Keep the target current (cheap) so a burst still lands on the newest
         // message, but only run one *un-animated* scroll per ~100ms. Animating a
@@ -175,6 +181,7 @@ struct ChatView: View {
         // Resuming after a pause: snap back to the newest message.
         guard isOn, let last = messages.last else { return }
         pendingScrollWork?.cancel()
+        pendingScrollWork = nil
         withAnimation(.easeOut(duration: 0.18)) {
           proxy.scrollTo(last.id, anchor: .bottom)
         }

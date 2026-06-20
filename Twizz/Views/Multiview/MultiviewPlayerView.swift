@@ -636,7 +636,12 @@ private struct MultiviewAddView: View {
 /// channel picker first, then the live grid. Keeps the chained-presentation
 /// timing issues of stacked covers out of the caller.
 struct MultiviewRootView: View {
-  let liveChannels: [FollowedChannel]
+  /// Discovery sections offered in the setup picker (Following first, then
+  /// recommendations and popular).
+  let sections: [MultiviewChannelSection]
+  /// Every live channel across all sections — the pool the in-session "Add"
+  /// picker draws from, so additions aren't limited to follows.
+  let availablePool: [FollowedChannel]
   /// When non-nil, multiview opens straight into the video wall with this
   /// roster, skipping the setup picker — used to restore a session after the
   /// viewer escalated a pane to full-screen and pressed Back.
@@ -653,12 +658,12 @@ struct MultiviewRootView: View {
       if let startedChannels {
         MultiviewPlayerView(
           channels: startedChannels,
-          availableChannels: liveChannels,
+          availableChannels: availablePool,
           onEscalate: onWatchFull
         )
       } else {
         MultiviewSetupView(
-          channels: liveChannels,
+          sections: sections,
           onStart: { startedChannels = $0 },
           onCancel: { dismiss() }
         )

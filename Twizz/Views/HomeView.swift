@@ -75,6 +75,39 @@ struct HomeView: View {
     liveFollowedChannels = follows.channels.filter(\.isLive)
   }
 
+  /// Discovery sections for the multiview setup picker: Following first (the
+  /// most-wanted pool), then personalized recommendations, then popular streams.
+  /// `MultiviewSetupView` filters each to live and dedupes across sections.
+  private var multiviewSections: [MultiviewChannelSection] {
+    var sections: [MultiviewChannelSection] = [
+      MultiviewChannelSection(id: "following", title: "Following", channels: liveFollowedChannels)
+    ]
+    if personalizedEnabled, !personalized.channels.isEmpty {
+      sections.append(
+        MultiviewChannelSection(id: "recommended", title: "Recommended for you", channels: personalized.channels)
+      )
+    }
+    if !topStreams.isEmpty {
+      sections.append(
+        MultiviewChannelSection(id: "popular", title: "Popular right now", channels: topStreams)
+      )
+    } else if !recommendations.channels.isEmpty {
+      sections.append(
+        MultiviewChannelSection(id: "popular", title: "Popular right now", channels: recommendations.channels)
+      )
+    }
+    return sections
+  }
+
+  /// Every live channel the in-session "Add" picker can offer — the union of all
+  /// section pools, deduped, so additions aren't limited to follows.
+  private var multiviewAvailablePool: [FollowedChannel] {
+    var seen = Set<String>()
+    return multiviewSections
+      .flatMap(\.channels)
+      .filter { $0.isLive && seen.insert($0.id).inserted }
+  }
+
   private var targetVisibleCards: CGFloat {
     CGFloat(streamCardSize.visibleCardCount)
   }
@@ -299,7 +332,8 @@ struct HomeView: View {
       }
     }) {
       MultiviewRootView(
-        liveChannels: liveFollowedChannels,
+        sections: multiviewSections,
+        availablePool: multiviewAvailablePool,
         initialChannels: multiviewInitialChannels,
         onWatchFull: { channel, roster in
           pendingMultiviewWatch = channel
@@ -371,7 +405,7 @@ struct HomeView: View {
         Spacer()
 
         HStack(spacing: 8) {
-          if liveFollowedChannels.count >= 2 {
+          if multiviewAvailablePool.count >= 2 {
             Button {
               multiviewInitialChannels = nil
               showingMultiview = true

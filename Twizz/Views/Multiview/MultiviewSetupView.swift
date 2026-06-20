@@ -1,15 +1,26 @@
 import SwiftUI
 
+/// One titled group of channels offered on the multiview setup screen — e.g.
+/// "Following", "Recommended for you", "Popular right now". Sections let the
+/// picker double as a discovery surface instead of only listing follows.
+struct MultiviewChannelSection: Identifiable {
+  let id: String
+  let title: String
+  let channels: [FollowedChannel]
+}
+
 /// Picks up to ``multiviewPaneLimit`` live channels to watch together, then
 /// hands the ordered selection to the multiview grid.
 ///
-/// Each option is a real ``StreamChannelCard`` — the same card the Home grid
-/// uses, so it brings the thumbnail, hover-preview video, LIVE/viewer badge,
-/// avatar, and title for free — wrapped in a selection overlay that shows the
-/// pick order, a purple ring when selected, and dims unselected cards once the
+/// Channels are grouped into discovery sections (Following first, then
+/// recommendations and popular streams) and rendered as native horizontal rails
+/// of ``StreamChannelCard`` — the same card the Home grid uses, so each option
+/// brings the thumbnail, hover-preview video, LIVE/viewer badge, avatar, and
+/// title for free — wrapped in a selection overlay that shows the pick order, a
+/// native focus-color ring when selected, and dims unselected cards once the
 /// four-pick limit is reached.
 struct MultiviewSetupView: View {
-  let channels: [FollowedChannel]
+  let sections: [MultiviewChannelSection]
   var onStart: ([FollowedChannel]) -> Void
   var onCancel: () -> Void
 
@@ -18,14 +29,35 @@ struct MultiviewSetupView: View {
   @State private var selectedIDs: [String] = []
   @FocusState private var focusedID: String?
 
-  private let columns = [GridItem(.adaptive(minimum: 360, maximum: 480), spacing: 28)]
+  /// Each card's media is a 16:9 thumbnail; this width keeps roughly three
+  /// cards visible per rail on a 1080/4K tvOS layout.
+  private let cardWidth: CGFloat = 440
 
-  private var liveChannels: [FollowedChannel] { channels.filter(\.isLive) }
+  /// Live channels per section, deduped so a channel that appears in several
+  /// pools is only offered once (in its highest-priority section).
+  private var resolvedSections: [MultiviewChannelSection] {
+    var seen = Set<String>()
+    var result: [MultiviewChannelSection] = []
+    for section in sections {
+      let live = section.channels.filter { $0.isLive && seen.insert($0.id).inserted }
+      if !live.isEmpty {
+        result.append(MultiviewChannelSection(id: section.id, title: section.title, channels: live))
+      }
+    }
+    return result
+  }
+
+  /// Flattened lookup of every offered channel, for resolving the selection.
+  private var allChannels: [FollowedChannel] {
+    resolvedSections.flatMap(\.channels)
+  }
+
+  private var hasChannels: Bool { !resolvedSections.isEmpty }
   private var isAtLimit: Bool { selectedIDs.count >= multiviewPaneLimit }
   private var canStart: Bool { selectedIDs.count >= 2 }
 
   private var orderedSelection: [FollowedChannel] {
-    selectedIDs.compactMap { id in liveChannels.first { $0.id == id } }
+    selectedIDs.compactMap { id in allChannels.first { $0.id == id } }
   }
 
   var body: some View {
@@ -35,16 +67,15 @@ struct MultiviewSetupView: View {
       VStack(alignment: .leading, spacing: 0) {
         header
 
-        if liveChannels.count < 2 {
+        if !hasChannels {
           emptyState
         } else {
           ScrollView {
-            LazyVGrid(columns: columns, spacing: 28) {
-              ForEach(liveChannels) { channel in
-                tile(channel)
+            LazyVStack(alignment: .leading, spacing: 36) {
+              ForEach(resolvedSections) { section in
+                sectionRail(section)
               }
             }
-            .padding(.horizontal, AppLayout.horizontalPadding)
             .padding(.vertical, 28)
           }
         }
@@ -94,6 +125,30 @@ struct MultiviewSetupView: View {
         .multilineTextAlignment(.center)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  // MARK: Section rail
+
+  private func sectionRail(_ section: MultiviewChannelSection) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(section.title)
+        .font(.system(size: 30, weight: .bold))
+        .accessibilityAddTraits(.isHeader)
+        .padding(.horizontal, AppLayout.horizontalPadding)
+
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 28) {
+          ForEach(section.channels) { channel in
+            tile(channel)
+              .frame(width: cardWidth)
+          }
+        }
+        .padding(.horizontal, AppLayout.horizontalPadding)
+        .padding(.vertical, 16)
+      }
+      .scrollClipDisabled()
+    }
+    .focusSection()
   }
 
   // MARK: Tile

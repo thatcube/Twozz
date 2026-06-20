@@ -28,6 +28,10 @@ struct MultiviewSetupView: View {
   @Environment(\.glassDisabled) private var glassDisabled
   /// Selected channel ids, in pick order — that order drives grid placement.
   @State private var selectedIDs: [String] = []
+  /// Set when the user activates a tile that's already at the pick limit; drives
+  /// the "max streams" toast. A fresh token on each rejection restarts the
+  /// auto-dismiss timer so rapid presses keep the toast visible.
+  @State private var limitToastToken: UUID?
   @FocusState private var focusedID: String?
 
   /// Each card's media is a 16:9 thumbnail; this width keeps roughly three
@@ -82,7 +86,45 @@ struct MultiviewSetupView: View {
         }
       }
     }
+    .overlay(alignment: .bottom) {
+      if limitToastToken != nil {
+        limitToast
+          .padding(.bottom, 56)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+      }
+    }
+    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: limitToastToken)
+    .task(id: limitToastToken) {
+      guard limitToastToken != nil else { return }
+      try? await Task.sleep(for: .seconds(2.4))
+      limitToastToken = nil
+    }
     .onExitCommand(perform: onCancel)
+  }
+
+  /// Lightweight, non-focusable toast shown when the viewer tries to pick a 5th
+  /// stream. It never steals focus — the disabled tiles stay reachable — it just
+  /// explains why nothing happened.
+  private var limitToast: some View {
+    HStack(spacing: 12) {
+      Icon(glyph: .alertCircle, size: 26)
+        .foregroundStyle(.secondary)
+      Text("You can watch up to \(multiviewPaneLimit) streams at once")
+        .font(.headline)
+        .foregroundStyle(.primary)
+    }
+    .padding(.horizontal, 28)
+    .padding(.vertical, 18)
+    .background {
+      if glassDisabled {
+        Capsule().fill(palette.chromeOpaqueSurface)
+          .overlay(Capsule().strokeBorder(palette.chromeOpaqueBorder, lineWidth: 1))
+      } else {
+        Capsule().fill(.ultraThinMaterial)
+      }
+    }
+    .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+    .accessibilityElement(children: .combine)
   }
 
   // MARK: Header
@@ -244,7 +286,9 @@ struct MultiviewSetupView: View {
   private func toggle(_ channel: FollowedChannel) {
     if let idx = selectedIDs.firstIndex(of: channel.id) {
       selectedIDs.remove(at: idx)
-    } else if !isAtLimit {
+    } else if isAtLimit {
+      limitToastToken = UUID()
+    } else {
       selectedIDs.append(channel.id)
     }
   }

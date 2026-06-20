@@ -68,6 +68,7 @@ enum Glyph: String {
   case volumeOff = "volume-off"
   case search
   case settings
+  case alertCircle = "alert-circle"
 }
 
 /// Renders a vendored Tabler icon as a template image so it tints with the

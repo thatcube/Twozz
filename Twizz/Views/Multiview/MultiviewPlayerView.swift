@@ -124,7 +124,6 @@ struct MultiviewPlayerView: View {
       if case let .pane(id) = newValue {
         lastPaneID = id
         controller.setAudiblePane(id)
-        controller.setFocusedPane(id)
         // If the focus engine moved back down into a pane, retire the HUD.
         if showingControls {
           withAnimation(.easeOut(duration: 0.25)) { showingControls = false }

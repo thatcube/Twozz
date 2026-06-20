@@ -17,14 +17,13 @@ enum MultiviewLayout {
 /// Quality budget for a single pane. Each tier *pins* a specific rendition (via
 /// `PlaybackService.pinnedHLSURL(targetBitrate:)`) so the quality is guaranteed
 /// rather than left to the master playlist's adaptive logic (which only treats a
-/// bitrate cap as advisory and routinely serves a softer rendition). Changing a
-/// pane's tier is done seamlessly with a make-before-break player swap — the new
-/// rendition is fully preloaded on a second player, then hot-swapped in once it's
-/// actually rendering — so quality moves with no reload, black flash, or stall.
+/// bitrate cap as advisory and routinely serves a softer rendition). A pane's
+/// tier is its structural role; changing it re-pins the pane's single player in
+/// place (we never run a second concurrent decoder per tile — Apple TV's video
+/// decoders are a hard, shared budget).
 enum MultiviewQualityTier {
-  /// Full "Source" quality. Used by the spotlight primary AND any focused pane —
-  /// focusing pre-warms a tile to Source so promoting or opening it is instant
-  /// and already sharp.
+  /// Full "Source" quality. Used only by the spotlight primary (the one large
+  /// pane), so the heaviest rendition is decoded at most once at a time.
   case source
   /// A large grid quadrant (2×2 / side-by-side): a ~720p rendition, sharp enough
   /// not to look soft on a 4K panel while keeping four concurrent decodes sane.
@@ -58,19 +57,17 @@ enum MultiviewQualityTier {
 /// One tile in a multiview grid: a channel bound to its own `AVPlayer`.
 ///
 /// Every pane plays a *pinned* HLS rendition sized to its role (Source for the
-/// spotlight/focused pane, ~720p for grid quadrants, ~480p for filmstrip
-/// thumbnails). Quality changes swap `player` for a fully-preloaded one
-/// (make-before-break) so the on-screen surface re-binds with no stall. Only the
-/// focused pane is unmuted; the rest run silently.
+/// spotlight primary, ~720p for grid quadrants, ~480p for filmstrip thumbnails).
+/// Each pane keeps a *single* player for its whole lifetime — Apple TV's hardware
+/// can only decode so many live streams at once, so we never run a second
+/// concurrent player per tile; a quality change re-pins the existing player's
+/// item in place. Only the focused pane is unmuted; the rest run silently.
 @MainActor
 @Observable
 final class MultiviewPane: Identifiable {
   let id: String
   let channel: FollowedChannel
-  /// The player currently bound to this tile's video surface. Reassigned during a
-  /// seamless quality swap, so it's *observed* (not `@ObservationIgnored`) — the
-  /// surface re-binds to the new, already-rendering player when it changes.
-  private(set) var player: AVPlayer
+  @ObservationIgnored let player: AVPlayer
 
   /// True until the pane's first frame is ready, so the grid can show a
   /// loading state instead of a black tile.
@@ -79,39 +76,20 @@ final class MultiviewPane: Identifiable {
   var hasError = false
   /// Whether this pane currently owns audio (mirrors the focused pane).
   var isAudible = false
-  /// The quality tier this pane is currently running at. Recomputed from layout,
-  /// the spotlight primary, and which pane is focused (focusing pre-warms a tile
-  /// to Source).
+  /// The quality tier this pane is currently running at. Recomputed from the
+  /// layout and the spotlight primary (a purely structural role).
   @ObservationIgnored var qualityTier: MultiviewQualityTier = .grid
 
   @ObservationIgnored fileprivate var resolveTask: Task<Void, Never>?
-  /// In-flight make-before-break quality swap, cancelled if superseded.
-  @ObservationIgnored fileprivate var upgradeTask: Task<Void, Never>?
 
   init(channel: FollowedChannel) {
     self.id = channel.id
     self.channel = channel
-    self.player = MultiviewPane.makePlayer()
-  }
-
-  /// A fresh muted player configured the way every pane player should be.
-  static func makePlayer() -> AVPlayer {
     let player = AVPlayer()
     player.isMuted = true
     player.actionAtItemEnd = .pause
     player.automaticallyWaitsToMinimizeStalling = true
-    return player
-  }
-
-  /// Hot-swap in a fully-prepared player (already rendering the new rendition)
-  /// and tear down the old one. The surface re-binds because `player` is observed.
-  func adopt(_ next: AVPlayer) {
-    let old = player
-    guard old !== next else { return }
-    next.isMuted = !isAudible
-    player = next
-    old.pause()
-    old.replaceCurrentItem(with: nil)
+    self.player = player
   }
 }
 
@@ -132,11 +110,6 @@ final class MultiviewController {
   /// pane. Always points at a pane that still exists.
   private(set) var primaryPaneID: String?
 
-  /// The pane that currently holds focus (audio + quality pre-warm follow it).
-  /// Retained across transient focus moves to the controls HUD so the last tile
-  /// the user was on stays warmed and ready to spotlight.
-  @ObservationIgnored private var focusedPaneID: String?
-
   init(channels: [FollowedChannel]) {
     self.panes = channels.prefix(multiviewPaneLimit).map(MultiviewPane.init)
     self.primaryPaneID = panes.first?.id
@@ -156,69 +129,19 @@ final class MultiviewController {
     for pane in panes { load(pane) }
   }
 
-  /// Cold-load a pane's pinned rendition into its current player. Used on first
-  /// start, retry, or a newly added pane — the tile is already showing its poster
-  /// here, so a plain `replaceCurrentItem` is fine. A tier *change* on a pane
-  /// that's already playing instead goes through ``swapQuality`` for a seamless,
-  /// flash-free transition.
+  /// (Re)load a pane's pinned rendition into its single player. Used for the
+  /// first start, a retry, a newly added pane, and any quality-tier change. The
+  /// tile shows its channel poster while `isLoading` is true, so the brief
+  /// re-pin (a `replaceCurrentItem` on the same player) reads as a quick poster
+  /// flash rather than a black tile — and never spins up a second concurrent
+  /// decoder, which is what the hardware can't afford.
   func load(_ pane: MultiviewPane) {
     pane.isLoading = true
     pane.hasError = false
     pane.resolveTask?.cancel()
-    pane.upgradeTask?.cancel()
     let tier = pane.qualityTier
     pane.resolveTask = Task { [weak pane] in
       guard let pane else { return }
-      do {
-        let url = try await PlaybackService.pinnedHLSURL(
-          for: pane.channel.login, targetBitrate: tier.targetBitrate)
-        guard !Task.isCancelled else { return }
-        let asset = AVURLAsset(
-          url: url,
-          options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
-        )
-        let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = tier.forwardBufferDuration
-        pane.player.replaceCurrentItem(with: item)
-        pane.player.isMuted = !pane.isAudible
-        pane.player.play()
-
-        // Hold the loading state until the first frame is actually decodable so
-        // the tile fades in cleanly rather than flashing black.
-        for _ in 0..<40 {
-          if Task.isCancelled { return }
-          if pane.player.currentItem?.status == .readyToPlay { break }
-          try? await Task.sleep(for: .milliseconds(150))
-        }
-        guard !Task.isCancelled else { return }
-        pane.isLoading = false
-      } catch is CancellationError {
-        return
-      } catch {
-        pane.hasError = true
-        pane.isLoading = false
-      }
-    }
-  }
-
-  /// Seamlessly move a playing pane to its new tier's pinned rendition. A second
-  /// player is built on the new rendition and fully preloaded (buffered and
-  /// rendering) *before* it's hot-swapped onto the tile, so the picture never
-  /// drops to black or stalls — it just sharpens or softens in place. Falls back
-  /// to a cold ``load`` if the pane isn't currently playing.
-  private func swapQuality(_ pane: MultiviewPane) {
-    guard pane.player.currentItem != nil, !pane.hasError, !pane.isLoading else {
-      load(pane)
-      return
-    }
-    pane.upgradeTask?.cancel()
-    let tier = pane.qualityTier
-    pane.upgradeTask = Task { [weak pane] in
-      guard let pane else { return }
-      // Debounce: while the focus engine is flying across tiles the desired tier
-      // churns; only commit a swap once focus settles for a beat.
-      try? await Task.sleep(for: .milliseconds(180))
-      guard !Task.isCancelled, pane.qualityTier == tier else { return }
       do {
         let url = try await PlaybackService.pinnedHLSURL(
           for: pane.channel.login, targetBitrate: tier.targetBitrate)
@@ -229,28 +152,24 @@ final class MultiviewController {
         )
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = tier.forwardBufferDuration
-        let next = MultiviewPane.makePlayer()
-        next.replaceCurrentItem(with: item)
-        next.isMuted = !pane.isAudible
-        next.play()
+        pane.player.replaceCurrentItem(with: item)
+        pane.player.isMuted = !pane.isAudible
+        pane.player.play()
 
-        // Make-before-break: wait until the new rendition is genuinely rendering
-        // so the hot-swap is invisible rather than a momentary blank.
+        // Hold the loading state (poster shown) until the first frame is actually
+        // decodable so the tile reveals cleanly rather than flashing black.
         for _ in 0..<40 {
-          if Task.isCancelled || pane.qualityTier != tier {
-            next.replaceCurrentItem(with: nil)
-            return
-          }
-          if item.status == .readyToPlay, item.isPlaybackLikelyToKeepUp { break }
-          try? await Task.sleep(for: .milliseconds(100))
+          if Task.isCancelled || pane.qualityTier != tier { return }
+          if pane.player.currentItem?.status == .readyToPlay { break }
+          try? await Task.sleep(for: .milliseconds(150))
         }
-        guard !Task.isCancelled, pane.qualityTier == tier else {
-          next.replaceCurrentItem(with: nil)
-          return
-        }
-        pane.adopt(next)
+        guard !Task.isCancelled, pane.qualityTier == tier else { return }
+        pane.isLoading = false
+      } catch is CancellationError {
+        return
       } catch {
-        // Keep the current rendition playing; a failed upgrade is non-fatal.
+        pane.hasError = true
+        pane.isLoading = false
       }
     }
   }
@@ -275,8 +194,6 @@ final class MultiviewController {
     let pane = panes[index]
     pane.resolveTask?.cancel()
     pane.resolveTask = nil
-    pane.upgradeTask?.cancel()
-    pane.upgradeTask = nil
     pane.player.pause()
     pane.player.replaceCurrentItem(with: nil)
     panes.remove(at: index)
@@ -318,12 +235,12 @@ final class MultiviewController {
     refreshQuality()
   }
 
-  /// The tier a pane should run at. Focusing a pane (or it being the spotlight
-  /// primary) pre-warms it to Source so a later spotlight or full-screen open is
-  /// instant and already sharp. Otherwise large grid quadrants get a ~720p
-  /// rendition while the small spotlight filmstrip thumbnails stay light (~480p).
+  /// The tier a pane should run at — a purely structural role, so quality only
+  /// changes on deliberate layout/primary changes (never on every focus move,
+  /// which would flash a poster constantly). The one large spotlight primary gets
+  /// Source; grid quadrants get ~720p; the small spotlight filmstrip thumbnails
+  /// stay light (~480p).
   private func desiredTier(for pane: MultiviewPane) -> MultiviewQualityTier {
-    if pane.id == focusedPaneID { return .source }
     if layout == .spotlight && pane.id == primaryPane?.id { return .source }
     return layout == .grid ? .grid : .thumbnail
   }
@@ -333,15 +250,16 @@ final class MultiviewController {
     for pane in panes { pane.qualityTier = desiredTier(for: pane) }
   }
 
-  /// Re-evaluate each pane's tier and seamlessly re-pin any that changed. The
-  /// swap preloads the new rendition on a second player and hot-swaps it in once
-  /// it's rendering (``swapQuality``), so quality moves with no reload or stall.
+  /// Re-evaluate each pane's tier and re-pin any that changed. The re-pin is a
+  /// `replaceCurrentItem` on the pane's single player, masked by the channel
+  /// poster while it loads — no second concurrent decoder (the hardware can't
+  /// afford one), so playback stays reliable instead of going black.
   private func refreshQuality() {
     for pane in panes {
       let desired = desiredTier(for: pane)
       guard desired != pane.qualityTier else { continue }
       pane.qualityTier = desired
-      swapQuality(pane)
+      load(pane)
     }
   }
 
@@ -356,22 +274,11 @@ final class MultiviewController {
     }
   }
 
-  /// Note which pane the focus engine is on so its quality can be pre-warmed to
-  /// full Source. `nil` (focus moved to the controls HUD) is ignored so the last
-  /// focused tile stays warm and ready to spotlight instantly.
-  func setFocusedPane(_ paneID: String?) {
-    guard let paneID, focusedPaneID != paneID else { return }
-    focusedPaneID = paneID
-    refreshQuality()
-  }
-
   /// Pause every pane without releasing its item — used while a single stream
   /// is layered on top (escalated to full-screen), so the wall's audio/video
   /// don't compete and battery isn't wasted decoding hidden video.
   func suspend() {
     for pane in panes {
-      pane.upgradeTask?.cancel()
-      pane.upgradeTask = nil
       pane.player.pause()
     }
   }
@@ -389,8 +296,6 @@ final class MultiviewController {
     for pane in panes {
       pane.resolveTask?.cancel()
       pane.resolveTask = nil
-      pane.upgradeTask?.cancel()
-      pane.upgradeTask = nil
       pane.player.pause()
       pane.player.replaceCurrentItem(with: nil)
     }

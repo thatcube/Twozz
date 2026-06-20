@@ -135,11 +135,15 @@ struct PlayerView: View {
   /// immediately re-pause the replay.
   var chatScrollExitFocus: Focusable { isVOD ? .chatToggle : .chatInput }
 
-  /// Keep the seek bar and the chat scroller mutually non-neighboring so a
-  /// sideways swipe can never escape from one into the other.
+  /// The seek bar is only ever *entered* by an explicit up-press from a control
+  /// button (whose `onMoveCommand` assigns focus to it directly), and it only
+  /// needs to be focusable while it actually holds focus. Gating on the focus
+  /// value keeps it out of chat and — crucially — stops it from acting as a
+  /// geometric magnet that steals focus the instant the chrome appears, which
+  /// made up/left/down from rest jump straight to the bar instead of the
+  /// intended control.
   var scrubberFocusable: Bool {
-    if isVOD { return focus != .chatScroller }
-    return focus != .chatInput && focus != .chatSend
+    focus == .rewindScrubber
   }
 
   /// Spoken value for the rewind/seek bar's `accessibilityValue`: VODs read
@@ -1215,12 +1219,13 @@ struct PlayerView: View {
         wakeFromSleep()
       } else if isChatScrolling || chatSoftPauseRemaining != nil {
         resumeChatLive()
-        // Land focus on the composer (live) / collapse button (VOD) with the
-        // chrome up. Without this the buttons rejoin the focus engine with no
-        // owner and tvOS defaults to the leftmost control (the channel button on
-        // the far side), instead of the "Send a message" field right under the
-        // chat the viewer was just reading.
-        revealControls(preferredFocus: chatScrollExitFocus)
+        // Focus is already on the composer during a scroll (the scroll trap holds
+        // it there with the chrome up), so in the common case this is a no-op and
+        // there's no focus flash. It only nudges focus on the VOD scroller (no
+        // composer) or any edge where focus drifted off the composer.
+        if focus != chatScrollExitFocus {
+          focus = chatScrollExitFocus
+        }
       } else if showChatSettings {
         if chatSettingsPage != .main {
           closeSubpage()

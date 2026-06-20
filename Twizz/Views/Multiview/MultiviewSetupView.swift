@@ -62,7 +62,7 @@ struct MultiviewSetupView: View {
           Text("Multiview")
             .font(.system(size: 40, weight: .bold))
         } icon: {
-          Icon(glyph: .layoutGrid, size: 34)
+          Icon(glyph: .borderAll, size: 34)
         }
         Text("Choose up to \(multiviewPaneLimit) live channels to watch together.")
           .font(.title3)

@@ -14,8 +14,9 @@ struct MultiviewPlayerView: View {
   let availableChannels: [FollowedChannel]
   /// Invoked when the viewer clicks a pane to watch it full-screen (with chat,
   /// quality control, the works). The presenter tears down multiview and opens
-  /// the normal `PlayerView`.
-  var onEscalate: (FollowedChannel) -> Void
+  /// the normal `PlayerView`. The second argument is the current roster so the
+  /// presenter can restore this multiview when the single player is dismissed.
+  var onEscalate: (FollowedChannel, [FollowedChannel]) -> Void
 
   @Environment(\.dismiss) private var dismiss
   @Environment(\.themePalette) private var palette
@@ -27,11 +28,23 @@ struct MultiviewPlayerView: View {
   @State private var chromeVisible = true
   @State private var chromeHideTask: Task<Void, Never>?
   @State private var showingAddPicker = false
+  /// The reveal-on-up controls HUD. The wall is full-screen by default; pressing
+  /// up from the top pane row (a focus move the engine can't satisfy) surfaces
+  /// the control bar and hands focus to it. Pressing down / Menu hides it again.
+  @State private var showingControls = false
+  /// Last pane that held focus, so dismissing the HUD restores focus to it.
+  @State private var lastPaneID: String?
+  /// A brief on-appear coach hint explaining the hidden controls.
+  @State private var hintVisible = true
+  @State private var hintHideTask: Task<Void, Never>?
+  /// Timestamp of the last unconsumed up-press, used to require a deliberate
+  /// double-up to reveal the HUD so ordinary navigation doesn't trigger it.
+  @State private var lastUpAt: Date?
 
   init(
     channels: [FollowedChannel],
     availableChannels: [FollowedChannel],
-    onEscalate: @escaping (FollowedChannel) -> Void
+    onEscalate: @escaping (FollowedChannel, [FollowedChannel]) -> Void
   ) {
     self.channels = channels
     self.availableChannels = availableChannels
@@ -50,7 +63,7 @@ struct MultiviewPlayerView: View {
   }
 
   var body: some View {
-    ZStack {
+    ZStack(alignment: .top) {
       Color.black.ignoresSafeArea()
 
       // The video wall fills the entire screen edge-to-edge — no outer margins.
@@ -63,16 +76,47 @@ struct MultiviewPlayerView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .ignoresSafeArea()
 
-      // Controls ride on top as auto-hiding chrome so they never steal space
-      // from the streams.
-      VStack {
-        controlsBar
-          .padding(.horizontal, 36)
-          .padding(.top, 28)
-        Spacer()
+      // While the HUD is open, dim the wall a touch for contrast/modality.
+      if showingControls {
+        Color.black.opacity(0.4)
+          .ignoresSafeArea()
+          .allowsHitTesting(false)
+          .transition(.opacity)
       }
-      .opacity(chromeVisible ? 1 : 0)
-      .animation(.easeOut(duration: 0.3), value: chromeVisible)
+
+      // Top layer: either the reveal HUD (focusable) or the coach hint. Both
+      // float over the wall so the streams keep the full width and height.
+      VStack(spacing: 0) {
+        if showingControls {
+          controlsBar
+            .padding(.horizontal, 36)
+            .padding(.top, 28)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        } else if hintVisible {
+          revealHint
+            .padding(.top, 20)
+            .transition(.opacity)
+        }
+        Spacer(minLength: 0)
+      }
+    }
+    .onMoveCommand { direction in
+      switch direction {
+      case .up where !showingControls:
+        // Require two up-presses in quick succession so simply navigating to
+        // the top row doesn't pop the HUD by accident.
+        let now = Date()
+        if let last = lastUpAt, now.timeIntervalSince(last) < 0.7 {
+          lastUpAt = nil
+          revealControls()
+        } else {
+          lastUpAt = now
+        }
+      case .down where showingControls:
+        hideControls()
+      default:
+        lastUpAt = nil
+      }
     }
     .onAppear {
       controller.start()
@@ -80,22 +124,36 @@ struct MultiviewPlayerView: View {
         focus = controller.panes.first.map { .pane($0.id) }
       }
       bumpChrome()
+      showHintBriefly()
     }
     .onChange(of: focus) { _, newValue in
       if case let .pane(id) = newValue {
+        lastPaneID = id
         controller.setAudiblePane(id)
+        // If the focus engine moved back down into a pane, retire the HUD.
+        if showingControls {
+          withAnimation(.easeOut(duration: 0.25)) { showingControls = false }
+        }
       }
       bumpChrome()
     }
     .onPlayPauseCommand {
       controller.toggleLayout()
       bumpChrome()
+      showHintBriefly()
     }
     .onDisappear {
       chromeHideTask?.cancel()
+      hintHideTask?.cancel()
       controller.teardown()
     }
-    .onExitCommand { dismiss() }
+    .onExitCommand {
+      if showingControls {
+        hideControls()
+      } else {
+        dismiss()
+      }
+    }
     .fullScreenCover(isPresented: $showingAddPicker) {
       MultiviewAddView(
         channels: addableChannels,
@@ -107,20 +165,27 @@ struct MultiviewPlayerView: View {
 
   // MARK: Controls
 
+  /// A slim, non-focusable coach mark shown briefly on appear so the hidden
+  /// controls are discoverable. Styled as a standard tvOS material pill.
+  private var revealHint: some View {
+    HStack(spacing: 10) {
+      Icon(glyph: .selector, size: 18)
+      Text("Press Up twice for controls")
+        .font(.callout.weight(.medium))
+    }
+    .foregroundStyle(.white)
+    .padding(.horizontal, 20)
+    .padding(.vertical, 11)
+    .background(
+      Capsule().fill(glassDisabled ? AnyShapeStyle(Color.black.opacity(0.72))
+                                   : AnyShapeStyle(.regularMaterial))
+    )
+  }
+
   private var controlsBar: some View {
-    HStack(spacing: 16) {
-      Label {
-        Text("Play/Pause toggles layout")
-      } icon: {
-        Icon(glyph: .playerPlayFilled, size: 18)
-      }
-      .font(.footnote)
-      .foregroundStyle(.white.opacity(0.55))
-
-      Spacer()
-
-      // Native tvOS buttons: the system handles the focus lift/highlight, so
-      // these match the standard "See All"-style buttons elsewhere in the app.
+    // A compact, centered pill of native tvOS buttons — the system supplies the
+    // standard focus capsule/highlight, so it matches buttons elsewhere.
+    HStack(spacing: 22) {
       Button {
         controller.toggleLayout()
         bumpChrome()
@@ -148,6 +213,12 @@ struct MultiviewPlayerView: View {
         .focused($focus, equals: .addButton)
       }
     }
+    .padding(.horizontal, 28)
+    .padding(.vertical, 14)
+    .background(
+      Capsule().fill(glassDisabled ? AnyShapeStyle(Color.black.opacity(0.72))
+                                   : AnyShapeStyle(.regularMaterial))
+    )
   }
 
   // MARK: Grid layout
@@ -227,14 +298,14 @@ struct MultiviewPlayerView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .focusable()
     .focused($focus, equals: .pane(pane.id))
-    .onTapGesture { onEscalate(pane.channel) }
+    .onTapGesture { escalate(pane) }
     .contextMenu { paneMenu(pane) }
   }
 
   @ViewBuilder
   private func paneMenu(_ pane: MultiviewPane) -> some View {
     Button {
-      onEscalate(pane.channel)
+      escalate(pane)
     } label: {
       Label {
         Text("Watch Stream")
@@ -267,9 +338,23 @@ struct MultiviewPlayerView: View {
         Label { Text("Remove") } icon: { Icon(glyph: .trash) }
       }
     }
+
+    if controller.canAddPane && !addableChannels.isEmpty {
+      Button {
+        showingAddPicker = true
+      } label: {
+        Label { Text("Add Channel") } icon: { Icon(glyph: .plus) }
+      }
+    }
   }
 
   // MARK: Actions
+
+  /// Escalates a pane to the full single-stream player, handing the presenter
+  /// the current roster so it can restore this exact multiview on return.
+  private func escalate(_ pane: MultiviewPane) {
+    onEscalate(pane.channel, controller.panes.map(\.channel))
+  }
 
   private func add(_ channel: FollowedChannel) {
     if let id = controller.addPane(channel) {
@@ -296,6 +381,30 @@ struct MultiviewPlayerView: View {
       withAnimation(.easeOut(duration: 0.4)) {
         chromeVisible = false
       }
+    }
+  }
+
+  private func revealControls() {
+    hintHideTask?.cancel()
+    withAnimation(.easeOut(duration: 0.25)) {
+      hintVisible = false
+      showingControls = true
+    }
+    focus = .layoutButton
+  }
+
+  private func hideControls() {
+    withAnimation(.easeOut(duration: 0.25)) { showingControls = false }
+    focus = (lastPaneID.map { .pane($0) }) ?? controller.panes.first.map { .pane($0.id) }
+  }
+
+  private func showHintBriefly() {
+    hintVisible = true
+    hintHideTask?.cancel()
+    hintHideTask = Task {
+      try? await Task.sleep(for: .seconds(5))
+      guard !Task.isCancelled else { return }
+      withAnimation(.easeOut(duration: 0.5)) { hintVisible = false }
     }
   }
 }
@@ -528,8 +637,13 @@ private struct MultiviewAddView: View {
 /// timing issues of stacked covers out of the caller.
 struct MultiviewRootView: View {
   let liveChannels: [FollowedChannel]
-  /// Called when the viewer escalates a pane to full-screen single-stream.
-  var onWatchFull: (FollowedChannel) -> Void
+  /// When non-nil, multiview opens straight into the video wall with this
+  /// roster, skipping the setup picker — used to restore a session after the
+  /// viewer escalated a pane to full-screen and pressed Back.
+  var initialChannels: [FollowedChannel]? = nil
+  /// Called when the viewer escalates a pane to full-screen single-stream. The
+  /// second argument is the current roster, so the caller can restore it later.
+  var onWatchFull: (FollowedChannel, [FollowedChannel]) -> Void
 
   @Environment(\.dismiss) private var dismiss
   @State private var startedChannels: [FollowedChannel]?
@@ -548,6 +662,11 @@ struct MultiviewRootView: View {
           onStart: { startedChannels = $0 },
           onCancel: { dismiss() }
         )
+      }
+    }
+    .onAppear {
+      if startedChannels == nil, let initialChannels, !initialChannels.isEmpty {
+        startedChannels = initialChannels
       }
     }
   }

@@ -27,6 +27,10 @@ struct HomeView: View {
   /// When a multiview pane is clicked to watch full-screen, the channel is held
   /// here so the normal single-stream player can open once multiview dismisses.
   @State private var pendingMultiviewWatch: FollowedChannel?
+  /// Roster to restore when a multiview-escalated single stream is dismissed.
+  @State private var multiviewResume: [FollowedChannel]?
+  /// When set, the multiview cover opens straight into the wall with this roster.
+  @State private var multiviewInitialChannels: [FollowedChannel]?
   /// Categories opened from the Home tab are pushed one level deep here, so the
   /// category view is genuinely L2 of Home rather than a tab switch into Browse.
   @State private var homePath: [TwitchCategory] = []
@@ -264,7 +268,15 @@ struct HomeView: View {
         await refreshPersonalizedIfNeeded(force: true)
       }
     }
-    .fullScreenCover(item: $selectedChannel) { channel in
+    .fullScreenCover(item: $selectedChannel, onDismiss: {
+      // If this single stream was opened by escalating a multiview pane,
+      // pressing Back drops the viewer right back into that multiview.
+      if let resume = multiviewResume {
+        multiviewResume = nil
+        multiviewInitialChannels = resume
+        showingMultiview = true
+      }
+    }) { channel in
       PlayerView(channel: channel.login, auth: auth, goLive: goLive)
         .environment(\.themePalette, resolvedPalette)
     }
@@ -280,6 +292,7 @@ struct HomeView: View {
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
     .fullScreenCover(isPresented: $showingMultiview, onDismiss: {
+      multiviewInitialChannels = nil
       if let channel = pendingMultiviewWatch {
         pendingMultiviewWatch = nil
         selectedChannel = channel
@@ -287,8 +300,10 @@ struct HomeView: View {
     }) {
       MultiviewRootView(
         liveChannels: liveFollowedChannels,
-        onWatchFull: { channel in
+        initialChannels: multiviewInitialChannels,
+        onWatchFull: { channel, roster in
           pendingMultiviewWatch = channel
+          multiviewResume = roster
           showingMultiview = false
         }
       )
@@ -358,13 +373,14 @@ struct HomeView: View {
         HStack(spacing: 8) {
           if liveFollowedChannels.count >= 2 {
             Button {
+              multiviewInitialChannels = nil
               showingMultiview = true
             } label: {
               Label {
                 Text("Multiview")
                   .font(.system(size: 24, weight: .semibold))
               } icon: {
-                Icon(glyph: .layoutGrid, size: 26)
+                Icon(glyph: .borderAll, size: 26)
               }
             }
             .accessibilityLabel("Watch multiple channels at once")

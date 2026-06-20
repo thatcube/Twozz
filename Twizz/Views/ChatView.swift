@@ -716,14 +716,26 @@ struct ChatView: View {
     // color) stay legible on whichever surface the chat is drawn on.
     let resolved = base.chatReadable(onSurface: chatSurfaceColor)
     Self.colorCache[key] = resolved
+    Self.colorCacheOrder.append(key)
+    if Self.colorCacheOrder.count > Self.colorCacheLimit {
+      let overflow = Self.colorCacheOrder.count - Self.colorCacheLimit
+      for evicted in Self.colorCacheOrder.prefix(overflow) {
+        Self.colorCache.removeValue(forKey: evicted)
+      }
+      Self.colorCacheOrder.removeFirst(overflow)
+    }
     return resolved
   }
 
   /// Resolved name colors keyed by the user's color hex (or username) plus the
   /// surface they're drawn on. Parsing the hex, building a Color, and running the
   /// readable-contrast adjustment on every line render is pure repeated work, so
-  /// memoize it across the session.
+  /// memoize it across the session. Bounded with an LRU eviction (matching the
+  /// segment/highlight caches) so a long session on a busy channel with many
+  /// distinct chatters can't grow this map without limit.
   private static var colorCache: [String: Color] = [:]
+  private static var colorCacheOrder: [String] = []
+  private static let colorCacheLimit = 3000
 
   /// Bright, readable defaults (Twitch-style) for users with no color set.
   private static let fallbackPalette: [Color] = [

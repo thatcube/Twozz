@@ -44,6 +44,7 @@ final class SearchService {
             guard query == trimmed else { return }
             channelResults = results.channels
             categoryResults = results.categories
+            prewarmStaticArtwork(channels: results.channels, categories: results.categories)
             if !hasResults {
                 errorMessage = "No results for \"\(trimmed)\"."
             }
@@ -52,6 +53,24 @@ final class SearchService {
             channelResults = []
             categoryResults = []
             errorMessage = "Could not search right now."
+        }
+    }
+
+    /// Warm the decoded-image cache for the *static* artwork search results show —
+    /// channel avatars and category box art — so the results grids paint each tile
+    /// instantly instead of decoding on the fly as they scroll. Live stream
+    /// preview thumbnails (`FollowedChannel.thumbnailURL`) are deliberately never
+    /// prewarmed: they must always reflect the current moment. Best-effort and low
+    /// priority.
+    private func prewarmStaticArtwork(channels: [FollowedChannel], categories: [TwitchCategory]) {
+        let urls = channels.compactMap(\.profileImageURL)
+            + categories.compactMap(\.boxArtURL)
+        guard !urls.isEmpty else { return }
+        Task(priority: .utility) {
+            for url in urls {
+                if Task.isCancelled { return }
+                await ImageMemoryCache.shared.prewarm(url)
+            }
         }
     }
 

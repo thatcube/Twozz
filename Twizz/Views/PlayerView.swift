@@ -135,15 +135,57 @@ struct PlayerView: View {
   /// immediately re-pause the replay.
   var chatScrollExitFocus: Focusable { isVOD ? .chatToggle : .chatInput }
 
-  /// The seek bar is only ever *entered* by an explicit up-press from a control
-  /// button (whose `onMoveCommand` assigns focus to it directly), and it only
-  /// needs to be focusable while it actually holds focus. Gating on the focus
-  /// value keeps it out of chat and — crucially — stops it from acting as a
-  /// geometric magnet that steals focus the instant the chrome appears, which
-  /// made up/left/down from rest jump straight to the bar instead of the
-  /// intended control.
+  /// The seek bar is only reachable by an explicit up-press from a control-row
+  /// button (each button's `onMoveCommand` assigns focus here). It is focusable
+  /// only while focus already sits inside the control cluster (or on the bar
+  /// itself), which means:
+  ///   • from rest (`.video`) or chat it is NOT focusable, so it can't act as a
+  ///     geometric magnet that steals focus the instant the chrome appears
+  ///     (which made up/left/down from rest jump to the bar), and
+  ///   • moving off the bar onto a sibling control keeps it focusable, so it
+  ///     doesn't drop out of the focus engine mid-move and scramble focus to the
+  ///     leftmost control (the channel-button "teleport").
   var scrubberFocusable: Bool {
-    focus == .rewindScrubber
+    switch focus {
+    case .rewindScrubber, .streamInfo, .quality, .chatSettingsButton, .chatToggle:
+      return true
+    default:
+      return false
+    }
+  }
+
+  /// Throttle window for stepping between control-row buttons. The Siri Remote
+  /// trackpad emits a burst of move commands for a single swipe; coalescing them
+  /// into one step per gesture makes navigating the row feel deliberate and
+  /// precise (you land on the next button instead of flinging across the whole
+  /// row) — closer to how YouTube and the system transport controls behave.
+  var controlSwipeThrottle: TimeInterval { 0.32 }
+
+  /// Step focus to a neighbouring control button, but at most once per swipe
+  /// gesture. A move that arrives inside the throttle window is swallowed (and it
+  /// refreshes the timestamp so a continuous swipe keeps yielding nothing until
+  /// the finger lifts), so a fast flick advances a single button rather than
+  /// rocketing past several. Deliberate, spaced presses pass straight through.
+  func navigateControl(to target: Focusable) {
+    let now = Date()
+    if let last = lastControlHorizontalMoveAt,
+       now.timeIntervalSince(last) < controlSwipeThrottle {
+      lastControlHorizontalMoveAt = now
+      return
+    }
+    lastControlHorizontalMoveAt = now
+    focus = target
+  }
+
+  /// Handle an up-press from a control button. Moves focus to the seek bar, but
+  /// only when it's available and no horizontal move just happened — a swipe
+  /// between buttons frequently carries a stray vertical component, and acting on
+  /// it would yank focus to the bar accidentally.
+  func requestSeekBarFocus() {
+    guard rewindAvailable else { return }
+    if let last = lastControlHorizontalMoveAt,
+       Date().timeIntervalSince(last) < 0.34 { return }
+    focus = .rewindScrubber
   }
 
   /// Spoken value for the rewind/seek bar's `accessibilityValue`: VODs read
@@ -591,6 +633,22 @@ struct PlayerView: View {
     isChatScrolling || chatSoftPauseRemaining != nil
   }
   @State var lastChatSettingsFocus: Focusable = .chatSettingsButton
+  /// Initial focus target for the control row when the chrome appears. The row
+  /// is rebuilt from scratch each time controls are revealed, so an explicit
+  /// `focus =` set in the same tick is dropped (the buttons don't exist yet) and
+  /// tvOS auto-focuses the leftmost control (the channel button). Driving the
+  /// row's `.defaultFocus` from this lets a reveal land directly on the intended
+  /// button (quality on up, channel on left, etc.) with no leftmost detour.
+  @State var pendingControlFocus: Focusable = .quality
+  /// Reasserts focus onto the composer after leaving a chat scroll; see
+  /// `resumeChatLive(restoreFocus:)`.
+  @State var chatExitFocusTask: Task<Void, Never>?
+  /// Timestamp of the last horizontal move within the control row. A trackpad
+  /// swipe between buttons often carries a slight vertical component, which tvOS
+  /// reports as an `.up` and would otherwise fling focus onto the seek bar. We
+  /// suppress an up→seek-bar jump for a short window after any left/right move so
+  /// the bar is only reached by a deliberate up press, not an accidental diagonal.
+  @State var lastControlHorizontalMoveAt: Date?
   /// A just-activated settings control to briefly defend against tvOS's
   /// transient focus jump when toggling an option resizes the panel.
   @State var chatFocusPin: Focusable?
@@ -1218,14 +1276,10 @@ struct PlayerView: View {
       if isSleeping {
         wakeFromSleep()
       } else if isChatScrolling || chatSoftPauseRemaining != nil {
-        resumeChatLive()
-        // Focus is already on the composer during a scroll (the scroll trap holds
-        // it there with the chrome up), so in the common case this is a no-op and
-        // there's no focus flash. It only nudges focus on the VOD scroller (no
-        // composer) or any edge where focus drifted off the composer.
-        if focus != chatScrollExitFocus {
-          focus = chatScrollExitFocus
-        }
+        // Deliberate exit from a chat scroll: land focus on the composer (live)
+        // / collapse button (VOD), reasserting past the control row rejoining the
+        // focus engine so it can't bounce to the far-side channel button.
+        resumeChatLive(restoreFocus: true)
       } else if showChatSettings {
         if chatSettingsPage != .main {
           closeSubpage()
@@ -1267,18 +1321,25 @@ struct PlayerView: View {
         }
         switch direction {
         case .up:
+          pendingControlFocus = .quality
           revealControls(preferredFocus: .quality)
         case .left:
+          pendingControlFocus = .streamInfo
           revealControls(preferredFocus: .streamInfo)
         case .right:
           if !showChat {
             showChat = true
             chatReplayStartMessageID = chat.messages.suffix(chatReplayMessageCount).first?.id
           }
+          // Land on the chat composer (already mounted, so this sticks). Point
+          // the row's default at the collapse button so a later move into the
+          // row from chat is sensible.
+          pendingControlFocus = .chatToggle
           revealControls(preferredFocus: chatFocusAnchor)
         case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
           handleChatDownPress()
         default:
+          pendingControlFocus = .quality
           revealControls(preferredFocus: .quality)
         }
       } else {
@@ -1827,11 +1888,9 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .right:
-            focus = .quality
-          case .left:
-            focus = .streamInfo
+            navigateControl(to: .quality)
           case .up:
-            if rewindAvailable { focus = .rewindScrubber }
+            requestSeekBarFocus()
           default:
             break
           }
@@ -1901,11 +1960,11 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .streamInfo
+            navigateControl(to: .streamInfo)
           case .right:
-            focus = .chatSettingsButton
+            navigateControl(to: .chatSettingsButton)
           case .up:
-            if rewindAvailable { focus = .rewindScrubber }
+            requestSeekBarFocus()
           default:
             break
           }
@@ -1930,11 +1989,11 @@ struct PlayerView: View {
           .onMoveCommand { direction in
             switch direction {
             case .left:
-              focus = .streamInfo
+              navigateControl(to: .streamInfo)
             case .right:
-              focus = .chatSettingsButton
+              navigateControl(to: .chatSettingsButton)
             case .up:
-              if rewindAvailable { focus = .rewindScrubber }
+              requestSeekBarFocus()
             default:
               break
             }
@@ -1952,11 +2011,11 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .quality
+            navigateControl(to: .quality)
           case .right:
-            focus = .chatToggle
+            navigateControl(to: .chatToggle)
           case .up:
-            if rewindAvailable { focus = .rewindScrubber }
+            requestSeekBarFocus()
           default:
             break
           }
@@ -1977,13 +2036,13 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .chatSettingsButton
+            navigateControl(to: .chatSettingsButton)
           case .right:
             if showChat {
-              focus = chatFocusAnchor
+              navigateControl(to: chatFocusAnchor)
             }
           case .up:
-            if rewindAvailable { focus = .rewindScrubber }
+            requestSeekBarFocus()
           default:
             break
           }
@@ -2011,6 +2070,11 @@ struct PlayerView: View {
     // list) offers competing focus targets and a quick swipe can fling focus out of
     // the row or drop it entirely — which never happens with chat closed.
     .focusSection()
+    // Direct the row's initial focus when the chrome is revealed. Because the
+    // row is rebuilt on each reveal, this is what actually makes a reveal land
+    // on the intended button (set via `pendingControlFocus`) instead of tvOS
+    // auto-picking the leftmost control. Dormant when focus is sent into chat.
+    .defaultFocus($focus, pendingControlFocus)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.leading, 48)

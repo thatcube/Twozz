@@ -46,8 +46,14 @@ enum TwitchAPIClient {
     _ type: T.Type, from data: Data, response: URLResponse
   ) throws -> T {
     try validatedData(data, response)
-    return try JSONDecoder().decode(T.self, from: data)
+    return try sharedDecoder.decode(T.self, from: data)
   }
+
+  /// A single reused decoder for every `decode(_:from:response:)` call. A fresh
+  /// `JSONDecoder()` per response is wasteful across the dozen services that
+  /// route through here; the decoder holds only immutable configuration and is
+  /// safe to read concurrently while decoding value types.
+  private nonisolated(unsafe) static let sharedDecoder = JSONDecoder()
 
   // MARK: - GraphQL
 

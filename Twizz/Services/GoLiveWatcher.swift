@@ -27,6 +27,10 @@ final class GoLiveWatcher {
   /// honest without hammering Helix.
   private static let pollInterval: Duration = .seconds(60)
 
+  /// Reused across poll iterations so the 60s loop doesn't build a decoder per
+  /// request.
+  private nonisolated(unsafe) static let decoder = JSONDecoder()
+
   /// How long a toast stays up before it auto-dismisses, unless the viewer
   /// focuses its button (which pauses the countdown).
   private static let toastSeconds = 15
@@ -242,7 +246,7 @@ final class GoLiveWatcher {
     guard (200...299).contains(status) else {
       throw GoLiveRequestError(status: status)
     }
-    return try JSONDecoder().decode(GoLiveStreamsEnvelope.self, from: data).data
+    return try Self.decoder.decode(GoLiveStreamsEnvelope.self, from: data).data
   }
 
   private func resolveClientID() -> String? {
@@ -274,7 +278,7 @@ final class GoLiveWatcher {
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else { throw GoLiveRequestError(status: status) }
 
-    let payload = try JSONDecoder().decode(GoLiveUsersEnvelope.self, from: data)
+    let payload = try Self.decoder.decode(GoLiveUsersEnvelope.self, from: data)
     return Dictionary(
       uniqueKeysWithValues: payload.data.compactMap { user -> (String, URL)? in
         guard let raw = user.profileImageURL, !raw.isEmpty, let url = URL(string: raw) else {

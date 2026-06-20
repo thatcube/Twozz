@@ -697,6 +697,7 @@ struct ChannelPageView: View {
     isLoadingProfile = false
     isLoadingContent = false
     applyInitialFocusIfNeeded()
+    prewarmMediaThumbnails(loadedContent)
 
     if let signals = loadedContent?.signals {
       // Let the page become interactive before kicking off the heavy multi-seed
@@ -707,6 +708,27 @@ struct ChannelPageView: View {
       recommendations = []
     }
     isLoadingRecs = false
+  }
+
+  /// Warm the decoded-image cache for the channel's *static* clip and VOD rail
+  /// thumbnails right after content loads, so flicking through those rails paints
+  /// each tile instantly instead of decoding it on the fly (the dominant scroll
+  /// cost called out in `CachedAsyncImage`). Best-effort and low priority — if the
+  /// user scrolls first, `CachedAsyncImage` still loads on demand. The channel's
+  /// *live* preview thumbnail is deliberately never prewarmed: it must always
+  /// reflect the current moment. Clip/VOD thumbnails are immutable snapshots, so
+  /// caching them ahead is safe.
+  private func prewarmMediaThumbnails(_ content: ChannelContent?) {
+    guard let content else { return }
+    let urls = content.clips.compactMap(\.thumbnailURL)
+      + content.videos.compactMap(\.thumbnailURL)
+    guard !urls.isEmpty else { return }
+    Task(priority: .utility) {
+      for url in urls {
+        if Task.isCancelled { return }
+        await ImageMemoryCache.shared.prewarm(url)
+      }
+    }
   }
 
   private func applyInitialFocusIfNeeded() {

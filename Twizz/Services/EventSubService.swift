@@ -30,6 +30,10 @@ final class EventSubService {
 
   private let endpoint = URL(string: "wss://eventsub.wss.twitch.tv/ws")!
 
+  /// Reused across the receive loop and subscription parsing so a busy event
+  /// stream doesn't allocate a decoder per frame.
+  private nonisolated(unsafe) static let decoder = JSONDecoder()
+
   /// Shared WebSocket transport: owns the reused `URLSession`, the socket task,
   /// and the exponential-backoff counter.
   private let connection = WebSocketConnection()
@@ -135,7 +139,7 @@ final class EventSubService {
 
   private func handle(_ raw: String) {
     guard let data = raw.data(using: .utf8),
-          let envelope = try? JSONDecoder().decode(EventSubEnvelope.self, from: data) else {
+          let envelope = try? Self.decoder.decode(EventSubEnvelope.self, from: data) else {
       return
     }
 
@@ -247,7 +251,7 @@ final class EventSubService {
       throw EventSubError.subscriptionFailed(status: status)
     }
 
-    let payload = try JSONDecoder().decode(EventSubSubscriptionEnvelope.self, from: data)
+    let payload = try Self.decoder.decode(EventSubSubscriptionEnvelope.self, from: data)
     guard let id = payload.data.first?.id else {
       throw EventSubError.subscriptionFailed(status: status)
     }

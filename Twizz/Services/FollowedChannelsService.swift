@@ -10,7 +10,9 @@ final class FollowedChannelsService {
     TwitchConfig.webPublicClientID
   ]
 
-  private(set) var channels: [FollowedChannel] = []
+  private(set) var channels: [FollowedChannel] = [] {
+    didSet { prewarmAvatars(channels) }
+  }
   /// Category name -> number of followed channels (online **and** offline) whose
   /// last/current broadcast was in that category. Drives the personalized
   /// recommendation profile so it reflects the whole follow list, not just whoever
@@ -29,7 +31,9 @@ final class FollowedChannelsService {
   /// **and** offline — sorted live-first. Populated lazily by `loadDirectory`
   /// when the directory screen opens, so its heavier multi-batch fetch never
   /// runs as part of the Home refresh.
-  private(set) var directory: [FollowedChannel] = []
+  private(set) var directory: [FollowedChannel] = [] {
+    didSet { prewarmAvatars(directory) }
+  }
   private(set) var isLoadingDirectory = false
   private(set) var directoryErrorMessage: String?
   private(set) var directoryLoadedAt: Date?
@@ -130,6 +134,24 @@ final class FollowedChannelsService {
     } else {
       followedCategories = [:]
       followedLogins = []
+    }
+  }
+
+  /// Warm the decoded-image cache for followed channels' *static* avatars
+  /// whenever the followed list or the full Following directory updates, so the
+  /// Home "Followed" rail and the directory grid paint each avatar instantly
+  /// instead of decoding it on the fly while scrolling. Live stream preview
+  /// thumbnails (`FollowedChannel.thumbnailURL`) are deliberately never
+  /// prewarmed: they must always reflect the current moment. Best-effort and low
+  /// priority; idempotent and bounded by the shared `NSCache`.
+  private func prewarmAvatars(_ channels: [FollowedChannel]) {
+    let urls = channels.compactMap(\.profileImageURL)
+    guard !urls.isEmpty else { return }
+    Task(priority: .utility) {
+      for url in urls {
+        if Task.isCancelled { return }
+        await ImageMemoryCache.shared.prewarm(url)
+      }
     }
   }
 

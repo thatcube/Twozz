@@ -16,23 +16,31 @@ enum MultiviewLayout {
 
 /// Quality budget for a single pane. Every pane plays the *master* playlist (all
 /// renditions available in one item), and the tier only sets the live ABR knobs
-/// — a bitrate cap plus how deep to buffer. Because nothing is pinned, promoting
-/// a pane to the spotlight is just a knob change on the already-playing item:
-/// the cap is lifted and the buffer deepened so ABR climbs up within a few
-/// seconds, with no reload or interruption. (The dedicated full-screen player is
-/// the only place a reload is acceptable; here we never tear the stream down.)
+/// — a bitrate cap plus how deep to buffer. Because nothing is pinned, changing a
+/// pane's tier is just a knob change on the already-playing item (no reload), so
+/// quality climbs/drops within a few seconds with no interruption. (The dedicated
+/// full-screen player is the only place a reload is acceptable.)
 enum MultiviewQualityTier {
-  /// Spotlight primary: uncapped, deeper buffer so ABR can climb to Source.
+  /// Full quality: uncapped + deep buffer so ABR climbs to Source. Used by the
+  /// spotlight primary AND any focused pane — focusing pre-warms a tile to full
+  /// quality so promoting it to the spotlight is instant and sharp.
   case source
-  /// A small tile (grid quadrant or spotlight filmstrip thumbnail): capped to a
-  /// light, low-bitrate rendition with a shallow buffer to stay cheap.
-  case light
+  /// A large grid quadrant (2×2 / side-by-side). These tiles are big enough to
+  /// look soft on a 4K panel, so they get a generous cap that still guarantees
+  /// at least ~720p when bandwidth allows, with a medium buffer.
+  case grid
+  /// A spotlight filmstrip thumbnail: tiny, so a low-bitrate rendition is plenty.
+  case thumbnail
 
   /// `0` = unlimited (`AVPlayerItem.preferredPeakBitRate` treats 0 as no cap).
+  /// The grid cap sits above Twitch's 720p renditions (~3.5 Mbps) so a grid tile
+  /// is guaranteed at least 720p, while still trimming the heaviest 1080p60
+  /// Source rendition so four concurrent decodes stay within budget.
   var peakBitRate: Double {
     switch self {
     case .source: return 0
-    case .light: return 800_000
+    case .grid: return 5_000_000
+    case .thumbnail: return 500_000
     }
   }
 
@@ -41,7 +49,8 @@ enum MultiviewQualityTier {
   var forwardBufferDuration: Double {
     switch self {
     case .source: return 6
-    case .light: return 1
+    case .grid: return 3
+    case .thumbnail: return 1
     }
   }
 }
@@ -66,9 +75,10 @@ final class MultiviewPane: Identifiable {
   var hasError = false
   /// Whether this pane currently owns audio (mirrors the focused pane).
   var isAudible = false
-  /// Which rendition this pane is currently pinned to. The spotlight primary
-  /// pins Source; every other tile pins the light, low-bitrate rendition.
-  @ObservationIgnored var qualityTier: MultiviewQualityTier = .light
+  /// The ABR budget this pane is currently running at. Recomputed from layout,
+  /// the spotlight primary, and which pane is focused (focusing pre-warms a tile
+  /// to full quality).
+  @ObservationIgnored var qualityTier: MultiviewQualityTier = .grid
 
   @ObservationIgnored fileprivate var resolveTask: Task<Void, Never>?
 
@@ -99,6 +109,11 @@ final class MultiviewController {
   /// In spotlight mode, the pane shown large. `nil` falls back to the first
   /// pane. Always points at a pane that still exists.
   private(set) var primaryPaneID: String?
+
+  /// The pane that currently holds focus (audio + quality pre-warm follow it).
+  /// Retained across transient focus moves to the controls HUD so the last tile
+  /// the user was on stays warmed and ready to spotlight.
+  @ObservationIgnored private var focusedPaneID: String?
 
   init(channels: [FollowedChannel]) {
     self.panes = channels.prefix(multiviewPaneLimit).map(MultiviewPane.init)
@@ -224,11 +239,14 @@ final class MultiviewController {
     refreshQuality()
   }
 
-  /// The tier a pane should run at: only the spotlight primary gets Source;
-  /// every other tile (grid quadrant or filmstrip thumbnail) stays light. In
-  /// grid mode there is no primary, so all panes are light.
+  /// The tier a pane should run at. Focusing a pane (or it being the spotlight
+  /// primary) pre-warms it to full quality so a later spotlight is instant and
+  /// sharp. Otherwise large grid quadrants get a generous cap (≥720p) while the
+  /// small spotlight filmstrip thumbnails stay light.
   private func desiredTier(for pane: MultiviewPane) -> MultiviewQualityTier {
-    layout == .spotlight && pane.id == primaryPane?.id ? .source : .light
+    if pane.id == focusedPaneID { return .source }
+    if layout == .spotlight && pane.id == primaryPane?.id { return .source }
+    return layout == .grid ? .grid : .thumbnail
   }
 
   /// Recompute each pane's desired quality tier without reloading anything.
@@ -265,6 +283,15 @@ final class MultiviewController {
       pane.isAudible = audible
       pane.player.isMuted = !audible
     }
+  }
+
+  /// Note which pane the focus engine is on so its quality can be pre-warmed to
+  /// full Source. `nil` (focus moved to the controls HUD) is ignored so the last
+  /// focused tile stays warm and ready to spotlight instantly.
+  func setFocusedPane(_ paneID: String?) {
+    guard let paneID, focusedPaneID != paneID else { return }
+    focusedPaneID = paneID
+    refreshQuality()
   }
 
   /// Pause every pane without releasing its item — used while a single stream

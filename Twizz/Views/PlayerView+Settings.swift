@@ -259,6 +259,26 @@ extension PlayerView {
           }
           .frame(maxWidth: .infinity, alignment: .leading)
 
+          // Experimental: swap the video to the streamer's YouTube simulcast to
+          // compare real on-device latency against the proxied Twitch path. Uses
+          // raw AVPlayer (no Twitch proxy/headers, no edge chasing); the Latency
+          // Readout / Diagnostics overlay measures both the same way.
+          settingsPill(
+            title: isUsingAltSource ? "Source: YouTube Simulcast" : "Source: Twitch",
+            isSelected: isUsingAltSource,
+            focusTag: .chatAltSourceToggle
+          ) {
+            toggleAltYouTubeSource()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          if let altSourceStatus {
+            Text(altSourceStatus)
+              .font(.caption2)
+              .foregroundStyle(chatSettingsForeground.opacity(0.6))
+              .fixedSize(horizontal: false, vertical: true)
+          }
+
           // Debug-only: outgoing raids can't be triggered on demand, so this
           // injects a simulated one (raiding to Monstercat, a near-24/7 stream)
           // to exercise the auto-follow banner + redirect. Visible only while the

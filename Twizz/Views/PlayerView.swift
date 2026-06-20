@@ -512,6 +512,13 @@ struct PlayerView: View {
   // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
   // for this comparison directly.
   @State var currentSourceURL: URL?
+  // Experimental alternate video source (e.g. a streamer's YouTube simulcast),
+  // surfaced under the Diagnostics overlay to A/B latency against the Twitch
+  // path. When active, the player drops the Twitch-only proxy/headers and the
+  // edge-chasing rate controller so the alternate source gets a fair read.
+  @State var isUsingAltSource = false
+  @State var altYouTubeMasterURL: URL?
+  @State var altSourceStatus: String?
   var isPlaybackActive: Bool {
     get { mon.isPlaybackActive }
     nonmutating set { mon.isPlaybackActive = newValue }
@@ -1007,6 +1014,7 @@ struct PlayerView: View {
     case chatLayoutOption(Int)
     case chatSyncToggle
     case chatLowLatencyToggle
+    case chatAltSourceToggle
     case chatRewindToggle
     case chatViewerCountToggle
     case chatLatencyToggle
@@ -1596,6 +1604,11 @@ struct PlayerView: View {
       // when the channel changes (e.g. following a raid) so it can't leak.
       experimentalYouTubeMergeChannelOrURL = ""
       youtubeAutoResolvedTarget = ""
+      // The alternate (YouTube) source is per-channel; drop it on a channel
+      // change so a stale simulcast URL can't leak into the next stream.
+      isUsingAltSource = false
+      altYouTubeMasterURL = nil
+      altSourceStatus = nil
       // The rewind window is per-stream: drop the previous channel's DVR history.
       lowLatencyProxy.resetDVR()
       // …and any resolved/active hand-off into the previous channel's VOD.

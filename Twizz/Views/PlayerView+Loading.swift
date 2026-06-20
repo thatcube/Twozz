@@ -1058,6 +1058,10 @@ extension PlayerView {
   func applyLiveLatencyCorrection() {
     guard isPlaybackActive else { return }
     guard !isUserPaused, !isScrubbing, !isVOD else { return }
+    // The adaptive-rate controller is tuned for the proxied Twitch path. On an
+    // alternate source (e.g. a YouTube simulcast) leave the rate at 1.0 so the
+    // latency comparison reflects plain AVPlayer behavior, not Twitch chasing.
+    guard !isUsingAltSource else { return }
 
     let previousRate = player.rate
     let targetRate = desiredLivePlaybackRate(policy: activeLivePlaybackPolicy)

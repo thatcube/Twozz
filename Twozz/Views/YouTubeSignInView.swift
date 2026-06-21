@@ -129,7 +129,7 @@ struct YouTubeSignInView: View {
   @ViewBuilder
   private var qrCodeView: some View {
     let payload = auth.verificationURI ?? "https://www.google.com/device"
-    BrandQRCodeView(payload: payload, logoName: "youtube-logo")
+    BrandQRCodeView(payload: payload, logoName: "youtube-logo", moduleColor: youTubeRed)
   }
 
   @ViewBuilder

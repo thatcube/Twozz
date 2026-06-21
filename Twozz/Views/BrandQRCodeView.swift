@@ -13,12 +13,15 @@ struct BrandQRCodeView: View {
   let payload: String
   /// Asset catalog name of the brand logo to inset (e.g. `"twitch-logo"`).
   let logoName: String
+  /// Color applied to the dark QR modules, matching the inset logo's brand
+  /// color (e.g. Twitch purple, YouTube red). Defaults to black.
+  var moduleColor: Color = .black
   /// Side length of the QR image inside the white card.
   var size: CGFloat = 500
 
   var body: some View {
     Group {
-      if let image = Self.makeQRCode(from: payload) {
+      if let image = Self.makeQRCode(from: payload, moduleColor: moduleColor) {
         Image(uiImage: image)
           .interpolation(.none)
           .resizable()
@@ -48,13 +51,20 @@ struct BrandQRCodeView: View {
 
   private static let ciContext = CIContext()
 
-  static func makeQRCode(from string: String) -> UIImage? {
+  static func makeQRCode(from string: String, moduleColor: Color = .black) -> UIImage? {
     let filter = CIFilter.qrCodeGenerator()
     filter.message = Data(string.utf8)
     filter.correctionLevel = "H"
 
     guard let output = filter.outputImage else { return nil }
-    let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+
+    let falseColor = CIFilter.falseColor()
+    falseColor.inputImage = output
+    falseColor.color0 = CIColor(color: UIColor(moduleColor))
+    falseColor.color1 = CIColor(color: .white)
+
+    guard let tinted = falseColor.outputImage else { return nil }
+    let scaled = tinted.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
     guard let cgImage = ciContext.createCGImage(scaled, from: scaled.extent) else { return nil }
     return UIImage(cgImage: cgImage)
   }

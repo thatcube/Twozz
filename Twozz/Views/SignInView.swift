@@ -140,7 +140,7 @@ struct SignInView: View {
   @ViewBuilder
   private var qrCodeView: some View {
     let payload = auth.verificationURIComplete ?? auth.verificationURI ?? "https://www.twitch.tv/activate"
-    BrandQRCodeView(payload: payload, logoName: "twitch-logo")
+    BrandQRCodeView(payload: payload, logoName: "twitch-logo", moduleColor: Color(red: 0.58, green: 0.41, blue: 0.96))
   }
 
   @ViewBuilder

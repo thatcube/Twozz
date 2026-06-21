@@ -38,3 +38,9 @@ enum YouTubeConfig {
     return trimmed
   }
 }
+
+/// User preferences for the YouTube integration.
+enum YouTubePreferences {
+  /// `@AppStorage` key for the "Show YouTube subscriptions" toggle (default on).
+  static let showSubscriptionsKey = "showYouTubeSubscriptions"
+}

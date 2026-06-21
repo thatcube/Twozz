@@ -21,6 +21,8 @@ struct HomeView: View {
   @State private var affinity = StreamerAffinityService()
   @State private var youtubeAliases = TwitchYouTubeAliasService()
   @State private var youtubeLive = YouTubeLiveSnapshotService()
+  @State private var youtubeAuth = YouTubeAuthSession()
+  @State private var youtubeSubscriptions = YouTubeSubscriptionsService()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
@@ -35,6 +37,7 @@ struct HomeView: View {
   @State private var showingFollowingDirectory = false
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
+  @State private var showYouTubeSignIn = false
   @State private var refreshToast: RefreshToastState?
   @State private var goLive = GoLiveWatcher()
   @State private var goLiveSettings = GoLiveNotificationSettings()
@@ -206,10 +209,13 @@ struct HomeView: View {
         SettingsView(
           themeManager: themeManager,
           auth: auth,
+          youtubeAuth: youtubeAuth,
+          youtubeSubscriptions: youtubeSubscriptions,
           follows: follows,
           goLiveSettings: goLiveSettings,
           recommendationFeedback: feedback,
           onRequestSignIn: { showSignIn = true },
+          onRequestYouTubeSignIn: { showYouTubeSignIn = true },
           onClearWatchHistory: {
             watchHistory.clear()
             Task { await refreshPersonalizedIfNeeded(force: true) }
@@ -258,6 +264,7 @@ struct HomeView: View {
     .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive.pending)
     .task {
       auth.restore()
+      youtubeAuth.restore()
       goLive.notificationSettings = goLiveSettings
       goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
@@ -272,6 +279,7 @@ struct HomeView: View {
       await refreshPersonalizedIfNeeded(force: true)
       requestFocusIfPossible(force: true)
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
+      await youtubeSubscriptions.refresh(using: youtubeAuth)
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)
@@ -291,6 +299,9 @@ struct HomeView: View {
         await refreshFollowedChannelsIfNeeded(force: true)
         requestFocusIfPossible(force: true)
       }
+    }
+    .onChange(of: youtubeAuth.isAuthenticated) { _, _ in
+      Task { await youtubeSubscriptions.refresh(using: youtubeAuth, force: true) }
     }
     .onChange(of: selectedSidebarTab) { _, tab in
       guard tab == .home else { return }
@@ -351,6 +362,13 @@ struct HomeView: View {
           await refreshFollowedChannelsIfNeeded(force: true)
           requestFocusIfPossible(force: true)
         }
+      }
+      .environment(\.themePalette, resolvedPalette)
+      .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    }
+    .fullScreenCover(isPresented: $showYouTubeSignIn) {
+      YouTubeSignInView(auth: youtubeAuth) {
+        Task { await youtubeSubscriptions.refresh(using: youtubeAuth, force: true) }
       }
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)

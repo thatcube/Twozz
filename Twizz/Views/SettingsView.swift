@@ -11,10 +11,13 @@ import UIKit
 struct SettingsView: View {
   @Bindable var themeManager: ThemeManager
   let auth: TwitchAuthSession
+  var youtubeAuth: YouTubeAuthSession
+  var youtubeSubscriptions: YouTubeSubscriptionsService
   var follows: FollowedChannelsService
   var goLiveSettings: GoLiveNotificationSettings
   var recommendationFeedback: RecommendationFeedbackService
   var onRequestSignIn: () -> Void = {}
+  var onRequestYouTubeSignIn: () -> Void = {}
   var onClearWatchHistory: () -> Void = {}
   var onResetNotInterested: () -> Void = {}
   var onAccountChanged: () -> Void = {}
@@ -22,6 +25,7 @@ struct SettingsView: View {
 
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
+  @State private var showYouTubeSignOutConfirm = false
   @State private var showClearHistoryConfirm = false
   @State private var showResetNotInterestedConfirm = false
   @State private var topShelfStatus = TopShelfStore.diagnosticsSummary()
@@ -34,6 +38,7 @@ struct SettingsView: View {
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
   @AppStorage(GoLiveNotificationPreferences.enabledKey) private var goLiveAlertsEnabled = true
   @AppStorage("disableLiquidGlass") private var disableLiquidGlass = false
+  @AppStorage(YouTubePreferences.showSubscriptionsKey) private var showYouTubeSubscriptions = true
   @Environment(\.glassDisabled) private var glassDisabled
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -57,6 +62,7 @@ struct SettingsView: View {
 
             preferencesGroup
             accountSection
+            youTubeAccountSection
             topShelfSection
             AboutSection()
           }
@@ -393,6 +399,99 @@ struct SettingsView: View {
         .focusSection()
       }
     }
+  }
+
+  @ViewBuilder
+  private var youTubeAccountSection: some View {
+    if youtubeAuth.isConfigured {
+      let youTubeRed = Color(red: 1.0, green: 0.0, blue: 0.0)
+      if youtubeAuth.isAuthenticated {
+        VStack(alignment: .leading, spacing: 18) {
+          HStack(spacing: 20) {
+            Icon(glyph: .brandYoutube, size: 44)
+              .foregroundStyle(youTubeRed)
+
+            VStack(alignment: .leading, spacing: 4) {
+              Text("YouTube connected")
+                .font(.title3.weight(.semibold))
+              Text(youTubeSubscriptionSubtitle)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 24)
+
+            Button("Sign Out", role: .destructive) {
+              showYouTubeSignOutConfirm = true
+            }
+            .font(.headline)
+            .prominentActionButtonStyle()
+            .tint(.red)
+          }
+
+          Toggle(isOn: $showYouTubeSubscriptions) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Show YouTube subscriptions")
+                .font(.headline)
+              Text("Include channels you subscribe to on YouTube alongside your Twitch follows.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(disabled: glassDisabled)
+        .focusSection()
+        .confirmationDialog(
+          "Sign out of YouTube?",
+          isPresented: $showYouTubeSignOutConfirm,
+          titleVisibility: .visible
+        ) {
+          Button("Sign Out", role: .destructive) {
+            youtubeAuth.signOut()
+            onAccountChanged()
+          }
+          Button("Cancel", role: .cancel) {}
+        }
+      } else {
+        HStack(spacing: 24) {
+          Icon(glyph: .brandYoutube, size: 40)
+            .foregroundStyle(youTubeRed)
+
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Connect YouTube")
+              .font(.title3.weight(.bold))
+            Text("Sign in to bring your subscribed YouTube streamers into Twizz.")
+              .font(.callout)
+              .foregroundStyle(.secondary)
+          }
+
+          Spacer(minLength: 24)
+
+          Button("Sign In") {
+            onRequestYouTubeSignIn()
+          }
+          .font(.headline)
+          .prominentActionButtonStyle()
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(disabled: glassDisabled)
+        .focusSection()
+      }
+    }
+  }
+
+  private var youTubeSubscriptionSubtitle: String {
+    let count = youtubeSubscriptions.subscriptions.count
+    if youtubeSubscriptions.isLoading && count == 0 {
+      return "Loading your subscriptions…"
+    }
+    if count == 0 {
+      return "Signed in"
+    }
+    return "\(count) subscription\(count == 1 ? "" : "s")"
   }
 
 // MARK: - Theme option card

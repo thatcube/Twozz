@@ -232,7 +232,7 @@ struct StreamChannelCard: View {
     }
     .frame(width: layout.mediaWidth, height: layout.mediaHeight)
     .frame(maxWidth: layout.mediaWidth == nil ? .infinity : nil, alignment: .leading)
-    .aspectRatio(layout.mediaWidth == nil ? 16 / 9 : nil, contentMode: .fit)
+    .mediaAspectRatio(layout.mediaWidth == nil ? 16 / 9 : nil)
     .clipShape(RoundedRectangle(cornerRadius: layout.mediaCornerRadius, style: .continuous))
     .overlay {
       // A hairline rim on the media edge. It matches the frosted-glass tone of
@@ -448,6 +448,22 @@ private extension View {
           }
         }
       }
+    }
+  }
+}
+
+private extension View {
+  /// Applies a fixed media aspect ratio only when a ratio is supplied. Passing
+  /// `nil` leaves the view's existing (fixed-frame) sizing untouched — unlike
+  /// `aspectRatio(nil, contentMode:)`, which would make the view adopt its
+  /// content's intrinsic ratio (e.g. a 4:3 YouTube thumbnail) and overflow the
+  /// 16:9 rail frame.
+  @ViewBuilder
+  func mediaAspectRatio(_ ratio: CGFloat?) -> some View {
+    if let ratio {
+      aspectRatio(ratio, contentMode: .fit)
+    } else {
+      self
     }
   }
 }

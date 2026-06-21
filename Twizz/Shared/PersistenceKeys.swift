@@ -81,6 +81,11 @@ enum PersistenceKey {
   static let chatLineSpacingLegacy = "chatLineSpacing"
   static let chatWidthValue = "chatWidthValue"
   static let chatWidthModeLegacy = "chatWidthMode"
+
+  // MARK: Settings view bindings (also bound via `@AppStorage` in views)
+
+  static let showChatByDefault = "showChatByDefault"
+  static let disableLiquidGlass = "disableLiquidGlass"
 }
 
 /// Small typed helpers that wrap the `JSONEncoder`/`JSONDecoder` round-trip used

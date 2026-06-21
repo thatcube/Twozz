@@ -51,6 +51,7 @@ enum Glyph: String {
   case brandFacebook = "brand-facebook"
   case brandDiscord = "brand-discord"
   case brandTwitch = "brand-twitch"
+  case brandKick = "brand-kick"
   case brandGithub = "brand-github"
   case brandReddit = "brand-reddit"
   case brandPatreon = "brand-patreon"

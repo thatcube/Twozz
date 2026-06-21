@@ -198,7 +198,7 @@ struct StreamChannelCard: View {
     if !channel.gameName.isEmpty {
       parts.append(channel.gameName)
     }
-    if channel.isLive, let viewerCount = channel.viewerCount {
+    if channel.isLive, let viewerCount = channel.combinedViewerCount {
       parts.append("\(viewerCount) watching")
     }
     return Text(parts.joined(separator: ", "))
@@ -236,7 +236,7 @@ struct StreamChannelCard: View {
         )
       }
       .overlay(alignment: .bottomLeading) {
-        LiveBadge(isLive: channel.isLive, viewerCount: channel.viewerCount)
+        LiveBadge(isLive: channel.isLive, viewerCount: channel.combinedViewerCount)
           .padding(12)
       }
     .frame(width: layout.mediaWidth, height: layout.mediaHeight)

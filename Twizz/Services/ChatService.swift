@@ -164,6 +164,11 @@ final class ChatService {
   /// actually live (rather than just "connected").
   var kickResolvedSlug: String?
   var kickResolvedIsLive = false
+  /// Concurrent viewers on the resolved Kick livestream, captured from the
+  /// channel API when it last resolved while live. `nil` when the channel was
+  /// offline at resolve (or its count was unavailable), so the player never
+  /// shows a Kick count for a channel that isn't live.
+  var kickViewerCount: Int?
   var kickSeenMessageIDs: Set<String> = []
   var kickSeenMessageOrder: [String] = []
   /// Rolling cap on retained chat lines. The live list backs a `LazyVStack`

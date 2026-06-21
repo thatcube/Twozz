@@ -112,6 +112,12 @@ struct PlayerTitleHeader: View {
   let title: String
   @Bindable var latency: LatencyReadout
   let hermes: HermesEventService
+  /// Source of the Kick live viewer count when a Kick target is merged into the
+  /// player; `@Observable`, so the per-platform row re-renders as it resolves.
+  let chat: ChatService
+  /// Concurrent YouTube viewers for this stream, already gated to "live on
+  /// YouTube" by the caller (`nil` when the creator isn't live on YouTube).
+  let youtubeViewerCount: Int?
   /// Whether the viewer/latency subheader may appear at all (live only).
   let showSubheader: Bool
   let showLatency: Bool
@@ -121,8 +127,26 @@ struct PlayerTitleHeader: View {
   /// (matching the bottom scrim), so white reads in every theme.
   private var foreground: Color { .white }
 
-  /// Brick red from the requested reference, kept legible over the scrim.
-  private static let viewerTint = Color(red: 0.86, green: 0.26, blue: 0.22)
+  /// Per-platform viewer counts for the platforms the stream is *currently live
+  /// on*: Twitch from the pubsub-backed `hermes.viewerCount` (the header only
+  /// renders while the Twitch channel is live), YouTube from the public live
+  /// snapshot (passed in pre-gated to "live on YouTube"), and Kick from the
+  /// merged channel when its Kick target resolved live with a known count. A
+  /// platform is only included when it's live and its count is known.
+  private var platformViewerCounts: [PlatformViewerCount] {
+    guard showViewerCount else { return [] }
+    var counts: [PlatformViewerCount] = []
+    if let twitchViewers = hermes.viewerCount {
+      counts.append(PlatformViewerCount(platform: .twitch, count: twitchViewers))
+    }
+    if let youtubeViewers = youtubeViewerCount {
+      counts.append(PlatformViewerCount(platform: .youtube, count: youtubeViewers))
+    }
+    if chat.kickMergeEnabled, chat.kickResolvedIsLive, let kickViewers = chat.kickViewerCount {
+      counts.append(PlatformViewerCount(platform: .kick, count: kickViewers))
+    }
+    return counts
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -135,22 +159,28 @@ struct PlayerTitleHeader: View {
         .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
 
       if showSubheader {
-        let viewers = showViewerCount ? hermes.viewerCount : nil
-        if viewers != nil || showLatency {
+        let counts = platformViewerCounts
+        if !counts.isEmpty || showLatency {
           HStack(spacing: 16) {
-            if let viewers {
-              HStack(spacing: 8) {
-                Icon(glyph: .user, size: 24)
-                  .foregroundStyle(Self.viewerTint)
-                Text(viewers.formatted(.number))
-                  .font(.footnote)
-                  .fontWeight(.semibold)
-                  .foregroundStyle(foreground)
-                  .monospacedDigit()
-                  .contentTransition(.numericText())
+            if !counts.isEmpty {
+              HStack(spacing: 16) {
+                ForEach(counts) { entry in
+                  HStack(spacing: 8) {
+                    Icon(glyph: entry.platform.glyph, size: 24)
+                      .foregroundStyle(entry.platform.tint)
+                    Text(entry.count.formatted(.number))
+                      .font(.footnote)
+                      .fontWeight(.semibold)
+                      .foregroundStyle(foreground)
+                      .monospacedDigit()
+                      .contentTransition(.numericText())
+                  }
+                  .accessibilityElement(children: .ignore)
+                  .accessibilityLabel(
+                    "\(entry.count.formatted(.number)) watching on \(entry.platform.accessibilityName)"
+                  )
+                }
               }
-              .accessibilityElement(children: .ignore)
-              .accessibilityLabel("\(viewers.formatted(.number)) watching")
             }
 
             if showLatency {
@@ -166,7 +196,7 @@ struct PlayerTitleHeader: View {
             }
           }
           .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 1)
-          .animation(.easeInOut(duration: 0.25), value: viewers)
+          .animation(.easeInOut(duration: 0.25), value: counts)
         }
       }
     }

@@ -60,6 +60,10 @@ struct PlayerView: View {
   @Environment(\.themePalette) var palette
   @Environment(\.glassDisabled) var glassDisabled
   @Environment(\.accessibilityReduceMotion) var reduceMotion
+  /// App-global services. Used here to source the in-player YouTube viewer count
+  /// from the same public live snapshot the Home cards use (followed channels
+  /// carry the streamer's YouTube channel ID; the snapshot holds its live count).
+  @Environment(AppEnvironment.self) var environment
   @AppStorage(PersistenceKey.preferredQuality) var preferredQuality = "Auto"
   /// Latency-vs-quality profile for the adaptive ("Auto") stream, surfaced as the
   /// two Auto rows in the quality picker. Stored as the enum raw value; read it

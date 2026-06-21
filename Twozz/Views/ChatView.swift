@@ -62,10 +62,6 @@ struct ChatView: View {
   var scrollTarget: ChatScrollTarget? = nil
   @Environment(\.themePalette) var palette
   @Environment(\.glassDisabled) var glassDisabled
-  @State private var pendingScrollWork: DispatchWorkItem?
-  /// Newest message id, tracked separately so the throttled auto-scroll always
-  /// targets the true latest message even if more arrived during its window.
-  @State private var latestMessageID: UUID?
   /// Drives the swipe-up hint chevron: it fades + drifts up once, slightly after
   /// the pill animates in. Reset to false on disappear so it replays on reopen.
   @State var hintShown = false
@@ -166,13 +162,21 @@ struct ChatView: View {
         .padding(.vertical, verticalPadding)
       }
       .scrollIndicators(.hidden)
+      // Pin the list to the bottom natively. Unlike a manual `scrollTo(lastID,
+      // anchor: .bottom)` — which must sum the heights of every row above the
+      // target, including off-screen lazy rows whose heights are only *estimated*
+      // (and fluctuate as the capped buffer trims the front and appends the back),
+      // causing the list to overshoot upward then snap back down — this keeps the
+      // bottom *content edge* glued to the viewport as content grows. It's a
+      // relative pin with no per-item offset math, so live chat stays steady with
+      // no upward re-adjustment, and it also absorbs a row growing taller when its
+      // emotes finish loading.
+      .defaultScrollAnchor(.bottom)
       .onChange(of: scrollTarget) { _, target in
         // Manual scroll: jump to the requested message. Discrete swipes animate
         // for a snappy feel; continuous gesture scrolling sends un-animated
         // targets so the stream of updates reads as a smooth drag.
         guard let target else { return }
-        pendingScrollWork?.cancel()
-        pendingScrollWork = nil
         if target.animated {
           withAnimation(.spring(response: 0.24, dampingFraction: 0.84)) {
             proxy.scrollTo(target.id, anchor: target.anchor)
@@ -181,46 +185,14 @@ struct ChatView: View {
           proxy.scrollTo(target.id, anchor: target.anchor)
         }
       }
-      .onChange(of: messages.last?.id) {
-        // Keyed off the newest message id rather than `messages.count`: the chat
-        // buffer is capped (see ChatService.maxBufferedMessages), so on a busy
-        // channel each new message trims one off the front and the count stays
-        // pinned at the cap forever. A count-based trigger would stop firing and
-        // auto-scroll would silently freeze; the last id changes on every message.
-        guard autoScroll, let last = messages.last else { return }
-        // Keep the target current (cheap) so a burst still lands on the newest
-        // message, but only run one *un-animated* scroll per ~100ms. Animating a
-        // scrollTo on every incoming message forces a continuous stream of layout
-        // passes — the dominant chat cost on fast/raided channels. Un-animated
-        // anchoring just keeps the list pinned to the bottom, which is smoother.
-        latestMessageID = last.id
-        guard pendingScrollWork == nil else { return }
-        let work = DispatchWorkItem {
-          pendingScrollWork = nil
-          guard autoScroll, let id = latestMessageID else { return }
-          proxy.scrollTo(id, anchor: .bottom)
-        }
-        pendingScrollWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
-      }
       .onChange(of: autoScroll) { _, isOn in
-        // Cancel any throttled auto-scroll the moment the user pauses/scrolls.
-        // The work item scheduled in the `messages.last?.id` handler captures a
-        // *stale* `autoScroll` (SwiftUI views are value types), so its own guard
-        // can't see the live paused state — without this cancel, a message that
-        // landed in the ~100ms before the user grabbed the list would still yank
-        // it to the bottom and fight the scroll.
-        pendingScrollWork?.cancel()
-        pendingScrollWork = nil
-        // Resuming after a pause: snap back to the newest message.
+        // Resuming after a pause: snap back to the newest message. (Live pinning
+        // is handled natively by `defaultScrollAnchor(.bottom)`; this is just the
+        // one-shot animated catch-up when the reader rejoins the feed.)
         guard isOn, let last = messages.last else { return }
         withAnimation(.easeOut(duration: 0.18)) {
           proxy.scrollTo(last.id, anchor: .bottom)
         }
-      }
-      .onDisappear {
-        pendingScrollWork?.cancel()
-        pendingScrollWork = nil
       }
       .overlay(alignment: .bottom) {
         if !autoScroll {

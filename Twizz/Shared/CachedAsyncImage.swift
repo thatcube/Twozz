@@ -1,50 +1,48 @@
+import SDWebImage
+import SDWebImageSwiftUI
 import SwiftUI
-import UIKit
 
-/// A small in-memory cache of decoded images, keyed by URL. `AsyncImage` keeps no
-/// cache of its own, so as tvOS recycles cards during scrolling it re-fetches and
-/// re-decodes the same thumbnails repeatedly — the dominant cost when flicking
-/// through the channel page's clip/VOD rails. This keeps decoded `UIImage`s around
-/// so a recycled card paints instantly. `NSCache` is thread-safe and evicts under
-/// memory pressure on its own.
+/// Best-effort cache prewarming, backed by SDWebImage's shared image cache. The
+/// app standardizes on SDWebImage for all image loading/caching (it already
+/// powers chat emotes/badges and decodes WebP/animated content), so prewarming
+/// here populates the *same* memory+disk cache that `CachedAsyncImage` and
+/// `WebImage` read from — no second parallel cache. As tvOS recycles cards while
+/// scrolling, an already-warmed thumbnail paints from cache instead of being
+/// re-fetched and re-decoded.
 final class ImageMemoryCache: @unchecked Sendable {
   static let shared = ImageMemoryCache()
-  private let cache = NSCache<NSURL, UIImage>()
 
-  private init() {
-    cache.countLimit = 240
-  }
+  private init() {}
 
-  func image(for url: URL) -> UIImage? {
-    cache.object(forKey: url as NSURL)
-  }
-
-  func insert(_ image: UIImage, for url: URL) {
-    cache.setObject(image, forKey: url as NSURL)
-  }
-
-  /// Decode `url` and insert it into the cache ahead of time, so a view that
-  /// later renders it (via `CachedAsyncImage`) paints the image on its first
-  /// frame instead of popping it in a frame or two later. Best-effort and
-  /// idempotent; a nil URL or an existing cache entry is a no-op.
+  /// Fetch `url` and store it in SDWebImage's cache ahead of time, so a view that
+  /// later renders it (via `CachedAsyncImage`) paints on its first frame instead
+  /// of popping in once the download finishes. Best-effort, low priority, and
+  /// idempotent; a nil URL or an already-cached entry resolves immediately.
   func prewarm(_ url: URL?) async {
-    guard let url, image(for: url) == nil else { return }
-    guard let prepared = await CachedAsyncImage<Image, Image>.fetchAndDecode(url) else { return }
-    insert(prepared, for: url)
+    guard let url else { return }
+    await withCheckedContinuation { continuation in
+      SDWebImageManager.shared.loadImage(
+        with: url,
+        options: [.lowPriority],
+        progress: nil
+      ) { _, _, _, _, _, _ in
+        continuation.resume()
+      }
+    }
   }
 }
 
-/// Drop-in replacement for the two-closure `AsyncImage` that adds a decoded-image
-/// memory cache (and rides the shared `URLCache` for the network layer). Behavior
-/// matches `AsyncImage`: `placeholder` shows until the image resolves, and a nil
-/// URL stays on the placeholder. Used for the channel page's media tiles, avatar,
-/// banner, and live thumbnail so scrolling doesn't thrash the decoder.
+/// Drop-in replacement for the two-closure `AsyncImage`, implemented as a thin
+/// wrapper over SDWebImage's `WebImage`. Behavior matches `AsyncImage`:
+/// `placeholder` shows until the image resolves, and a nil URL stays on the
+/// placeholder. Routing through `WebImage` means media tiles, avatars, banners,
+/// and live thumbnails share the single SDWebImage cache (memory + disk, WebP
+/// aware) used everywhere else, so scrolling doesn't thrash the decoder and a
+/// recycled card paints from cache on its first frame.
 struct CachedAsyncImage<Content: View, Placeholder: View>: View {
   private let url: URL?
   private let content: (Image) -> Content
   private let placeholder: () -> Placeholder
-
-  @State private var uiImage: UIImage?
 
   init(
     url: URL?,
@@ -54,53 +52,17 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     self.url = url
     self.content = content
     self.placeholder = placeholder
-    // Seed from the decoded-image cache synchronously so an already-warmed image
-    // paints on the very first frame. Without this, `uiImage` starts nil and the
-    // real image swaps in a frame or two later — which makes it pop into place
-    // instead of animating in alongside whatever transition is presenting us.
-    _uiImage = State(initialValue: url.flatMap { ImageMemoryCache.shared.image(for: $0) })
   }
 
   var body: some View {
-    Group {
-      if let uiImage {
-        content(Image(uiImage: uiImage))
-      } else {
-        placeholder()
-      }
+    // Pin animation off so cards/avatars render a single static frame, matching
+    // the prior decoded-`UIImage` behavior; animated emotes have their own
+    // `AnimatedImage`/`WebImage` paths in chat. SDWebImage serves an already
+    // cached image synchronously, so a warmed tile still paints immediately.
+    WebImage(url: url, isAnimating: .constant(false)) { image in
+      content(image)
+    } placeholder: {
+      placeholder()
     }
-    .task(id: url) { await load() }
-  }
-
-  private func load() async {
-    guard let url else {
-      uiImage = nil
-      return
-    }
-
-    if let cached = ImageMemoryCache.shared.image(for: url) {
-      uiImage = cached
-      return
-    }
-
-    uiImage = nil
-    guard let prepared = await Self.fetchAndDecode(url) else { return }
-    guard !Task.isCancelled else { return }
-    ImageMemoryCache.shared.insert(prepared, for: url)
-    uiImage = prepared
-  }
-
-  /// Fetches and *fully decodes* the image off the main thread. `UIImage(data:)`
-  /// alone defers decoding until the image is first drawn — which lands on the
-  /// main thread mid-scroll and stutters as each new tile appears. Forcing the
-  /// decode here with `preparingForDisplay()` (and being `nonisolated` so it runs
-  /// on the cooperative pool, not the MainActor) hands SwiftUI a ready-to-blit
-  /// bitmap, so painting a recycled card costs nothing on the main thread.
-  nonisolated static func fetchAndDecode(_ url: URL) async -> UIImage? {
-    var request = URLRequest(url: url)
-    request.cachePolicy = .returnCacheDataElseLoad
-    guard let (data, _) = try? await URLSession.shared.data(for: request),
-          let image = UIImage(data: data) else { return nil }
-    return image.preparingForDisplay() ?? image
   }
 }

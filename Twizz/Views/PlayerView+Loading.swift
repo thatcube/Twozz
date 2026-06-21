@@ -51,6 +51,14 @@ extension PlayerView {
           player.replaceCurrentItem(with: nil)
           return
         }
+        // A "prefer YouTube" auto-default (or a manual pick) may have promoted
+        // the alternate source while this Twitch resolve was in flight. Bail
+        // before swapping in the Twitch item / re-arming the Twitch-only control
+        // loops, so we don't clobber the alt source or cause a visible flap.
+        if isUsingAltSource {
+          isLoading = false
+          return
+        }
         playback = resolved
         player.replaceCurrentItem(with: makeItem(url: resolved.master))
         applyQualityPreference(preferredQuality)

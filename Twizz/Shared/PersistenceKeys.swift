@@ -70,6 +70,11 @@ enum PersistenceKey {
   static let lowLatencyProxyEnabled = "lowLatencyProxyEnabled"
   static let streamRewindEnabled = "streamRewindEnabled"
 
+  /// Auto-select a creator's YouTube simulcast as the default playback source
+  /// when one is live (generally lower latency than the proxied Twitch path).
+  /// Default ON; the viewer can still switch sources manually per stream.
+  static let preferYouTubeSource = "preferYouTubeSource"
+
   // MARK: Chat appearance migration — one-time legacy→numeric conversion
 
   static let chatAppearanceMigratedV1 = "chatAppearanceMigratedV1"

@@ -109,6 +109,9 @@ extension PlayerView {
 
   /// Applies a Stream Source picker choice, switching the active video source.
   func selectStreamSource(at index: Int) {
+    // A picker choice is deliberate intent: record it so the "prefer YouTube"
+    // auto-default won't later yank the viewer off the source they chose.
+    didManuallySelectSource = true
     let wantYouTube = (index == 1)
     if wantYouTube != isUsingAltSource {
       if wantYouTube {
@@ -140,6 +143,28 @@ extension PlayerView {
     let master = await AltSourceService.youtubeHLSMaster(forTarget: target)
     guard login == activeChannel else { return }
     youtubeSourceAvailable = (master != nil)
+
+    // With a confirmed simulcast in hand, honor the "prefer YouTube" default by
+    // promoting it to the active source. Done here (rather than in `load()`) so
+    // it fires the moment availability resolves, even if the Twitch pipeline
+    // came up first — yielding a single clean switch instead of a flap.
+    if master != nil {
+      await autoSelectYouTubeSourceIfPreferred()
+    }
+  }
+
+  /// Switches to the YouTube simulcast as the default source when the viewer
+  /// prefers it and the active channel has a confirmed live source — unless the
+  /// viewer already made a deliberate Stream Source choice for this channel.
+  /// Reuses the existing alt-source machinery; non-YouTube channels and VODs are
+  /// untouched, and a manual switch (in either direction) is never overridden.
+  func autoSelectYouTubeSourceIfPreferred() async {
+    guard preferYouTubeSource else { return }
+    guard !isVOD else { return }
+    guard youtubeSourceAvailable else { return }
+    guard !isUsingAltSource else { return }
+    guard !didManuallySelectSource else { return }
+    await switchToAltYouTubeSource()
   }
 
   /// Polls the alternate-source item each monitor tick and reports its *real*

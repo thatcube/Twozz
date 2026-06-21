@@ -128,6 +128,10 @@ final class PlayerModel {
   /// Whether the active channel actually has a resolvable YouTube simulcast.
   /// Probed on channel load; gates the Stream Source picker in the quality menu.
   var youtubeSourceAvailable = false
+  /// True once the viewer has made a deliberate Stream Source choice for the
+  /// current channel. Suppresses the "prefer YouTube" auto-default so a manual
+  /// switch (in either direction) is never yanked back. Reset on channel change.
+  var didManuallySelectSource = false
 
   // MARK: Stream Rewind (DVR) / scrub / VOD hand-off
 
@@ -321,6 +325,10 @@ extension PlayerView {
   var youtubeSourceAvailable: Bool {
     get { model.youtubeSourceAvailable }
     nonmutating set { model.youtubeSourceAvailable = newValue }
+  }
+  var didManuallySelectSource: Bool {
+    get { model.didManuallySelectSource }
+    nonmutating set { model.didManuallySelectSource = newValue }
   }
   var isUserPaused: Bool {
     get { model.isUserPaused }

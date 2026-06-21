@@ -1,0 +1,61 @@
+name: Bump marketing version
+
+# Auto-increments the app's marketing version (CFBundleShortVersionString) one
+# MINOR per feature that lands on `main`, implementing the two-number scheme:
+#   * MARKETING_VERSION  — semver shown to users (0.1.0 -> 0.2.0 -> 0.3.0 ...),
+#                          bumped here on every push to main.
+#   * CFBundleVersion    — monotonic build number from `git rev-list --count`,
+#                          set at build time (project.yml). Untouched here.
+#
+# The maintainer merges feature branches directly into `main` (no PRs), so each
+# such merge is a push to `main` and triggers exactly one minor bump.
+#
+# Loop guard: the bump commit is pushed with the default GITHUB_TOKEN, and
+# GitHub does NOT start new workflow runs for GITHUB_TOKEN pushes, so this can't
+# recurse. As belt-and-suspenders we also tag the commit with `[skip ci]` and
+# skip the job when the head commit already carries that marker.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # commit the bumped project.yml back to main
+
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0 # full history; the script edits project.yml only
+
+      - name: Bump minor version
+        id: bump
+        run: |
+          set -euo pipefail
+          before="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([0-9.]+)"?[[:space:]]*$/\1/p' project.yml | head -n1)"
+          ./tools/bump-version.sh
+          after="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([0-9.]+)"?[[:space:]]*$/\1/p' project.yml | head -n1)"
+          echo "before=$before" >>"$GITHUB_OUTPUT"
+          echo "after=$after"   >>"$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- project.yml; then
+            echo "No version change to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add project.yml
+          git commit -m "chore: bump marketing version ${{ steps.bump.outputs.before }} -> ${{ steps.bump.outputs.after }} [skip ci]"
+          git push origin HEAD:main

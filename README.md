@@ -131,6 +131,37 @@ regenerates the Xcode project. Without it, builds fail with
 
 On Apple TV, sign-in uses Twitch Device Code flow: start sign-in on TV, then complete approval on your phone/browser (including the Twitch mobile app browser flow) using the shown code/link.
 
+## Versioning & Releases
+
+Twizz follows the standard Apple two-number scheme, and both numbers update
+automatically — you should not normally edit version numbers by hand:
+
+- **Marketing version** — `CFBundleShortVersionString`, a semver like `0.2.0`,
+  defined by `MARKETING_VERSION` in `project.yml`. It bumps one **minor** per
+  feature merged into `main`. The [`version-bump`](.github/workflows/version-bump.yml)
+  GitHub Actions workflow runs on every push to `main`, runs
+  [`tools/bump-version.sh`](tools/bump-version.sh) (minor +1, patch → 0), and
+  commits the change back to `main` with a `[skip ci]` marker. Bot pushes don't
+  retrigger Actions, so the bump can't loop.
+- **Build number** — `CFBundleVersion`, a monotonic integer derived from
+  `git rev-list --count HEAD` by the `postBuildScripts` in `project.yml` (the app
+  and the Top Shelf extension are kept in lockstep). It is set at build time and
+  never hand-edited.
+
+Manual bump (e.g. a major release): run `tools/bump-version.sh` or edit
+`MARKETING_VERSION` in `project.yml`, then `xcodegen generate`.
+
+Releases ship to TestFlight with fastlane using an App Store Connect API key:
+
+```bash
+cp .env.fastlane.example .env.fastlane   # fill in ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH
+fastlane beta --env fastlane             # archive a Release build + upload to TestFlight
+```
+
+`.env.fastlane` and the `.p8` key are gitignored — never commit them. Other
+lanes: `fastlane build` (archive only, no upload), `fastlane release`,
+`fastlane metadata`.
+
 ## How Playback Works
 
 Apple TV has no official Twitch playback SDK. Twizz resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.

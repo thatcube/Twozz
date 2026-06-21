@@ -67,6 +67,33 @@ refuse Swift Package Manager's bare dependency repos and breaks `xcodebuild`
 during "Resolve Package Graph". The wrapper relaxes only that one setting for the
 build subprocess. If a raw `xcodebuild` fails with that error, use the wrapper.
 
+## Versioning
+
+Twizz uses the standard two-number Apple scheme, both driven automatically — do
+not hand-edit version numbers:
+
+- **Marketing version** (`CFBundleShortVersionString`) is `MARKETING_VERSION` in
+  `project.yml` (semver, e.g. `0.2.0`). It bumps one **minor** per feature that
+  lands on `main`: the `.github/workflows/version-bump.yml` workflow runs on
+  every push to `main`, calls `tools/bump-version.sh` (minor +1, patch → 0),
+  and commits the result back with a `[skip ci]` marker. The bot push doesn't
+  retrigger Actions, so it can't loop. After a feature merges, re-sync other
+  worktrees so they pick up the bumped `project.yml`.
+- **Build number** (`CFBundleVersion`) is set at build time from
+  `git rev-list --count HEAD` by the `postBuildScripts` in `project.yml` (kept
+  in lockstep between the app and the TopShelf extension). It's monotonic and
+  never edited by hand.
+
+To bump the marketing version manually (e.g. a major bump), run
+`tools/bump-version.sh` or edit `MARKETING_VERSION` in `project.yml` directly,
+then `xcodegen generate`.
+
+Releases go to TestFlight via fastlane (`fastlane beta --env fastlane`). The App
+Store Connect credential workflow (the `.p8` API key, the `ASC_*` env vars, and
+the gitignored `.env.fastlane`) is documented in
+[`fastlane/README.md`](fastlane/README.md); machine-specific values live in the
+maintainer's gitignored `AGENTS.local.md`, never in the repo.
+
 ## Design: prefer native components and appearance
 
 Default to platform-native UI. When building or changing UI, prefer SwiftUI/UIKit's

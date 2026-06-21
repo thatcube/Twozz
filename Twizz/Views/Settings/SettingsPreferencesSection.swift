@@ -23,6 +23,7 @@ struct SettingsPreferencesSection: View {
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
   @AppStorage(GoLiveNotificationPreferences.enabledKey) private var goLiveAlertsEnabled = true
+  @AppStorage(PersistenceKey.preferYouTubeSource) private var preferYouTubeSource = true
   @AppStorage(PersistenceKey.disableLiquidGlass) private var disableLiquidGlass = false
 
   @Environment(\.glassDisabled) private var glassDisabled
@@ -56,6 +57,11 @@ struct SettingsPreferencesSection: View {
       groupDivider
 
       goLiveAlertsRow
+        .padding(.vertical, 16)
+
+      groupDivider
+
+      preferYouTubeSourceRow
         .padding(.vertical, 16)
 
       groupDivider
@@ -223,6 +229,26 @@ struct SettingsPreferencesSection: View {
       .settingPillStyle(isSelected: false)
       .disabled(!goLiveAlertsEnabled)
       .opacity(goLiveAlertsEnabled ? 1 : 0.4)
+    }
+  }
+
+  /// When a creator is simulcasting live on YouTube, default playback to the
+  /// YouTube source (generally lower latency than the proxied Twitch path).
+  /// Off leaves Twitch as the default; either way the in-player Stream Source
+  /// picker still lets the viewer switch per stream.
+  private var preferYouTubeSourceRow: some View {
+    SettingRow(
+      title: "Prefer YouTube source",
+      subtitle: "When a channel is live on YouTube too, start on YouTube for lower latency. You can still switch sources while watching."
+    ) {
+      ForEach([true, false], id: \.self) { on in
+        Button {
+          preferYouTubeSource = on
+        } label: {
+          SettingPill(title: on ? "On" : "Off", isSelected: preferYouTubeSource == on)
+        }
+        .settingPillStyle(isSelected: preferYouTubeSource == on)
+      }
     }
   }
 

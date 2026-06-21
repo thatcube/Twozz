@@ -45,6 +45,15 @@ final class WebSocketConnection {
     replace(with: urlSession.webSocketTask(with: url))
   }
 
+  /// Build a WebSocket task on this connection's reused `URLSession` without
+  /// starting or installing it. For protocol-level reconnects to a
+  /// server-provided URL where the caller drives `replace(with:)` itself —
+  /// reusing the existing session avoids leaking a fresh `URLSession` per
+  /// (rare) server-initiated reconnect.
+  func makeTask(to url: URL) -> URLSessionWebSocketTask {
+    urlSession.webSocketTask(with: url)
+  }
+
   /// Replace the active socket with a caller-built task, cancelling the previous
   /// one (`.goingAway`) first, then start it. For protocol-level reconnects to a
   /// server-provided URL where the caller must construct the task itself.
@@ -76,12 +85,16 @@ final class WebSocketConnection {
     reconnectAttempts = 0
   }
 
-  /// The next reconnect delay in seconds — `min(3 * 2^attempts, 30)` — and
-  /// advance the attempt counter. Identical schedule and increment point to the
-  /// inline plumbing it replaces (3s, 6s, 12s, 24s, … capped at 30s).
+  /// The next reconnect delay in seconds and advance the attempt counter. The
+  /// base schedule is `min(3 * 2^attempts, 30)` (3s, 6s, 12s, 24s, … capped at
+  /// 30s), with *equal jitter* applied: the result is `base/2 + random(0...base/2)`.
+  /// Keeping at least half the base preserves the exponential growth, while the
+  /// random half spreads reconnects so independent sockets (e.g. Twitch + Kick)
+  /// that drop together don't all reconnect in lockstep (thundering herd).
   func nextBackoffDelay() -> Double {
-    let delay = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
+    let base = min(3.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
     reconnectAttempts += 1
-    return delay
+    let half = base / 2
+    return half + Double.random(in: 0...half)
   }
 }

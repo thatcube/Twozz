@@ -171,6 +171,14 @@ final class TwitchAuthSession {
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
         userDefaults.removeObject(forKey: StorageKey.profileImageURL)
+
+        // Drop cached per-channel emote/badge/cheermote catalogs so a new
+        // session starts clean rather than reusing the prior viewer's caches.
+        Task {
+            await EmoteCatalogService.shared.clear()
+            await BadgeCatalogService.shared.clear()
+            await CheermoteCatalogService.shared.clear()
+        }
     }
 
     func clearStoredAuthState() {

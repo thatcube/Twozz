@@ -66,7 +66,7 @@ final class StreamerAffinityService {
       request.setValue(etag, forHTTPHeaderField: "If-None-Match")
     }
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
+    guard let (data, response) = try? await NetworkClient.api.data(for: request),
           let http = response as? HTTPURLResponse
     else { return }
 
@@ -94,7 +94,7 @@ final class StreamerAffinityService {
   /// Parses an affinity document and normalizes every login to lowercase,
   /// dropping empty keys and self-references.
   private static func decode(_ data: Data) -> StreamerAffinityMap? {
-    guard let document = try? JSONDecoder().decode(Document.self, from: data) else { return nil }
+    guard let document = try? TwitchAPIClient.sharedDecoder.decode(Document.self, from: data) else { return nil }
     var neighbors: [String: [String]] = [:]
     for (rawKey, rawValues) in document.map {
       let key = rawKey.lowercased()

@@ -80,7 +80,7 @@ struct FollowedChannelsDemoProvider {
     req.httpBody = try JSONSerialization.data(
       withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: ["first": limit]))
 
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     try TwitchAPIClient.validatedData(data, response)
 
     let decoded = try TwitchAPIClient.decode(TrendingEnvelope.self, from: data)

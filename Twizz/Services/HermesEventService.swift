@@ -583,7 +583,7 @@ final class HermesEventService {
       withJSONObject: TwitchAPIClient.graphQLBody(
         query: "query($login:String!){user(login:$login){id}}", variables: ["login": login]))
 
-    let (data, _) = try await URLSession.shared.data(for: req)
+    let (data, _) = try await NetworkClient.api.data(for: req)
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
       let dataObj = json["data"] as? [String: Any],
       let user = dataObj["user"] as? [String: Any],

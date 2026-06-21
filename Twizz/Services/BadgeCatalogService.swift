@@ -7,11 +7,11 @@ actor BadgeCatalogService {
   private let userAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
-  private var cache: [String: [String: URL]] = [:]
+  private var cache = BoundedCache<String, [String: URL]>(capacity: 48, ttl: 1800)
 
   func catalog(for channel: String) async -> [String: URL] {
     let key = channel.lowercased()
-    if let cached = cache[key] { return cached }
+    if let cached = cache.value(forKey: key) { return cached }
 
     let userID = await twitchUserID(for: key)
 
@@ -19,8 +19,13 @@ actor BadgeCatalogService {
     async let channelBadges = fetchChannelBadges(twitchUserID: userID)
 
     let merged = (await global).merging(await channelBadges) { _, new in new }
-    cache[key] = merged
+    cache.insert(merged, forKey: key)
     return merged
+  }
+
+  /// Drops all cached catalogs (e.g. on sign-out).
+  func clear() {
+    cache.removeAll()
   }
 
   private func fetchGlobalBadges() async -> [String: URL] {
@@ -120,14 +125,14 @@ actor BadgeCatalogService {
   private func fetchJSON(url: URL) async -> Any? {
     var req = URLRequest(url: url)
     req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-    guard let (data, response) = try? await URLSession.shared.data(for: req) else { return nil }
+    guard let (data, response) = try? await NetworkClient.api.data(for: req) else { return nil }
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else { return nil }
     return try? JSONSerialization.jsonObject(with: data)
   }
 
   private func fetchJSON(request: URLRequest) async -> Any? {
-    guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
+    guard let (data, response) = try? await NetworkClient.api.data(for: request) else { return nil }
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else { return nil }
     return try? JSONSerialization.jsonObject(with: data)

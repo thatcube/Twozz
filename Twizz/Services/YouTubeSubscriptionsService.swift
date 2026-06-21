@@ -117,14 +117,14 @@ final class YouTubeSubscriptionsService {
     request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     request.timeoutInterval = 20
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await NetworkClient.api.data(for: request)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else {
       let message = String(data: data, encoding: .utf8)
       throw YouTubeAuthHTTPError(
         context: "fetching YouTube subscriptions", status: status, error: nil, message: message)
     }
-    return try JSONDecoder().decode(SubscriptionsResponse.self, from: data)
+    return try YouTubeConfig.sharedDecoder.decode(SubscriptionsResponse.self, from: data)
   }
 
   // MARK: - Caching
@@ -146,7 +146,7 @@ final class YouTubeSubscriptionsService {
 
   private static func loadCached() -> [YouTubeSubscription]? {
     guard let url = cacheURL, let data = try? Data(contentsOf: url),
-      let entries = try? JSONDecoder().decode([CacheEntry].self, from: data)
+      let entries = try? YouTubeConfig.sharedDecoder.decode([CacheEntry].self, from: data)
     else { return nil }
     return entries.map {
       YouTubeSubscription(

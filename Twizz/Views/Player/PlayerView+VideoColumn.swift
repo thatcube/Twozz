@@ -6,26 +6,31 @@ import UIKit
 
 extension PlayerView {
   /// The concurrent YouTube viewer count to show in the player's per-platform
-  /// row, or `nil` when this stream's creator isn't live on YouTube (or isn't a
-  /// known dual-platform streamer). Sourced from the same public live snapshot
-  /// the Home cards use: the followed channel carries the streamer's YouTube
-  /// channel ID, and the snapshot service holds the live presence + viewers for
-  /// it — so we never show a YouTube count for a channel that isn't live there,
-  /// and never call the YouTube API from the device. YouTube chat-merge has no
-  /// viewer metadata, so the snapshot is the only honest source in the player.
+  /// row, or `nil` when this stream's creator isn't live on YouTube. Resolves the
+  /// streamer's YouTube channel ID from either the followed-channel enrichment
+  /// (dual-platform follows) or the public Twitch→YouTube alias table (so it also
+  /// covers simulcasters the viewer doesn't follow), then reads that channel's
+  /// live presence from the same public snapshot the Home cards use. No YouTube
+  /// API call is made from the device, and a count is never shown unless that
+  /// YouTube channel is currently live — which also matches the source the player
+  /// now defaults to for simulcasters.
   var youtubeViewerCountForCurrentStream: Int? {
     guard !isVOD else { return nil }
     let login = activeChannel.isEmpty ? channel : activeChannel
-    guard !login.isEmpty,
-      let presence = environment.follows.channels
-        .first(where: { $0.login.caseInsensitiveCompare(login) == .orderedSame })?.youtube
+    guard !login.isEmpty else { return nil }
+
+    let followedPresence = environment.follows.channels
+      .first(where: { $0.login.caseInsensitiveCompare(login) == .orderedSame })?.youtube
+    guard let channelID = followedPresence?.channelID
+      ?? environment.youtubeAliases.youtubeChannelID(forTwitchLogin: login)
     else { return nil }
+
     // Prefer the freshest snapshot reading, falling back to the value already
     // enriched onto the followed channel; only show it while live on YouTube.
-    let snapshot = environment.youtubeLive.presence(forChannelID: presence.channelID)
-    let isLive = snapshot?.isLive ?? presence.isLive
+    let snapshot = environment.youtubeLive.presence(forChannelID: channelID)
+    let isLive = snapshot?.isLive ?? followedPresence?.isLive ?? false
     guard isLive else { return nil }
-    return snapshot?.viewerCount ?? presence.viewerCount
+    return snapshot?.viewerCount ?? followedPresence?.viewerCount
   }
 
   var videoColumn: some View {

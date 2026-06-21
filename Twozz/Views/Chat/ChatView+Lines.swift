@@ -204,26 +204,38 @@ extension ChatView {
     let cardInset: CGFloat = 5
     let margin = max(barWidth + 8, horizontalPadding - cardInset)
     let glow = highlightGlow(seed: seed)
+    let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
 
     content()
       .padding(.vertical, max(verticalPadding - 2, 3))
       .padding(.horizontal, margin)
       .frame(maxWidth: .infinity, alignment: .leading)
+      // Draw the whole highlight (tinted glow, accent bar, hairline border) as a
+      // rounded *background* instead of clipping the card with `.clipShape`. The
+      // message content is already inset from the corners by `margin`, so it never
+      // reached the rounded edge — the old clip only ever masked empty background,
+      // yet still forced an offscreen compositing pass on every highlighted row.
+      // Those passes are what made scrolling back through a busy channel (lots of
+      // sub / first-message cards) janky. Rounded shapes filled straight into the
+      // background composite in place with no offscreen pass, for the same look.
       .background {
         ZStack(alignment: .leading) {
           // A soft radial glow whose origin + spread vary per message (seeded by
           // the line) so highlights don't all read as the same left-to-right ramp.
           // The center stays biased toward the leading edge, anchoring the glow to
           // the accent bar. EllipticalGradient costs about the same as a linear one
-          // and uses relative radii, so it needs no GeometryReader.
-          EllipticalGradient(
-            colors: [
-              accent.opacity(isSideLayout ? 0.18 : 0.26),
-              accent.opacity(isSideLayout ? 0.03 : 0.05),
-            ],
-            center: glow.center,
-            startRadiusFraction: 0,
-            endRadiusFraction: glow.endRadiusFraction
+          // and uses relative radii, so it needs no GeometryReader. Filling the
+          // rounded shape directly is what replaces the former clip.
+          shape.fill(
+            EllipticalGradient(
+              colors: [
+                accent.opacity(isSideLayout ? 0.18 : 0.26),
+                accent.opacity(isSideLayout ? 0.03 : 0.05),
+              ],
+              center: glow.center,
+              startRadiusFraction: 0,
+              endRadiusFraction: glow.endRadiusFraction
+            )
           )
           Capsule(style: .continuous)
             .fill(accent)
@@ -235,11 +247,9 @@ extension ChatView {
             .padding(.vertical, 14)
             .padding(.leading, (margin - barWidth) / 2 + 1)
         }
-      }
-      .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: corner, style: .continuous)
-          .strokeBorder(accent.opacity(isSideLayout ? 0.22 : 0.32), lineWidth: 1)
+        .overlay {
+          shape.strokeBorder(accent.opacity(isSideLayout ? 0.22 : 0.32), lineWidth: 1)
+        }
       }
       // Bleed back out so the text inside lands on the normal chat keyline while
       // the card keeps a small inset from the panel edge.

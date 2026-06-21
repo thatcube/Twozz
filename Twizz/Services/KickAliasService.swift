@@ -58,7 +58,7 @@ final class KickAliasService {
       request.setValue(etag, forHTTPHeaderField: "If-None-Match")
     }
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
+    guard let (data, response) = try? await NetworkClient.api.data(for: request),
       let http = response as? HTTPURLResponse
     else { return }
 
@@ -81,7 +81,7 @@ final class KickAliasService {
   }
 
   private static func decode(_ data: Data) -> [String: String]? {
-    guard let document = try? JSONDecoder().decode(Document.self, from: data) else { return nil }
+    guard let document = try? TwitchAPIClient.sharedDecoder.decode(Document.self, from: data) else { return nil }
     var result: [String: String] = [:]
     for (rawKey, rawValue) in document.map {
       let key = rawKey.lowercased()

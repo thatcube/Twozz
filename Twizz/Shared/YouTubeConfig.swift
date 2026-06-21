@@ -12,6 +12,13 @@ enum YouTubeConfig {
   static let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
   static let apiBaseURL = URL(string: "https://www.googleapis.com/youtube/v3")!
 
+  /// A single reused decoder for YouTube Data API / OAuth responses. Mirrors
+  /// `TwitchAPIClient.sharedDecoder`: the YouTube services check the HTTP status
+  /// themselves and then decode the body, so they can reuse one decoder instead
+  /// of allocating a fresh `JSONDecoder()` per response. Holds only immutable
+  /// configuration and is safe to read concurrently while decoding value types.
+  nonisolated(unsafe) static let sharedDecoder = JSONDecoder()
+
   /// The OAuth client ID, or nil when the secret hasn't been configured (so the
   /// app can hide YouTube sign-in instead of failing). Guards against the
   /// unresolved `$(YOUTUBE_CLIENT_ID)` placeholder when the local xcconfig is

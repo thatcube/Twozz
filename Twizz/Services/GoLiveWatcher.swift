@@ -27,6 +27,14 @@ final class GoLiveWatcher {
   /// honest without hammering Helix.
   private static let pollInterval: Duration = .seconds(60)
 
+  /// Ceiling for the exponential backoff applied after consecutive poll
+  /// failures, so a sustained Helix/network outage doesn't retry every 60s.
+  private static let maxPollBackoff: Double = 600
+
+  /// Consecutive failed polls, for exponential backoff. Reset on any successful
+  /// (or idle / signed-out) poll.
+  private var consecutivePollFailures = 0
+
   /// Reused across poll iterations so the 60s loop doesn't build a decoder per
   /// request.
   private nonisolated(unsafe) static let decoder = JSONDecoder()
@@ -96,10 +104,25 @@ final class GoLiveWatcher {
     pollTask = Task { [weak self] in
       guard let self else { return }
       while !Task.isCancelled {
-        await self.poll(using: auth)
-        try? await Task.sleep(for: Self.pollInterval)
+        let succeeded = await self.poll(using: auth)
+        try? await Task.sleep(for: self.nextPollDelay(succeeded: succeeded))
       }
     }
+  }
+
+  /// The delay before the next poll. A successful (or idle) poll resumes the
+  /// steady 60s cadence; a failure backs off exponentially —
+  /// `min(60 * 2^(failures-1), 600)` — with equal jitter so a fleet of devices
+  /// hitting an outage don't all retry in lockstep.
+  private func nextPollDelay(succeeded: Bool) -> Duration {
+    if succeeded {
+      consecutivePollFailures = 0
+      return Self.pollInterval
+    }
+    consecutivePollFailures += 1
+    let base = min(60.0 * pow(2.0, Double(consecutivePollFailures - 1)), Self.maxPollBackoff)
+    let half = base / 2
+    return .seconds(half + Double.random(in: 0...half))
   }
 
   /// Stop polling and clear all transient state.
@@ -113,6 +136,7 @@ final class GoLiveWatcher {
     secondsRemaining = 0
     knownLiveLogins = []
     hasBaseline = false
+    consecutivePollFailures = 0
   }
 
   /// The viewer chose to act on the current toast. Returns its login (so the
@@ -155,7 +179,11 @@ final class GoLiveWatcher {
 
   // MARK: - Polling
 
-  private func poll(using auth: TwitchAuthSession) async {
+  /// Runs one poll. Returns `true` when the poll completed (including the idle
+  /// signed-out case, which needs no backoff) and `false` on a network/auth
+  /// failure so the caller can back off before retrying.
+  @discardableResult
+  private func poll(using auth: TwitchAuthSession) async -> Bool {
     guard auth.isAuthenticated, let userID = auth.userID,
           let clientID = resolveClientID(),
           !Self.disallowedClientIDs.contains(clientID.lowercased())
@@ -164,10 +192,10 @@ final class GoLiveWatcher {
       // poll doesn't treat the whole live follow list as fresh go-lives.
       hasBaseline = false
       knownLiveLogins = []
-      return
+      return true
     }
 
-    guard let token = await accessToken(auth: auth) else { return }
+    guard let token = await accessToken(auth: auth) else { return false }
 
     let streams: [GoLiveStream]
     do {
@@ -177,11 +205,11 @@ final class GoLiveWatcher {
       guard let refreshed = try? await auth.refreshAccessTokenIfNeeded(force: true),
             let retry = try? await fetchFollowedStreams(
               clientID: clientID, accessToken: refreshed, userID: userID)
-      else { return }
+      else { return false }
       streams = retry
     } catch {
       // Transient failure: keep the last baseline so a blip doesn't spam toasts.
-      return
+      return false
     }
 
     let liveStreams = streams.filter { $0.type == "live" }
@@ -190,19 +218,19 @@ final class GoLiveWatcher {
     guard hasBaseline else {
       knownLiveLogins = liveLogins
       hasBaseline = true
-      return
+      return true
     }
 
     let newlyLive = liveLogins.subtracting(knownLiveLogins)
     knownLiveLogins = liveLogins
-    guard !newlyLive.isEmpty else { return }
+    guard !newlyLive.isEmpty else { return true }
 
     let suppressed = suppressedLogin?.lowercased()
     let freshStreams = liveStreams
       .filter { newlyLive.contains($0.userLogin.lowercased()) }
       .filter { $0.userLogin.lowercased() != suppressed }
       .filter { isAlerting(login: $0.userLogin) }
-    guard !freshStreams.isEmpty else { return }
+    guard !freshStreams.isEmpty else { return true }
 
     // Resolve avatars for just the channels that went live (best-effort).
     let avatars = (try? await fetchProfileImages(
@@ -221,6 +249,7 @@ final class GoLiveWatcher {
     // Decode avatars before presenting so they animate in with each toast.
     for event in events { await ImageMemoryCache.shared.prewarm(event.profileImageURL) }
     for event in events { enqueue(event) }
+    return true
   }
 
   private func accessToken(auth: TwitchAuthSession) async -> String? {
@@ -241,7 +270,7 @@ final class GoLiveWatcher {
       url: components.url!, accessToken: accessToken, clientID: clientID,
       accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else {
       throw GoLiveRequestError(status: status)
@@ -274,7 +303,7 @@ final class GoLiveWatcher {
       url: components.url!, accessToken: accessToken, clientID: clientID,
       accept: "application/json", userAgent: TwitchConfig.apiUserAgent)
 
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else { throw GoLiveRequestError(status: status) }
 

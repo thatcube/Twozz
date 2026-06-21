@@ -227,13 +227,13 @@ extension TwitchAuthSession {
         let body = "client_id=\(percentEncode(clientID))&scopes=\(percentEncode(scope))"
         req.httpBody = body.data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await NetworkClient.api.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else {
             throw makeHTTPError(context: "requesting Twitch device code", status: status, data: data)
         }
 
-        return try JSONDecoder().decode(DeviceCodeResponse.self, from: data)
+        return try TwitchAPIClient.sharedDecoder.decode(DeviceCodeResponse.self, from: data)
     }
 
     private func requestToken(clientID: String, deviceCode: String) async throws -> DeviceTokenResponse {
@@ -245,11 +245,11 @@ extension TwitchAuthSession {
         let body = "client_id=\(percentEncode(clientID))&device_code=\(percentEncode(deviceCode))&grant_type=\(percentEncode(grantType))"
         req.httpBody = body.data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await NetworkClient.api.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
 
         if status == 400 {
-            let payload = (try? JSONDecoder().decode(OAuthErrorPayload.self, from: data))
+            let payload = (try? TwitchAPIClient.sharedDecoder.decode(OAuthErrorPayload.self, from: data))
             switch normalizedOAuthMessage(payload?.message) {
             case "authorization_pending": throw OAuthPollingError.authorizationPending
             case "slow_down": throw OAuthPollingError.slowDown
@@ -264,7 +264,7 @@ extension TwitchAuthSession {
             throw makeHTTPError(context: "exchanging Twitch device code", status: status, data: data)
         }
 
-        return try JSONDecoder().decode(DeviceTokenResponse.self, from: data)
+        return try TwitchAPIClient.sharedDecoder.decode(DeviceTokenResponse.self, from: data)
     }
 
     private func requestRefreshToken(clientID: String, refreshToken: String) async throws -> DeviceTokenResponse {
@@ -276,13 +276,13 @@ extension TwitchAuthSession {
         let body = "client_id=\(percentEncode(clientID))&grant_type=\(percentEncode(grantType))&refresh_token=\(percentEncode(refreshToken))"
         req.httpBody = body.data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await NetworkClient.api.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else {
             throw makeHTTPError(context: "refreshing Twitch token", status: status, data: data)
         }
 
-        return try JSONDecoder().decode(DeviceTokenResponse.self, from: data)
+        return try TwitchAPIClient.sharedDecoder.decode(DeviceTokenResponse.self, from: data)
     }
 
     private func requestValidatedIdentity(accessToken: String) async throws -> OAuthValidateResponse {
@@ -290,13 +290,13 @@ extension TwitchAuthSession {
         req.httpMethod = "GET"
         req.setValue("OAuth \(accessToken)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await NetworkClient.api.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else {
             throw makeHTTPError(context: "validating Twitch token", status: status, data: data)
         }
 
-        return try JSONDecoder().decode(OAuthValidateResponse.self, from: data)
+        return try TwitchAPIClient.sharedDecoder.decode(OAuthValidateResponse.self, from: data)
     }
 }
 

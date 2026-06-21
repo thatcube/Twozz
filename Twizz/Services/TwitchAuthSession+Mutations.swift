@@ -51,7 +51,7 @@ extension TwitchAuthSession {
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await NetworkClient.api.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else {
             throw makeHTTPError(context: "sending message", status: status, data: data)
@@ -134,7 +134,7 @@ extension TwitchAuthSession {
         let req = TwitchAPIClient.helixRequest(
             url: components.url!, accessToken: accessToken, clientID: clientID)
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await NetworkClient.api.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else {
             throw makeHTTPError(context: "checking follow status", status: status, data: data)
@@ -240,7 +240,7 @@ extension TwitchAuthSession {
         req.httpBody = try JSONSerialization.data(
             withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: variables))
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await NetworkClient.api.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200...299).contains(status) else {
             throw makeHTTPError(

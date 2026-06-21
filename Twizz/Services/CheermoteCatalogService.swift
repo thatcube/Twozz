@@ -51,11 +51,11 @@ actor CheermoteCatalogService {
     private let clientID = TwitchConfig.webPublicClientID
     private let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
-    private var cache: [String: [Cheermote]] = [:]
+    private var cache = BoundedCache<String, [Cheermote]>(capacity: 48, ttl: 1800)
 
     func catalog(for channel: String) async -> [Cheermote] {
         let key = channel.lowercased()
-        if let cached = cache[key] { return cached }
+        if let cached = cache.value(forKey: key) { return cached }
 
         async let global = fetchGlobal()
         async let channelCustom = fetchChannel(login: key)
@@ -66,8 +66,13 @@ actor CheermoteCatalogService {
         for cheer in await channelCustom { merged[cheer.prefixLower] = cheer }
 
         let result = Array(merged.values)
-        cache[key] = result
+        cache.insert(result, forKey: key)
         return result
+    }
+
+    /// Drops all cached catalogs (e.g. on sign-out).
+    func clear() {
+        cache.removeAll()
     }
 
     private func fetchGlobal() async -> [Cheermote] {
@@ -148,7 +153,7 @@ actor CheermoteCatalogService {
         req.httpBody = try? JSONSerialization.data(
             withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: variables))
 
-        guard let (data, response) = try? await URLSession.shared.data(for: req) else { return nil }
+        guard let (data, response) = try? await NetworkClient.api.data(for: req) else { return nil }
         guard TwitchAPIClient.isSuccess(response) else { return nil }
         return try? JSONSerialization.jsonObject(with: data)
     }

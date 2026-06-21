@@ -189,10 +189,10 @@ final class EventSubService {
 
   private func reconnect(to url: URL) {
     receiveTask?.cancel()
-    // Twitch's reconnect handoff historically opened a brand-new URLSession for
-    // the redirect target; preserve that exactly while routing the task through
-    // the shared connection so it tracks the live socket.
-    connection.replace(with: URLSession(configuration: .default).webSocketTask(with: url))
+    // Twitch hands us a new URL for the redirect target. Build the task on the
+    // connection's existing reused `URLSession` rather than spinning up a fresh
+    // one per reconnect (which would leak the old session, never invalidated).
+    connection.replace(with: connection.makeTask(to: url))
     receiveTask = Task { [weak self] in await self?.receiveLoop() }
   }
 
@@ -245,7 +245,7 @@ final class EventSubService {
     ]
     req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else {
       throw EventSubError.subscriptionFailed(status: status)
@@ -269,7 +269,7 @@ final class EventSubService {
     let req = TwitchAPIClient.helixRequest(
       url: url, method: "DELETE", accessToken: credentials.accessToken,
       clientID: credentials.clientID)
-    _ = try? await URLSession.shared.data(for: req)
+    _ = try? await NetworkClient.api.data(for: req)
   }
 }
 

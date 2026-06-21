@@ -446,7 +446,7 @@ struct FollowedChannelsFetcher {
   }
 
   private func performHelixRequest(_ req: URLRequest) async throws -> (Data, Int) {
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     return (data, status)
   }

@@ -56,14 +56,14 @@ enum YouTubeStreamResolver {
     ]
     request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await NetworkClient.api.data(for: request)
     guard (response as? HTTPURLResponse)?.statusCode == 200 else {
       throw ResolveError.badResponse
     }
 
     let player: PlayerResponse
     do {
-      player = try JSONDecoder().decode(PlayerResponse.self, from: data)
+      player = try YouTubeConfig.sharedDecoder.decode(PlayerResponse.self, from: data)
     } catch {
       throw ResolveError.badResponse
     }

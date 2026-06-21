@@ -275,11 +275,11 @@ final class YouTubeAuthSession {
       request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
       request.timeoutInterval = 20
 
-      let (data, response) = try await URLSession.shared.data(for: request)
+      let (data, response) = try await NetworkClient.api.data(for: request)
       let status = (response as? HTTPURLResponse)?.statusCode ?? -1
       guard (200...299).contains(status) else { return }
 
-      let decoded = try JSONDecoder().decode(ChannelsResponse.self, from: data)
+      let decoded = try YouTubeConfig.sharedDecoder.decode(ChannelsResponse.self, from: data)
       guard let snippet = decoded.items.first?.snippet else { return }
 
       userDisplayName = snippet.title
@@ -304,12 +304,12 @@ final class YouTubeAuthSession {
       "client_id=\(percentEncode(clientID))&scope=\(percentEncode(YouTubeConfig.readonlyScope))"
     req.httpBody = body.data(using: .utf8)
 
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else {
       throw makeHTTPError(context: "requesting YouTube device code", status: status, data: data)
     }
-    return try JSONDecoder().decode(DeviceCodeResponse.self, from: data)
+    return try YouTubeConfig.sharedDecoder.decode(DeviceCodeResponse.self, from: data)
   }
 
   private func requestToken(
@@ -324,11 +324,11 @@ final class YouTubeAuthSession {
       + "&device_code=\(percentEncode(deviceCode))&grant_type=\(percentEncode(grantType))"
     req.httpBody = body.data(using: .utf8)
 
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
 
     if status == 400 || status == 428 {
-      let payload = try? JSONDecoder().decode(OAuthErrorPayload.self, from: data)
+      let payload = try? YouTubeConfig.sharedDecoder.decode(OAuthErrorPayload.self, from: data)
       switch payload?.error {
       case "authorization_pending": throw YouTubePollingError.authorizationPending
       case "slow_down": throw YouTubePollingError.slowDown
@@ -341,7 +341,7 @@ final class YouTubeAuthSession {
     guard (200...299).contains(status) else {
       throw makeHTTPError(context: "exchanging YouTube device code", status: status, data: data)
     }
-    return try JSONDecoder().decode(TokenResponse.self, from: data)
+    return try YouTubeConfig.sharedDecoder.decode(TokenResponse.self, from: data)
   }
 
   private func requestRefresh(
@@ -355,12 +355,12 @@ final class YouTubeAuthSession {
       + "&refresh_token=\(percentEncode(refreshToken))&grant_type=refresh_token"
     req.httpBody = body.data(using: .utf8)
 
-    let (data, response) = try await URLSession.shared.data(for: req)
+    let (data, response) = try await NetworkClient.api.data(for: req)
     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
     guard (200...299).contains(status) else {
       throw makeHTTPError(context: "refreshing YouTube token", status: status, data: data)
     }
-    return try JSONDecoder().decode(TokenResponse.self, from: data)
+    return try YouTubeConfig.sharedDecoder.decode(TokenResponse.self, from: data)
   }
 
   // MARK: - Helpers
@@ -370,7 +370,7 @@ final class YouTubeAuthSession {
   }
 
   private func makeHTTPError(context: String, status: Int, data: Data) -> YouTubeAuthHTTPError {
-    let payload = try? JSONDecoder().decode(OAuthErrorPayload.self, from: data)
+    let payload = try? YouTubeConfig.sharedDecoder.decode(OAuthErrorPayload.self, from: data)
     let message = payload?.errorDescription ?? payload?.error ?? String(data: data, encoding: .utf8)
     return YouTubeAuthHTTPError(context: context, status: status, error: payload?.error, message: message)
   }

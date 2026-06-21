@@ -122,9 +122,9 @@ final class YouTubeLiveResolver {
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.timeoutInterval = 15
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
+    guard let (data, response) = try? await NetworkClient.api.data(for: request),
       (response as? HTTPURLResponse)?.statusCode == 200,
-      let decoded = try? JSONDecoder().decode(PlaylistItemsResponse.self, from: data)
+      let decoded = try? YouTubeConfig.sharedDecoder.decode(PlaylistItemsResponse.self, from: data)
     else { return [] }
 
     return decoded.items.compactMap { $0.contentDetails.videoId }
@@ -169,9 +169,9 @@ final class YouTubeLiveResolver {
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.timeoutInterval = 20
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
+    guard let (data, response) = try? await NetworkClient.api.data(for: request),
       (response as? HTTPURLResponse)?.statusCode == 200,
-      let decoded = try? JSONDecoder().decode(VideosResponse.self, from: data)
+      let decoded = try? YouTubeConfig.sharedDecoder.decode(VideosResponse.self, from: data)
     else { return [] }
     return decoded.items
   }

@@ -63,8 +63,10 @@ enum TwitchAPIClient {
   /// A single reused decoder for every `decode(_:from:response:)` call. A fresh
   /// `JSONDecoder()` per response is wasteful across the dozen services that
   /// route through here; the decoder holds only immutable configuration and is
-  /// safe to read concurrently while decoding value types.
-  private nonisolated(unsafe) static let sharedDecoder = JSONDecoder()
+  /// safe to read concurrently while decoding value types. Exposed so services
+  /// that check the HTTP status themselves (with bespoke error mapping) can
+  /// still reuse one decoder instead of allocating a fresh `JSONDecoder()`.
+  nonisolated(unsafe) static let sharedDecoder = JSONDecoder()
 
   // MARK: - GraphQL
 

@@ -217,7 +217,7 @@ final class BrowseService {
         req.httpBody = try JSONSerialization.data(
             withJSONObject: TwitchAPIClient.graphQLBody(query: query, variables: variables))
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await NetworkClient.api.data(for: req)
         return try TwitchAPIClient.validatedData(data, response)
     }
 }

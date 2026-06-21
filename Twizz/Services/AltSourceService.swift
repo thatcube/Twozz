@@ -45,7 +45,7 @@ enum AltSourceService {
     request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
     request.setValue("YES+1", forHTTPHeaderField: "Cookie")
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
+    guard let (data, response) = try? await NetworkClient.api.data(for: request),
       let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode)
     else { return nil }
 
@@ -126,7 +126,7 @@ enum AltSourceService {
     request.setValue("https://www.youtube.com", forHTTPHeaderField: "Origin")
     request.setValue(visitor, forHTTPHeaderField: "X-Goog-Visitor-Id")
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
+    guard let (data, response) = try? await NetworkClient.api.data(for: request),
       let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let streaming = json["streamingData"] as? [String: Any],
@@ -144,7 +144,7 @@ enum AltSourceService {
     request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
     request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
+    guard let (data, response) = try? await NetworkClient.api.data(for: request),
       let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode)
     else { return nil }
 
@@ -162,7 +162,7 @@ enum AltSourceService {
     request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
     request.setValue("YES+1", forHTTPHeaderField: "Cookie")
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
+    guard let (data, response) = try? await NetworkClient.api.data(for: request),
       let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode)
     else { return nil }
 

@@ -230,7 +230,7 @@ final class VODChatReplayService {
       withJSONObject: TwitchAPIClient.graphQLBody(
         query: query, variables: ["id": vodID, "o": offset]))
 
-    guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
+    guard let (data, response) = try? await NetworkClient.api.data(for: request) else { return nil }
     guard TwitchAPIClient.isSuccess(response) else { return nil }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let dataObj = json["data"] as? [String: Any],

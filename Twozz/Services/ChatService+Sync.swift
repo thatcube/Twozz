@@ -154,13 +154,14 @@ extension ChatService {
   /// into one array mutation.
   private func scheduleAppendFlush() {
     guard !appendFlushScheduled else { return }
+    let interval = adaptiveCoalesceInterval
     let elapsed = Date().timeIntervalSince(lastAppendFlushAt)
-    if elapsed >= appendCoalesceInterval {
+    if elapsed >= interval {
       flushPendingAppends()
       return
     }
     appendFlushScheduled = true
-    let delay = appendCoalesceInterval - elapsed
+    let delay = interval - elapsed
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self else { return }
       self.appendFlushScheduled = false

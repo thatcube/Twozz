@@ -199,10 +199,21 @@ final class ChatService {
   /// Wall-clock of the last flush, used to flush instantly when the previous
   /// flush is already older than one tick (i.e. traffic is low).
   var lastAppendFlushAt: Date = .distantPast
-  /// One display tick. Appends arriving within this window of the last flush are
-  /// coalesced into a single mutation; an isolated append older than this flushes
-  /// with zero added latency.
-  let appendCoalesceInterval: Double = 1.0 / 60.0
+  /// Adaptive coalescing window. At low traffic we flush at display rate so a
+  /// lone line appears instantly and chat feels snappy. As the smoothed inbound
+  /// rate climbs, we stretch the window so a burst folds into one `ForEach` diff
+  /// + one `LazyVStack` layout pass instead of many — the dominant render cost on
+  /// raided/huge (e.g. 350k-viewer) channels. 60 visual updates a second aren't
+  /// humanly readable, so this trades imperceptible freshness for a 3–5× drop in
+  /// render churn. The window only widens; it never adds latency at low traffic.
+  var adaptiveCoalesceInterval: Double {
+    switch smoothedMessageRate {
+    case ..<15: return 1.0 / 60.0
+    case ..<30: return 1.0 / 30.0
+    case ..<45: return 1.0 / 20.0
+    default: return 1.0 / 12.0
+    }
+  }
   /// Smoothed inbound message rate (msg/s), updated on each flush and used to
   /// decide whether to shed under extreme load.
   var smoothedMessageRate: Double = 0

@@ -13,8 +13,9 @@ import SwiftUI
 /// - A native search field filters the whole list (online + offline) by display
 ///   name and login.
 struct FollowingDirectoryView: View {
-  let follows: FollowedChannelsService
-  let auth: TwitchAuthSession
+  @Environment(AppEnvironment.self) private var environment
+  private var follows: FollowedChannelsService { environment.follows }
+  private var auth: TwitchAuthSession { environment.auth }
   @Binding var selectedChannel: FollowedChannel?
   @Binding var channelPageTarget: ChannelPageTarget?
 

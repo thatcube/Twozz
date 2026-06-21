@@ -93,7 +93,7 @@ final class BrowseService {
 
         let responseData = try await performGQL(
             query: query, variables: ["first": limit])
-        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let decoded = try TwitchAPIClient.decode(GQLEnvelope.self, from: responseData)
         let edges = decoded.data?.games?.edges ?? []
 
         return edges.compactMap { edge -> TwitchCategory? in
@@ -179,7 +179,7 @@ final class BrowseService {
 
         let responseData = try await performGQL(
             query: query, variables: ["id": category.id, "first": limit])
-        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let decoded = try TwitchAPIClient.decode(GQLEnvelope.self, from: responseData)
         let edges = decoded.data?.game?.streams?.edges ?? []
 
         return edges.compactMap { edge -> FollowedChannel? in

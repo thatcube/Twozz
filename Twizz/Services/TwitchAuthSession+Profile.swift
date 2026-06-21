@@ -14,7 +14,7 @@ extension TwitchAuthSession {
             throw makeHTTPError(context: "loading Twitch profile", status: status, data: data)
         }
 
-        let payload = try JSONDecoder().decode(UserProfileEnvelope.self, from: data)
+        let payload = try TwitchAPIClient.decode(UserProfileEnvelope.self, from: data)
         guard let first = payload.data.first else {
             throw URLError(.cannotParseResponse)
         }
@@ -78,7 +78,7 @@ extension TwitchAuthSession {
             throw makeHTTPError(context: "resolving channel", status: status, data: data)
         }
 
-        let payload = try JSONDecoder().decode(UserProfileEnvelope.self, from: data)
+        let payload = try TwitchAPIClient.decode(UserProfileEnvelope.self, from: data)
         guard let id = payload.data.first?.id else {
             throw ChatSendError.channelNotFound
         }

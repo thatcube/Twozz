@@ -104,7 +104,7 @@ struct ChannelContentService {
       """
 
     guard let data = try? await perform(query: query, variables: ["login": normalized]),
-          let decoded = try? JSONDecoder().decode(ContentEnvelope.self, from: data),
+          let decoded = try? TwitchAPIClient.decode(ContentEnvelope.self, from: data),
           let user = decoded.data?.user
     else { return nil }
 

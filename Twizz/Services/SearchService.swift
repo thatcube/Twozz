@@ -155,7 +155,7 @@ final class SearchService {
 
         let responseData = try await performGQL(
             query: gqlQuery, variables: ["query": query])
-        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let decoded = try TwitchAPIClient.decode(GQLEnvelope.self, from: responseData)
         let searchFor = decoded.data?.searchFor
 
         let channels: [FollowedChannel] = (searchFor?.channels?.edges ?? []).compactMap { edge in

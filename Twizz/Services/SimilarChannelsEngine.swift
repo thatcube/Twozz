@@ -223,7 +223,7 @@ struct SimilarChannelsEngine {
     guard
       let data = try? await ChannelContentService.perform(
         query: query, variables: ["logins": Array(unique)]),
-      let decoded = try? JSONDecoder().decode(UsersEnvelope.self, from: data),
+      let decoded = try? TwitchAPIClient.decode(UsersEnvelope.self, from: data),
       let users = decoded.data?.users
     else { return [] }
 
@@ -283,7 +283,7 @@ struct SimilarChannelsEngine {
         query: query,
         variables: ["name": category, "first": candidatesPerCategory]
       ),
-      let decoded = try? JSONDecoder().decode(CategoryEnvelope.self, from: data),
+      let decoded = try? TwitchAPIClient.decode(CategoryEnvelope.self, from: data),
       let edges = decoded.data?.game?.streams?.edges
     else { return [] }
 

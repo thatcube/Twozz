@@ -57,7 +57,7 @@ extension TwitchAuthSession {
             throw makeHTTPError(context: "sending message", status: status, data: data)
         }
 
-        let payload = try JSONDecoder().decode(SendChatMessageEnvelope.self, from: data)
+        let payload = try TwitchAPIClient.decode(SendChatMessageEnvelope.self, from: data)
         guard let result = payload.data.first else { return }
         if result.isSent == false {
             throw ChatSendError.dropped(reason: result.dropReason?.message ?? result.dropReason?.code)
@@ -140,7 +140,7 @@ extension TwitchAuthSession {
             throw makeHTTPError(context: "checking follow status", status: status, data: data)
         }
 
-        let payload = try JSONDecoder().decode(FollowedStateEnvelope.self, from: data)
+        let payload = try TwitchAPIClient.decode(FollowedStateEnvelope.self, from: data)
         // `total` can represent the user's overall followed-channel count, so
         // determine state from the returned relationship rows instead.
         return payload.data.contains { entry in
@@ -251,7 +251,7 @@ extension TwitchAuthSession {
         }
 
         // GraphQL returns HTTP 200 even for logical failures, so inspect the body.
-        let decoded = try JSONDecoder().decode(GQLFollowResponse.self, from: data)
+        let decoded = try TwitchAPIClient.decode(GQLFollowResponse.self, from: data)
         if let message = decoded.errors?.compactMap({ $0.message }).first(where: { !$0.isEmpty }) {
             if isIntegrityCheckFailureMessage(message) {
                 throw FollowActionError.integrityCheckRequired

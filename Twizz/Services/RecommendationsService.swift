@@ -120,7 +120,7 @@ final class RecommendationsService {
             """
 
         let responseData = try await performGQL(query: query, variables: ["first": limit])
-        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let decoded = try TwitchAPIClient.decode(GQLEnvelope.self, from: responseData)
         let edges = decoded.data?.streams?.edges ?? []
 
         return edges.compactMap { edge -> FollowedChannel? in
@@ -184,7 +184,7 @@ final class RecommendationsService {
             """
 
         let responseData = try await performGQL(query: query, variables: ["first": limit])
-        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let decoded = try TwitchAPIClient.decode(GQLEnvelope.self, from: responseData)
         let edges = decoded.data?.games?.edges ?? []
 
         return edges.compactMap { edge -> TwitchCategory? in

@@ -68,7 +68,7 @@ struct ChannelProfileService {
     guard TwitchAPIClient.isSuccess(response) else { return nil }
 
     guard
-      let decoded = try? JSONDecoder().decode(GQLEnvelope.self, from: data),
+      let decoded = try? TwitchAPIClient.decode(GQLEnvelope.self, from: data),
       let user = decoded.data?.user
     else { return nil }
 

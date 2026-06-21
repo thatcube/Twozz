@@ -206,7 +206,7 @@ final class TwitchAuthSession {
     }
 
     func makeHTTPError(context: String, status: Int, data: Data) -> TwitchAuthHTTPError {
-        let payload = try? JSONDecoder().decode(TwitchAuthAPIErrorPayload.self, from: data)
+        let payload = try? TwitchAPIClient.decode(TwitchAuthAPIErrorPayload.self, from: data)
         let message = payload?.message ?? payload?.error ?? String(data: data, encoding: .utf8)
         return TwitchAuthHTTPError(context: context, status: status, message: message)
     }

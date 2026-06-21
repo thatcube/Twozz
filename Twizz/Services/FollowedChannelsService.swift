@@ -316,7 +316,7 @@ final class FollowedChannelsService {
         throw makeHelixError(context: "loading followed channels", status: status, data: data)
       }
 
-      let envelope = try JSONDecoder().decode(FollowedChannelsEnvelope.self, from: data)
+      let envelope = try TwitchAPIClient.decode(FollowedChannelsEnvelope.self, from: data)
       all.append(contentsOf: envelope.data)
       let next = envelope.pagination?.cursor?.trimmingCharacters(in: .whitespacesAndNewlines)
       cursor = (next?.isEmpty == false) ? next : nil
@@ -349,7 +349,7 @@ final class FollowedChannelsService {
         throw makeHelixError(context: "loading live stream statuses", status: status, data: data)
       }
 
-      let streams = try JSONDecoder().decode(FollowedStreamsEnvelope.self, from: data).data
+      let streams = try TwitchAPIClient.decode(FollowedStreamsEnvelope.self, from: data).data
       for stream in streams {
         result[stream.userID] = stream
       }
@@ -380,7 +380,7 @@ final class FollowedChannelsService {
         throw makeHelixError(context: "loading followed user profiles", status: status, data: data)
       }
 
-      let payload = try JSONDecoder().decode(HelixUsersEnvelope.self, from: data)
+      let payload = try TwitchAPIClient.decode(HelixUsersEnvelope.self, from: data)
       for user in payload.data {
         result[user.id] = user
       }
@@ -411,7 +411,7 @@ final class FollowedChannelsService {
         throw makeHelixError(context: "loading followed channel info", status: status, data: data)
       }
 
-      let payload = try JSONDecoder().decode(ChannelInformationEnvelope.self, from: data)
+      let payload = try TwitchAPIClient.decode(ChannelInformationEnvelope.self, from: data)
       for channel in payload.data {
         if let id = channel.broadcasterID {
           result[id] = channel
@@ -469,7 +469,7 @@ final class FollowedChannelsService {
         throw makeHelixError(context: "loading followed channel categories", status: status, data: data)
       }
 
-      let payload = try JSONDecoder().decode(ChannelInformationEnvelope.self, from: data)
+      let payload = try TwitchAPIClient.decode(ChannelInformationEnvelope.self, from: data)
       for channel in payload.data {
         let name = channel.gameName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !name.isEmpty else { continue }
@@ -593,7 +593,7 @@ final class FollowedChannelsService {
       throw makeHelixError(context: "resolving current Twitch user", status: status, data: data)
     }
 
-    let payload = try JSONDecoder().decode(HelixUsersEnvelope.self, from: data)
+    let payload = try TwitchAPIClient.decode(HelixUsersEnvelope.self, from: data)
     guard let first = payload.data.first else {
       throw URLError(.cannotParseResponse)
     }
@@ -618,7 +618,7 @@ final class FollowedChannelsService {
       throw makeHelixError(context: "loading followed streams", status: status, data: data)
     }
 
-    return try JSONDecoder().decode(FollowedStreamsEnvelope.self, from: data).data
+    return try TwitchAPIClient.decode(FollowedStreamsEnvelope.self, from: data).data
   }
 
   private func fetchFollowedBroadcasters(clientID: String, accessToken: String, userID: String)
@@ -639,7 +639,7 @@ final class FollowedChannelsService {
       throw makeHelixError(context: "loading followed channels", status: status, data: data)
     }
 
-    return try JSONDecoder().decode(FollowedChannelsEnvelope.self, from: data).data
+    return try TwitchAPIClient.decode(FollowedChannelsEnvelope.self, from: data).data
   }
 
   private func fetchLiveStreamsByBroadcasterID(
@@ -662,7 +662,7 @@ final class FollowedChannelsService {
       throw makeHelixError(context: "loading live stream statuses", status: status, data: data)
     }
 
-    let streams = try JSONDecoder().decode(FollowedStreamsEnvelope.self, from: data).data
+    let streams = try TwitchAPIClient.decode(FollowedStreamsEnvelope.self, from: data).data
     return Dictionary(uniqueKeysWithValues: streams.map { ($0.userID, $0) })
   }
 
@@ -684,7 +684,7 @@ final class FollowedChannelsService {
       throw makeHelixError(context: "loading streamer profile images", status: status, data: data)
     }
 
-    let payload = try JSONDecoder().decode(HelixUsersEnvelope.self, from: data)
+    let payload = try TwitchAPIClient.decode(HelixUsersEnvelope.self, from: data)
     return Dictionary(
       uniqueKeysWithValues: payload.data.compactMap { user in
         guard let profileURL = user.profileImageURL else {
@@ -720,7 +720,7 @@ final class FollowedChannelsService {
   }
 
   private func makeHelixError(context: String, status: Int, data: Data) -> TwitchHelixRequestError {
-    let payload = try? JSONDecoder().decode(TwitchHelixErrorPayload.self, from: data)
+    let payload = try? TwitchAPIClient.decode(TwitchHelixErrorPayload.self, from: data)
     let message = payload?.message ?? payload?.error ?? String(data: data, encoding: .utf8)
     return TwitchHelixRequestError(context: context, status: status, message: message)
   }
@@ -802,7 +802,7 @@ final class FollowedChannelsService {
     let (data, response) = try await URLSession.shared.data(for: req)
     try TwitchAPIClient.validatedData(data, response)
 
-    let decoded = try JSONDecoder().decode(TrendingEnvelope.self, from: data)
+    let decoded = try TwitchAPIClient.decode(TrendingEnvelope.self, from: data)
     let edges = decoded.data?.streams?.edges ?? []
 
     let channels = edges.compactMap { edge -> FollowedChannel? in

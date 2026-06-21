@@ -49,6 +49,17 @@ enum TwitchAPIClient {
     return try sharedDecoder.decode(T.self, from: data)
   }
 
+  /// Decodes `T` from already-validated response data using the shared decoder.
+  /// Behaves exactly like `try JSONDecoder().decode(T.self, from: data)` (default
+  /// decoder configuration) but reuses one decoder instead of allocating a fresh
+  /// `JSONDecoder()` per call. Intended for the many services that check the HTTP
+  /// status themselves (with their own bespoke error mapping) and then decode the
+  /// body: the status guard stays where it is and only the redundant decoder is
+  /// shared.
+  static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    try sharedDecoder.decode(T.self, from: data)
+  }
+
   /// A single reused decoder for every `decode(_:from:response:)` call. A fresh
   /// `JSONDecoder()` per response is wasteful across the dozen services that
   /// route through here; the decoder holds only immutable configuration and is

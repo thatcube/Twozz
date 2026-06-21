@@ -189,6 +189,28 @@ final class PlayerModel {
   var sleepSelectionIndex = 0
   var showStillWatching = false
   var isSleeping = false
+
+  // MARK: Chat send / sync
+  var isSendingChat = false
+  var chatSendError: String?
+  var chatSyncSendDeadline: Date?
+  var chatSyncSendDelay: Double = 0
+  var chatSyncSendClearTask: Task<Void, Never>?
+
+  // MARK: Chat scroll / soft-pause / trackpad / hold
+  var chatSoftPauseRemaining: Int?
+  var softPauseTask: Task<Void, Never>?
+  var isChatScrolling = false
+  var chatScrollAnchorID: ChatMessage.ID?
+  var chatScrollTarget: ChatScrollTarget?
+  var chatScrollNonce = 0
+  var chatFrozenMessages: [ChatMessage]?
+  var trackpadScrollTask: Task<Void, Never>?
+  var trackpadScrollIndex: Double = 0
+  var lastSentScrollIndex: Int = -1
+  var lastGestureScrollAt = Date.distantPast
+  var chatHoldTask: Task<Void, Never>?
+  var lastHoldRepeatAt = Date.distantPast
 }
 
 extension PlayerView {
@@ -411,5 +433,77 @@ extension PlayerView {
   var isSleeping: Bool {
     get { model.isSleeping }
     nonmutating set { model.isSleeping = newValue }
+  }
+  var isSendingChat: Bool {
+    get { model.isSendingChat }
+    nonmutating set { model.isSendingChat = newValue }
+  }
+  var chatSendError: String? {
+    get { model.chatSendError }
+    nonmutating set { model.chatSendError = newValue }
+  }
+  var chatSyncSendDeadline: Date? {
+    get { model.chatSyncSendDeadline }
+    nonmutating set { model.chatSyncSendDeadline = newValue }
+  }
+  var chatSyncSendDelay: Double {
+    get { model.chatSyncSendDelay }
+    nonmutating set { model.chatSyncSendDelay = newValue }
+  }
+  var chatSyncSendClearTask: Task<Void, Never>? {
+    get { model.chatSyncSendClearTask }
+    nonmutating set { model.chatSyncSendClearTask = newValue }
+  }
+  var chatSoftPauseRemaining: Int? {
+    get { model.chatSoftPauseRemaining }
+    nonmutating set { model.chatSoftPauseRemaining = newValue }
+  }
+  var softPauseTask: Task<Void, Never>? {
+    get { model.softPauseTask }
+    nonmutating set { model.softPauseTask = newValue }
+  }
+  var isChatScrolling: Bool {
+    get { model.isChatScrolling }
+    nonmutating set { model.isChatScrolling = newValue }
+  }
+  var chatScrollAnchorID: ChatMessage.ID? {
+    get { model.chatScrollAnchorID }
+    nonmutating set { model.chatScrollAnchorID = newValue }
+  }
+  var chatScrollTarget: ChatScrollTarget? {
+    get { model.chatScrollTarget }
+    nonmutating set { model.chatScrollTarget = newValue }
+  }
+  var chatScrollNonce: Int {
+    get { model.chatScrollNonce }
+    nonmutating set { model.chatScrollNonce = newValue }
+  }
+  var chatFrozenMessages: [ChatMessage]? {
+    get { model.chatFrozenMessages }
+    nonmutating set { model.chatFrozenMessages = newValue }
+  }
+  var trackpadScrollTask: Task<Void, Never>? {
+    get { model.trackpadScrollTask }
+    nonmutating set { model.trackpadScrollTask = newValue }
+  }
+  var trackpadScrollIndex: Double {
+    get { model.trackpadScrollIndex }
+    nonmutating set { model.trackpadScrollIndex = newValue }
+  }
+  var lastSentScrollIndex: Int {
+    get { model.lastSentScrollIndex }
+    nonmutating set { model.lastSentScrollIndex = newValue }
+  }
+  var lastGestureScrollAt: Date {
+    get { model.lastGestureScrollAt }
+    nonmutating set { model.lastGestureScrollAt = newValue }
+  }
+  var chatHoldTask: Task<Void, Never>? {
+    get { model.chatHoldTask }
+    nonmutating set { model.chatHoldTask = newValue }
+  }
+  var lastHoldRepeatAt: Date {
+    get { model.lastHoldRepeatAt }
+    nonmutating set { model.lastHoldRepeatAt = newValue }
   }
 }

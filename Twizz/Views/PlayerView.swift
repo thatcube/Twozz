@@ -393,13 +393,7 @@ struct PlayerView: View {
   @State var youtubeInputActivationToken: Int = 0
   @State var kickInputActivationToken: Int = 0
   @State var highlightKeywordsActivationToken: Int = 0
-  @State var isSendingChat = false
-  @State var chatSendError: String?
-  /// When chat sync is active, a sent message is held until it appears in the
-  /// delayed stream. This is the wall-clock moment it should surface.
-  @State var chatSyncSendDeadline: Date?
-  @State var chatSyncSendDelay: Double = 0
-  @State var chatSyncSendClearTask: Task<Void, Never>?
+  // Chat send/sync state now lives in PlayerModel.
   @State var hideTask: Task<Void, Never>?
   @State var focusRecoveryTask: Task<Void, Never>?
   @State var isQualityMenuPresented = false
@@ -565,38 +559,14 @@ struct PlayerView: View {
   @State var lastControlFocus: Focusable = .quality
   /// Non-nil while chat is "soft paused" (Twitch-style): the list is frozen so
   /// the viewer can read, with a countdown that auto-resumes. A second Up press
-  /// promotes it to manual scroll mode.
-  @State var chatSoftPauseRemaining: Int?
-  @State var softPauseTask: Task<Void, Never>?
+  /// promotes it to manual scroll mode. (State now on PlayerModel.)
   let softPauseSeconds = 10
-  /// True once the viewer has promoted the pause into manual scroll mode. Focus
-  /// stays on the composer; up/down swipes drive `chatScrollTarget` directly,
-  /// because tvOS will not reliably hand (and keep) focus on the chat ScrollView.
-  @State var isChatScrolling = false
-  /// The message currently pinned near the top of the viewport while scrolling,
-  /// tracked by id so incoming messages don't shift our place.
-  @State var chatScrollAnchorID: ChatMessage.ID?
-  /// Latest scroll instruction handed to ChatView. The nonce makes repeated
-  /// scrolls to the same id still register as a change.
-  @State var chatScrollTarget: ChatScrollTarget?
-  @State var chatScrollNonce = 0
-  /// Snapshot of the chat list captured when the viewer pauses/scrolls. While
-  /// non-nil it is the single source of truth for both rendering and scroll math,
-  /// so a busy channel (where the live buffer is constantly trimmed from the
-  /// front) can't shift the list out from under the reader. Cleared on resume.
-  @State var chatFrozenMessages: [ChatMessage]?
   /// Messages to advance per up/down swipe while scrolling.
   let chatScrollStep = 4
   /// Swipe-to-scroll (Siri Remote trackpad) state. The `trackpad` monitor (now on
   /// `PlayerModel`) reports the finger's position; a loop maps finger *travel* to
   /// scroll position so the chat follows a swipe and holds still when the finger
-  /// does. Discrete presses still step (and press-and-hold repeats).
-  @State var trackpadScrollTask: Task<Void, Never>?
-  @State var trackpadScrollIndex: Double = 0
-  @State var lastSentScrollIndex: Int = -1
-  /// When the swipe loop last moved the scroll, used to suppress the discrete
-  /// focus-move events a swipe also emits so a swipe and a press don't double up.
-  @State var lastGestureScrollAt = Date.distantPast
+  /// does. Discrete presses still step (and press-and-hold repeats). (State on PlayerModel.)
   /// Finger position magnitude below this reads as "not touching" (lifted).
   let chatScrollTouchEpsilon: Double = 0.02
   /// Per-frame finger movement below this reads as "resting" (no swipe), so a
@@ -613,8 +583,7 @@ struct PlayerView: View {
   let chatScrollMomentumMin: Double = 0.04
   /// Press-and-hold auto-repeat. tvOS won't emit system key-repeat here because
   /// focus is trapped on the composer, so we drive an accelerating repeat
-  /// ourselves while the finger stays pressed/down on the pad.
-  @State var chatHoldTask: Task<Void, Never>?
+  /// ourselves while the finger stays pressed/down on the pad. (State on PlayerModel.)
   /// Delay after click-down before the continuous hold-scroll engages, so a quick
   /// tap stays a single discrete step.
   let chatHoldInitialDelay: Double = 0.2
@@ -624,9 +593,6 @@ struct PlayerView: View {
   let chatHoldMaxVelocity: Double = 1.4
   /// Per-frame multiplier that ramps the hold speed up (acceleration).
   let chatHoldVelocityAccel: Double = 1.035
-  /// When the hold last scrolled, used to swallow the single discrete move event
-  /// the click also emits on release.
-  @State var lastHoldRepeatAt = Date.distantPast
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
   @State var chatInputFocusedAt = Date.distantPast

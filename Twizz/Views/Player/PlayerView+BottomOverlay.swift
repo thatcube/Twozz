@@ -399,6 +399,17 @@ extension PlayerView {
       lines.append("State: Playing/waiting · Waiting: \(diagWaitingReasonDescription())")
     }
     lines.append("Edge gap: \(edge) · Encoder: \(wall)")
+    if let w = currentSeekWindow() {
+      let span = max(w.end - w.start, 0)
+      let behind = max(w.end - w.now, 0)
+      lines.append(
+        "Rewind window: \(diagFormat(span, decimals: 1))s · pos -\(diagFormat(behind, decimals: 1))s")
+    } else {
+      lines.append("Rewind window: —")
+    }
+    let dvr = lowLatencyProxy.dvrStats
+    lines.append(
+      "Proxy DVR: \(diagFormat(dvr.retainedSeconds, decimals: 1))s · keys: \(dvr.keyCount)")
     lines.append("Chat hold: \(chatHold)")
     lines.append(
       "Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")

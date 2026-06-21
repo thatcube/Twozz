@@ -50,9 +50,6 @@ final class PlaybackMonitorBox {
   /// after repeated resyncs fail to stick.
   var lastLiveResyncAt = Date.distantPast
   var liveResyncAttempts = 0
-  /// Throttles the snap-to-true-live reload that fires when the viewer returns to
-  /// the live edge atop a stale seekable window.
-  var lastLiveEdgeSnapAt = Date.distantPast
   /// When the player first entered a sustained "waiting with a starved buffer"
   /// state. Drives the authoritative end-of-stream (offline) probe.
   var liveStallWaitingSince: Date?

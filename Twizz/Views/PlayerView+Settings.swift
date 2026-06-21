@@ -162,7 +162,6 @@ extension PlayerView {
           applyChatSyncSettings()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .focusSection()
 
         Text("Holds chat back to line up with the broadcast delay, so messages appear as the moment they react to plays on screen.")
           .font(.caption2)

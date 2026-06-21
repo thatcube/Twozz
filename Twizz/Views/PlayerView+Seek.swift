@@ -72,7 +72,6 @@ extension PlayerView {
         isPaused: isUserPaused, isAtLiveEdge: true)
       return
     }
-
     // Full-broadcast timeline when the in-progress VOD is known: place the playhead
     // by its wall-clock instant against `broadcastStart … now`, so the DVR window
     // and the VOD share one bar. `now` stands in for the live edge (the broadcast
@@ -278,10 +277,27 @@ extension PlayerView {
     }
   }
 
-  /// Lands a frame-accurate seek at `seconds`, clears the intended-position
-  /// override, and resumes playback (unless the viewer is intentionally paused).
+  /// Lands a frame-accurate seek, clears the intended-position override, and
+  /// resumes playback (unless the viewer is intentionally paused). When returning
+  /// to live, we recompute the target to the current live-follow position (a few
+  /// seconds back from the proxy's seekable tail) so the viewer lands exactly where
+  /// they were before rewinding — the lowest latency playback can hold. We do NOT
+  /// chase the true broadcast edge: with the LL proxy that tail is already as close
+  /// to live as we can get, and reloading/seeking to reach further only causes
+  /// rebuffering and throws away the rewind window.
   func commitScrubSeek(to seconds: Double) {
     scrubCommitTask?.cancel()
+    // Returning to the live edge of a live stream: a plain seek can't restore the
+    // low latency we had before rewinding. While playing from the rewind buffer
+    // AVPlayer stops polling Twitch for a fresh playlist, so the seekable tail
+    // goes stale and drifts further behind real-live. Seeking can only reach that
+    // stale tail. A fresh item re-fetches the playlist and lands back at the live
+    // edge (~the pre-rewind latency). The proxy keeps `retainHistory` on across
+    // the swap, so the DVR/rewind window survives the reload.
+    if !isVOD, pinnedToLive {
+      reloadToLiveEdge()
+      return
+    }
     let time = CMTime(seconds: seconds, preferredTimescale: 600)
     player.currentItem?.seek(to: time, completionHandler: { [self] finished in
       // A frame-accurate live seek can take a second or two to land. If the
@@ -294,10 +310,33 @@ extension PlayerView {
       scrubTargetSeconds = nil
       if !isUserPaused { resumePlayback() }
       updateRewindReadout()
-      // Returning to the live edge over a stale seekable window leaves the viewer
-      // tens of seconds behind real live; a fresh load snaps to the true edge
-      // (and keeps the rewind window intact).
-      if !isVOD, pinnedToLive { snapToTrueLiveIfStale() }
     })
+  }
+
+  /// Swap in a fresh AVPlayerItem for the same source to re-fetch the live edge.
+  /// Used when the viewer scrubs back to live: it restores the pre-rewind latency
+  /// that a seek can't reach (the seekable tail goes stale while watching from
+  /// history). The proxy retains the DVR buffers across the swap, so the rewind
+  /// window is preserved and the viewer can scrub back again immediately.
+  func reloadToLiveEdge() {
+    guard let source = currentSourceURL else {
+      // No known source to reload — fall back to a tail seek so we still resume.
+      if let window = currentSeekWindow() {
+        let time = CMTime(seconds: max(window.end - targetLiveEdgeSeconds, window.start),
+                          preferredTimescale: 600)
+        player.currentItem?.seek(to: time, completionHandler: { [self] _ in
+          scrubTargetSeconds = nil
+          if !isUserPaused { resumePlayback() }
+          updateRewindReadout()
+        })
+      }
+      return
+    }
+    scrubTargetSeconds = nil
+    pinnedToLive = true
+    player.replaceCurrentItem(with: makeItem(url: source))
+    applyQualityPreference(preferredQuality)
+    if !isUserPaused { startPlayback() }
+    updateRewindReadout()
   }
 }

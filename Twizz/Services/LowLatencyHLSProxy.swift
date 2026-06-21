@@ -178,6 +178,21 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     /// media-playlist URL. Mutated only on `delegateQueue`.
     private var dvrBuffers: [String: DVRBuffer] = [:]
 
+    /// Diagnostic snapshot of the proxy's own retained DVR depth, independent of
+    /// what AVPlayer chooses to expose as seekable. Lets us tell whether a reload
+    /// loses the window at the proxy layer (key changed → buffer reset) or only at
+    /// the AVPlayer layer (proxy still holds it but the fresh item under-reports).
+    struct DVRStats { let retainedSeconds: Double; let keyCount: Int }
+    private let dvrStatsLock = NSLock()
+    private var dvrStatsRetainedSeconds: Double = 0
+    private var dvrStatsKeyCount: Int = 0
+    /// Thread-safe read of the proxy's retained DVR depth for the diagnostics overlay.
+    var dvrStats: DVRStats {
+        dvrStatsLock.lock()
+        defer { dvrStatsLock.unlock() }
+        return DVRStats(retainedSeconds: dvrStatsRetainedSeconds, keyCount: dvrStatsKeyCount)
+    }
+
     /// One parsed HLS segment (a real `#EXTINF` segment or a promoted prefetch),
     /// kept as its full text block so per-segment tags (PROGRAM-DATE-TIME,
     /// DISCONTINUITY, …) survive into the rewritten playlist verbatim.
@@ -472,6 +487,11 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             if dropped.isDiscontinuity { buf.discontinuitySequence += 1 }
         }
         dvrBuffers[key] = buf
+
+        dvrStatsLock.lock()
+        dvrStatsRetainedSeconds = buf.totalDuration
+        dvrStatsKeyCount = dvrBuffers.count
+        dvrStatsLock.unlock()
 
         let header = rebuildHeader(
             parsed.header,

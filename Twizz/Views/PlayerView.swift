@@ -277,10 +277,6 @@ struct PlayerView: View {
     get { mon.lastLiveResyncAt }
     nonmutating set { mon.lastLiveResyncAt = newValue }
   }
-  var lastLiveEdgeSnapAt: Date {
-    get { mon.lastLiveEdgeSnapAt }
-    nonmutating set { mon.lastLiveEdgeSnapAt = newValue }
-  }
   var liveResyncAttempts: Int {
     get { mon.liveResyncAttempts }
     nonmutating set { mon.liveResyncAttempts = newValue }
@@ -507,15 +503,6 @@ struct PlayerView: View {
   let liveResyncCooldownSeconds: Double = 6
   /// After this many resync seeks fail to hold the edge, escalate to a full reload.
   let maxLiveResyncAttempts = 3
-  /// When the viewer returns to the live edge but the seekable window AVPlayer
-  /// holds trails the true broadcast by at least this much, a same-window seek
-  /// can't reach real live — so we force a fresh load that lands at the true edge.
-  /// Measured as wall-clock behind-live minus the in-window edge gap, so it only
-  /// fires when the cached playlist is genuinely stale (not for normal latency).
-  let staleLiveWindowSnapThresholdSeconds: Double = 10
-  /// Minimum spacing between snap-to-true-live reloads, so a single return-to-live
-  /// can never loop into repeated reloads.
-  let liveEdgeSnapCooldownSeconds: Double = 6
   let stallNotificationDebounceSeconds: Double = 2.5
   /// Stream-stability watchdog. It counts destabilizing events — stalls plus
   /// involuntary backward playhead jumps (an AVPlayer rewind we never request) —

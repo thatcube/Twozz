@@ -291,14 +291,30 @@ of stalling, and the slow-down rides out short buffer dips.
   restarts playback near the live edge. A reload therefore looks like a large
   forward "jump" on screen — this is one known, code-level source of jumps
   (counted separately as "Reloads" in the Diagnostics overlay).
-- **Snap to true live on return.** After scrubbing through the DVR window and
-  returning to the live edge, AVPlayer's seekable window can itself trail the
-  true broadcast tail (its cached media playlist is stale), so a same-window seek
-  leaves the viewer ~10s+ behind. On scrub commit, when pinned to live and that
-  staleness (wall-clock behind-live minus the in-window edge gap) exceeds a
-  threshold, `snapToTrueLiveIfStale` forces a fresh load that lands at the real
-  edge. The proxy only clears its DVR buffers when `retainHistory` actually
-  changes, so the rewind window survives the reload.
+- **Return to live without reloading or chasing true live.** After scrubbing
+  through the DVR window, returning to live simply resumes the *live-follow
+  position* — a few seconds (`targetLiveEdgeSeconds`) back from the proxy's
+  seekable tail, which is exactly where the viewer was before they rewound and the
+  lowest latency playback can hold with the LL proxy on. `commitScrubSeek`
+  recomputes that target from the current window and seeks the **same**
+  `AVPlayerItem` there once. We deliberately do *not* try to reach the true
+  wall-clock broadcast edge: with the proxy that tail is already as close to live
+  as we get, and the old reload/seek-chase that tried only caused repeated
+  rebuffering and — because a fresh item re-anchors near the edge — silently threw
+  away the rewind window, so the viewer couldn't rewind again after catching up.
+  Keeping the same item preserves the full seekable history. Because AVPlayer lets
+  its seekable window go stale while playing from the rewind buffer (it stops
+  refreshing the live playlist), the commit seek can land a few seconds further
+  back than the pre-rewind position; `scheduleReturnToLiveCatchUp` then waits for
+  the playlist to refresh and seeks the playhead up to the now-fresh
+  `tail − targetLiveEdgeSeconds` once or twice. It targets the **reachable**
+  seekable edge, never the wall-clock true edge (which the LL proxy makes
+  unreachable), so it converges and stops rather than rebuffering on a moving
+  target, and it is cancelled the instant the viewer leaves live again.
+- The rewind bar's `0:00`/`LIVE` reference is that same live-follow point, not the
+  raw seekable tail or the wall-clock edge: a stream the proxy holds e.g. 16s
+  behind true live still reads `LIVE` while followed, and a 2-minute rewind reads
+  `-2:00` (distance from the follow point), not `-2:16`.
 - **Soft-stall deadlock recovery (the "Playing/waiting · evaluatingBufferingRate"
   freeze with a healthy buffer).** AVPlayer can park in
   `.waitingToPlayAtSpecifiedRate` (reason `.evaluatingBufferingRate` or

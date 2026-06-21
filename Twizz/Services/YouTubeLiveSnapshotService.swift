@@ -43,6 +43,26 @@ final class YouTubeLiveSnapshotService {
     presences[channelID]
   }
 
+  /// Merges freshly-resolved concurrent viewer counts (keyed by YouTube channel
+  /// ID) into the loaded presences, so a live channel whose snapshot shipped a
+  /// `nil`/stale viewer count gains the real "watching now" number. Only known,
+  /// still-live channels are updated; entries without a new count keep whatever
+  /// the snapshot provided. Both the Home cards and the player read `presences`,
+  /// so this enriches both at once. The video ID/title/live flag are preserved.
+  func applyConcurrentViewerCounts(_ countsByChannelID: [String: Int]) {
+    guard !countsByChannelID.isEmpty else { return }
+    for (channelID, viewers) in countsByChannelID {
+      guard let existing = presences[channelID], existing.isLive else { continue }
+      presences[channelID] = YouTubePresence(
+        channelID: existing.channelID,
+        isLive: existing.isLive,
+        viewerCount: viewers,
+        videoID: existing.videoID,
+        title: existing.title
+      )
+    }
+  }
+
   /// Conditionally refreshes from the remote (throttled, ETag-aware). Falls back
   /// silently to whatever is already loaded on any failure — presence must never
   /// block the Following rail.

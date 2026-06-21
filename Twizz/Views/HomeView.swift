@@ -29,6 +29,9 @@ struct HomeView: View {
   private var affinity: StreamerAffinityService { environment.affinity }
   private var youtubeAliases: TwitchYouTubeAliasService { environment.youtubeAliases }
   private var youtubeLive: YouTubeLiveSnapshotService { environment.youtubeLive }
+  private var youtubeConcurrentViewers: YouTubeConcurrentViewersService {
+    environment.youtubeConcurrentViewers
+  }
   private var youtubeAuth: YouTubeAuthSession { environment.youtubeAuth }
   private var youtubeSubscriptions: YouTubeSubscriptionsService { environment.youtubeSubscriptions }
   private var youtubeResolver: YouTubeLiveResolver { environment.youtubeResolver }
@@ -639,7 +642,34 @@ struct HomeView: View {
   private func refreshYouTubePresence() async {
     await youtubeAliases.refreshIfNeeded()
     await youtubeLive.refreshIfNeeded()
+    await enrichYouTubeViewerCounts()
     follows.applyYouTubePresence(aliases: youtubeAliases, live: youtubeLive)
+  }
+
+  /// Fills in real "watching now" counts for channels the snapshot reports live
+  /// on YouTube but without a viewer number (the official feed the CI snapshot
+  /// uses frequently omits it). Scrapes the anonymous watch page per live video,
+  /// bounded/throttled by `YouTubeConcurrentViewersService`, then merges the
+  /// counts back into the shared snapshot so both the Home cards and the player
+  /// show the YouTube viewers in the combined total.
+  private func enrichYouTubeViewerCounts() async {
+    let liveVideos = youtubeLive.presences.values
+      .filter { $0.isLive }
+      .compactMap { presence -> (channelID: String, videoID: String)? in
+        guard let videoID = presence.videoID, !videoID.isEmpty else { return nil }
+        return (presence.channelID, videoID)
+      }
+    guard !liveVideos.isEmpty else { return }
+
+    await youtubeConcurrentViewers.refresh(videoIDs: liveVideos.map(\.videoID))
+
+    var countsByChannelID: [String: Int] = [:]
+    for entry in liveVideos {
+      if let count = youtubeConcurrentViewers.count(forVideoID: entry.videoID) {
+        countsByChannelID[entry.channelID] = count
+      }
+    }
+    youtubeLive.applyConcurrentViewerCounts(countsByChannelID)
   }
 
   private func refreshRecommendationsIfNeeded(force: Bool) async {

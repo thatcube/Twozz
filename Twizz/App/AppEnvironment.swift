@@ -38,6 +38,9 @@ final class AppEnvironment {
   let youtubeAliases = TwitchYouTubeAliasService()
   /// Public YouTube live snapshot used to merge YouTube presence into follows.
   let youtubeLive = YouTubeLiveSnapshotService()
+  /// Anonymous watch-page scraper for live YouTube concurrent viewer counts,
+  /// used to fill in counts the public snapshot ships as `nil`.
+  let youtubeConcurrentViewers = YouTubeConcurrentViewersService()
   /// YouTube account / device-code session.
   let youtubeAuth = YouTubeAuthSession()
   /// The viewer's YouTube subscriptions.

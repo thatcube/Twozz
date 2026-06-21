@@ -571,6 +571,7 @@ extension PlayerView {
       .chatAdvancedButton,
       .chatWidthOption,
       .chatLayoutOption,
+      .chatSyncToggle,
       .chatCaptionsToggle,
       .chatCaptionsBackgroundOption,
       .chatCaptionsColorOption,

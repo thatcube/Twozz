@@ -37,6 +37,10 @@
 	<string>$(TVOS_DEPLOYMENT_TARGET)</string>
 	<key>TWITCH_CLIENT_ID</key>
 	<string>$(TWITCH_CLIENT_ID)</string>
+	<key>YOUTUBE_CLIENT_ID</key>
+	<string>$(YOUTUBE_CLIENT_ID)</string>
+	<key>YOUTUBE_CLIENT_SECRET</key>
+	<string>$(YOUTUBE_CLIENT_SECRET)</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>OpenDyslexic-Regular.otf</string>

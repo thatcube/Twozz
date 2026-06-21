@@ -46,6 +46,7 @@ extension ChatService {
     kickSubscribedChannel = nil
     kickResolvedSlug = nil
     kickResolvedIsLive = false
+    kickViewerCount = nil
     if clearStatus {
       kickStatusMessage = nil
     }
@@ -70,6 +71,7 @@ extension ChatService {
           kickChatroomID = info.chatroomID
           kickResolvedSlug = info.slug
           kickResolvedIsLive = info.isLive
+          kickViewerCount = info.isLive ? info.viewerCount : nil
           kickStatusMessage = "Connecting to kick.com/\(info.slug)…"
         }
 
@@ -175,6 +177,8 @@ extension ChatService {
     let slug: String
     let username: String
     let isLive: Bool
+    /// Concurrent viewers from the `livestream` object, present only while live.
+    let viewerCount: Int?
   }
 
   /// Fetches a Kick channel's public profile: chatroom id (needed to subscribe),
@@ -214,10 +218,16 @@ extension ChatService {
     let username = ((root["user"] as? [String: Any])?["username"] as? String)
       .flatMap { $0.isEmpty ? nil : $0 } ?? canonicalSlug
     // `livestream` is a non-null object only while the channel is broadcasting.
-    let isLive = root["livestream"] is [String: Any]
+    let livestream = root["livestream"] as? [String: Any]
+    let isLive = livestream != nil
+    // The live object carries the concurrent viewer count; Kick has used both
+    // `viewer_count` and `viewers` over time, so accept either.
+    let viewerCount = (livestream?["viewer_count"] as? Int)
+      ?? (livestream?["viewers"] as? Int)
 
     return KickChannelInfo(
-      chatroomID: id, slug: canonicalSlug, username: username, isLive: isLive)
+      chatroomID: id, slug: canonicalSlug, username: username, isLive: isLive,
+      viewerCount: viewerCount)
   }
 
   private static let kickAPIUserAgent =

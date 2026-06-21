@@ -68,6 +68,7 @@ extension PlayerView {
               title: streamTitle.isEmpty ? channelDisplayName : streamTitle,
               latency: latencyReadout,
               hermes: hermes,
+              chat: chat,
               showSubheader: !isVOD,
               showLatency: showLatencyBadge,
               showViewerCount: showViewerCount

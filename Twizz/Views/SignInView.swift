@@ -257,54 +257,66 @@ struct SignInView: View {
 /// Casual "we're waiting on you" status shown while polling Twitch *or* YouTube
 /// for authorization (shared by `SignInView` and `YouTubeSignInView`). Cycles
 /// through a broad, randomized set of playful stream-culture phrases — each
-/// paired with a real third-party emote (7TV / BTTV / FFZ) so the app's native
-/// emote support is on show right from the sign-in screen. `accent` tints the
-/// pulsing dots to match the host screen.
+/// paired with a real 7TV emote so the app's native emote support is on show
+/// right from the sign-in screen. `accent` tints the pulsing dots to match the
+/// host screen.
+///
+/// Emotes are pinned by 7TV ID (not looked up by name in the global set, which
+/// only carries a handful of these) and warmed into SDWebImage's disk cache on
+/// appear. A phrase only enters rotation once its emote is confirmed cached, so
+/// the emote slot is never blank.
 struct SignInWaitingView: View {
   var accent: Color = Color(red: 0.58, green: 0.41, blue: 0.96)
 
   private struct Line {
     let text: String
+    /// 7TV emote ID. Resolved once (most-popular variant) and pinned so it
+    /// always loads regardless of the global emote set.
     let emote: String
+
+    var url: URL? { URL(string: "https://cdn.7tv.app/emote/\(emote)/2x.webp") }
   }
 
   private static let lines: [Line] = [
-    Line(text: "Waiting on you", emote: "peepoHappy"),
-    Line(text: "Any second now", emote: "monkaS"),
-    Line(text: "We're so back", emote: "FeelsAmazingMan"),
-    Line(text: "No rush, chat", emote: "FeelsGoodMan"),
-    Line(text: "Easy clap", emote: "EZ"),
-    Line(text: "Hop in already", emote: "AYAYA"),
-    Line(text: "Vibing till you're in", emote: "catJAM"),
-    Line(text: "Let's gooo", emote: "PepePls"),
-    Line(text: "Is it loading yet", emote: "PauseChamp"),
-    Line(text: "Mods are asleep", emote: "monkaW"),
-    Line(text: "Two more minutes", emote: "Copium"),
-    Line(text: "Trust the process", emote: "Prayge"),
-    Line(text: "First!", emote: "KEKW"),
-    Line(text: "Hold the W", emote: "Pog"),
-    Line(text: "Still here, still hyping", emote: "peepoClap"),
-    Line(text: "Source? Just wait", emote: "Susge"),
-    Line(text: "Big if true", emote: "Pepega"),
-    Line(text: "Patiently malding", emote: "Madge"),
-    Line(text: "Buffering good vibes", emote: "widepeepoHappy"),
-    Line(text: "NODDERS while we wait", emote: "NODDERS"),
-    Line(text: "Chat's been patient", emote: "Sadge"),
-    Line(text: "Sub goal: you signing in", emote: "peepoHappy"),
-    Line(text: "Sheeesh, take your time", emote: "EZ"),
-    Line(text: "Clip it when you're in", emote: "KEKW"),
-    Line(text: "We ball regardless", emote: "Pepega"),
-    Line(text: "Number go up soon", emote: "Copium"),
+    Line(text: "Waiting on you", emote: "01KTR4A3Z08TPFNFA5CRVM9319"),        // peepoHappy
+    Line(text: "Any second now", emote: "01KTFW0YRNDPZ6FATQG0CQZ6A7"),        // monkaS
+    Line(text: "We're so back", emote: "01JTF4D0CN6QHA3A68NNZK3FD7"),         // FeelsAmazingMan
+    Line(text: "Easy clap", emote: "01KTVPGWKSKYVEY7G53DP0BPY5"),            // EZ
+    Line(text: "Hop in already", emote: "01KQXPJTS2RM5TX8K1VWFKETEX"),        // AYAYA
+    Line(text: "Vibing till you're in", emote: "01KTBJSRP2QAY765T51QPGVJ2B"), // catJAM
+    Line(text: "Let's gooo", emote: "01K5CGV5P7C2WZFXFAD38VNF8G"),           // PepePls
+    Line(text: "Is it loading yet", emote: "01KT2RGK5MH64Q75MDWJPC468V"),     // PauseChamp
+    Line(text: "Two more minutes", emote: "01KTVV0RVEWNDAJ2N3VEDMV6K8"),      // Copium
+    Line(text: "Trust the process", emote: "01KT72MTR32MVPWA6VCGRDN7PR"),     // Prayge
+    Line(text: "First!", emote: "01KVG21PGGY1C9WT2G07ENZSCA"),               // KEKW
+    Line(text: "Still here, still hyping", emote: "01KJVJXHDFJXFCJGTN4R1EKJQK"), // peepoClap
+    Line(text: "Big if true", emote: "01KTM1TVMBYHS7Y4G9D3W2H97J"),          // Pepega
+    Line(text: "Patiently malding", emote: "01KTT576FP1C7VKWN1VCCB98ZQ"),     // Madge
+    Line(text: "Buffering good vibes", emote: "01KTCNQ8E5J8FG3QWJPC1VG1BD"),  // widepeepoHappy
+    Line(text: "Nodders while we wait", emote: "01KTVV5R0FK1MB84QQ6ZXM9SJH"), // NODDERS
+    Line(text: "Chat's been patient", emote: "01KV0F3BNGAR3ZMPHN586FDJ6S"),   // Sadge
+    Line(text: "Hold the W", emote: "01KVGFXBX0E9DK1M9YNR0NKT7Z"),           // Pog
+    Line(text: "Clip it when you're in", emote: "01KV02YD3A6XD0MTWZK056MJJC"), // Clap
+    Line(text: "Just staring at the door", emote: "01KV9DYTQS7H565JXS11FYZE2C"), // Stare
+    Line(text: "WAYTOODANK loading", emote: "01KQZMQM5AQK6PG7DFBAGF5V15"),    // WAYTOODANK
   ]
 
   @State private var deck: [Line] = SignInWaitingView.lines.shuffled()
   @State private var index = 0
-  @State private var emoteURLs: [String: URL] = [:]
+  /// 7TV IDs confirmed present in the image cache. A phrase only shows once its
+  /// emote is in here, so the emote never pops in blank.
+  @State private var ready: Set<String> = []
   @State private var visible = true
 
   private let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
-  private var line: Line { deck[index % deck.count] }
+  /// The phrase to display: prefer ones whose emote is cached; fall back to the
+  /// full deck only while nothing has loaded yet (very first frames).
+  private var line: Line {
+    let loaded = deck.filter { ready.contains($0.emote) }
+    let pool = loaded.isEmpty ? deck : loaded
+    return pool[index % pool.count]
+  }
 
   var body: some View {
     HStack(spacing: 24) {
@@ -321,14 +333,7 @@ struct SignInWaitingView: View {
       .animation(.easeInOut(duration: 0.35), value: visible)
     }
     .frame(minHeight: 64)
-    .task {
-      let catalog = await EmoteCatalogService.shared.globalCatalog()
-      emoteURLs = catalog
-      // Warm the image cache up front so emotes appear instantly as they cycle,
-      // rather than downloading on first display.
-      let urls = Self.lines.compactMap { catalog[$0.emote] }
-      SDWebImagePrefetcher.shared.prefetchURLs(urls)
-    }
+    .task { warmEmotes() }
     .onReceive(timer) { _ in
       withAnimation(.easeInOut(duration: 0.35)) { visible = false }
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -341,9 +346,21 @@ struct SignInWaitingView: View {
     }
   }
 
+  /// Download every emote into SDWebImage's (disk-backed, cross-launch) cache up
+  /// front and mark each ready as it lands, so they render instantly on cycle —
+  /// and only after the image actually exists.
+  private func warmEmotes() {
+    for emoteLine in Self.lines {
+      guard let url = emoteLine.url else { continue }
+      SDWebImageManager.shared.loadImage(with: url, options: [.retryFailed], progress: nil) { _, _, _, _, finished, _ in
+        if finished { ready.insert(emoteLine.emote) }
+      }
+    }
+  }
+
   @ViewBuilder
   private var emoteView: some View {
-    if let url = emoteURLs[line.emote] {
+    if let url = line.url {
       AnimatedImage(url: url)
         .resizable()
         .aspectRatio(contentMode: .fit)

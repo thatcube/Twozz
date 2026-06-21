@@ -556,6 +556,21 @@ extension PlayerView {
     }
   }
 
+  /// Whether `focus` is an action button on one of the bottom banners (the
+  /// "just went live" Watch button or the outgoing-raid Cancel button). These
+  /// are deliberately presented overlays that *should* take focus, so when one
+  /// of them claims focus during an active chat scroll we resume the live feed
+  /// instead of trapping focus back on the composer — otherwise auto-scroll
+  /// could be left frozen with no way to recover.
+  func isBannerFocus(_ focus: Focusable) -> Bool {
+    switch focus {
+    case .goLiveWatch, .raidFollowCancel:
+      return true
+    default:
+      return false
+    }
+  }
+
   // FOCUS CONTRACT (tvOS focus here is managed explicitly, not automatically):
   // Every focusable control in the player/chat-settings panel must
   //   (1) have a unique `Focusable` case,

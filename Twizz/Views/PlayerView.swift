@@ -624,6 +624,10 @@ struct PlayerView: View {
     /// collapse-chat button).
     case chatScroller
     case raidFollowCancel
+    /// The "Watch" button on the bottom-middle "just went live" banner. Wired
+    /// into this focus model (rather than a detached `@FocusState`) so taking
+    /// focus can't silently strand an active chat scroll.
+    case goLiveWatch
     case sleepKeepWatching, sleepResume
     case chatSettingsButton
     // Stream Rewind transport bar
@@ -887,8 +891,8 @@ struct PlayerView: View {
       // them beside the stream. Read-only.
 
       if let goLive, let event = goLive.pending {
-        goLiveToast(goLive, event: event)
-          .transition(.motionAware(.move(edge: .top).combined(with: .opacity), reduceMotion: reduceMotion))
+        goLiveBanner(goLive, event: event)
+          .transition(.motionAware(.move(edge: .bottom).combined(with: .opacity), reduceMotion: reduceMotion))
           .zIndex(13)
       }
 

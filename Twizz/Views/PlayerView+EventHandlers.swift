@@ -49,6 +49,15 @@ extension PlayerView {
       guard let newRaid else { return }
       beginOutgoingRaidFollow(newRaid)
     }
+    .onChange(of: goLive?.pending) { _, pending in
+      // The bottom "just went live" banner owns focus while it's up (`.goLiveWatch`).
+      // When it dismisses (auto-timeout, or after Watch advances the queue to nil),
+      // hand focus back to the video so it isn't left on a vanished button. The
+      // Watch path also lands on `.video` via followRaid; this covers the timeout.
+      if pending == nil, focus == .goLiveWatch {
+        focus = .video
+      }
+    }
     .onChange(of: isOffline) { _, offline in
       // "End of current stream" sleep mode: when the channel goes offline, let
       // the device sleep (the offline empty-state is already shown, so no extra
@@ -283,12 +292,21 @@ extension PlayerView {
         // scrolling while the chrome is hidden. Exit is via Back or scrolling
         // back to the bottom.
         if let newFocus, newFocus != chatFocusAnchor, newFocus != .video {
-          focus = chatFocusAnchor
+          if isBannerFocus(newFocus) {
+            // A bottom banner (go-live / outgoing raid) deliberately claimed
+            // focus. Don't fight it back to the composer — that would leave the
+            // banner unreachable and, worse, strand chat frozen. Resume the live
+            // feed so auto-scroll re-enables, and let focus rest on the banner.
+            resumeChatLive()
+          } else {
+            focus = chatFocusAnchor
+          }
         }
       } else if chatSoftPauseRemaining != nil {
-        // Lightweight read pause: navigating away to a real control resumes live
-        // so the frozen state can't get stranded.
-        if let newFocus, newFocus != chatFocusAnchor, isControlFocus(newFocus) {
+        // Lightweight read pause: navigating away to a real control (or a bottom
+        // banner claiming focus) resumes live so the frozen state can't get stranded.
+        if let newFocus, newFocus != chatFocusAnchor,
+          isControlFocus(newFocus) || isBannerFocus(newFocus) {
           resumeChatLive()
         }
       }
@@ -298,6 +316,11 @@ extension PlayerView {
           focus = chatFocusPin ?? lastChatSettingsFocus
           return
         }
+
+        // A bottom banner (go-live / outgoing raid) may surface over the open
+        // settings panel and claim focus. Let it through rather than bouncing it
+        // back to the panel's last control.
+        if isBannerFocus(newFocus) { return }
 
         // A control was just activated: defend it against the transient focus
         // jump tvOS performs when toggling an option resizes the panel, which

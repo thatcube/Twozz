@@ -31,6 +31,20 @@ final class GoLiveWatcher {
   /// failures, so a sustained Helix/network outage doesn't retry every 60s.
   private static let maxPollBackoff: Double = 600
 
+  /// If this much wall-clock time elapsed since the last completed poll, the app
+  /// was almost certainly suspended (tvOS freezes the 60s sleep loop in the
+  /// background) or offline for a long stretch. Either way the in-memory
+  /// `knownLiveLogins` baseline is stale, so the next poll re-seeds it silently
+  /// instead of diffing — otherwise every channel that went live while we were
+  /// away would surface at once as a burst of "just went live" toasts. Chosen
+  /// well above the 60s cadence (and a single-failure backoff) but well below
+  /// any real suspend.
+  private static let staleResumeThreshold: TimeInterval = 300
+
+  /// Wall-clock time of the last poll that reached the baseline/diff stage. Used
+  /// to detect a stale resume (see `staleResumeThreshold`).
+  private var lastPollCompletedAt: Date?
+
   /// Consecutive failed polls, for exponential backoff. Reset on any successful
   /// (or idle / signed-out) poll.
   private var consecutivePollFailures = 0
@@ -71,7 +85,9 @@ final class GoLiveWatcher {
   }
 
   /// Logins known live as of the last successful poll. Seeded on the first poll
-  /// so channels already live at launch don't all toast at once.
+  /// so channels already live at launch don't all toast at once, and re-seeded
+  /// silently after a stale resume (see `staleResumeThreshold`) so a backlog of
+  /// go-lives that accumulated while suspended doesn't replay as a burst.
   private var knownLiveLogins: Set<String> = []
   private var hasBaseline = false
 
@@ -97,7 +113,11 @@ final class GoLiveWatcher {
   /// negligible, and tvOS suspends the app (and this `Task.sleep` loop) on its
   /// own when it goes to the background, so there's nothing to hand-tune there.
   /// (Per-channel EventSub `stream.online` would avoid polling entirely but caps
-  /// subscriptions below a large follow list — see the type doc above.)
+  /// subscriptions below a large follow list — see the type doc above.) When the
+  /// app resumes after being suspended (tvOS freezes this sleep loop in the
+  /// background), the first poll's wall-clock gap re-seeds the baseline silently
+  /// instead of replaying every go-live that piled up while away — see
+  /// `staleResumeThreshold`.
   func start(using auth: TwitchAuthSession) {
     stop()
     self.auth = auth
@@ -136,6 +156,7 @@ final class GoLiveWatcher {
     secondsRemaining = 0
     knownLiveLogins = []
     hasBaseline = false
+    lastPollCompletedAt = nil
     consecutivePollFailures = 0
   }
 
@@ -192,6 +213,7 @@ final class GoLiveWatcher {
       // poll doesn't treat the whole live follow list as fresh go-lives.
       hasBaseline = false
       knownLiveLogins = []
+      lastPollCompletedAt = nil
       return true
     }
 
@@ -215,7 +237,17 @@ final class GoLiveWatcher {
     let liveStreams = streams.filter { $0.type == "live" }
     let liveLogins = Set(liveStreams.map { $0.userLogin.lowercased() })
 
-    guard hasBaseline else {
+    // A long wall-clock gap since the last completed poll means the app was
+    // suspended or offline for a while, so the baseline is stale: re-seed it
+    // silently rather than diffing, otherwise every go-live that accumulated
+    // while we were away would surface as a burst of toasts on resume.
+    let now = Date()
+    let resumedStale = lastPollCompletedAt.map {
+      now.timeIntervalSince($0) > Self.staleResumeThreshold
+    } ?? false
+    lastPollCompletedAt = now
+
+    guard hasBaseline, !resumedStale else {
       knownLiveLogins = liveLogins
       hasBaseline = true
       return true

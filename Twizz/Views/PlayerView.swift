@@ -362,35 +362,15 @@ struct PlayerView: View {
   @AppStorage("showPredictionEvents") var showPredictionEvents = true
   @AppStorage("showGoalEvents") var showGoalEvents = true
 
-  @State var chat = ChatService()
-  /// Twitch login -> Kick slug overrides for streamers whose Kick name differs
-  /// from their Twitch login and isn't derivable from their profile.
-  @State var kickAliases = KickAliasService()
-  /// Drives chat replay when in VOD mode (reveals comments up to the playhead).
-  @State var replay = VODChatReplayService()
+  /// Owns the playback engine + chat/events/captions services and the per-frame
+  /// monitoring boxes. The engine members are reached by their original names via
+  /// the forwarding accessors in `PlayerModel.swift`.
+  @State var model = PlayerModel()
   /// Periodic player time observer used in VOD mode to sync chat replay + the
   /// seek readout to the playhead.
   @State var vodTimeObserver: Any?
-  /// Detects *outgoing* raids (the watched channel raiding away) via EventSub.
-  @State var eventSub = EventSubService()
-
-  /// Surfaces live polls / predictions / hype trains / goals for the watched
-  /// channel via Twitch's private Hermes WebSocket (read-only).
-  @State var hermes = HermesEventService()
   /// Debug-only cursor for the "Simulate Interactive Moment" cycle button.
   @State var debugMomentIndex = 0
-  @State var player = AVPlayer()
-  /// Drives the audio-only visualizer orb. Reacts to real audio when the player
-  /// item exposes a tappable audio track (best effort on live HLS), otherwise
-  /// runs an ambient animation.
-  @State var audioLevelMonitor = AudioLevelMonitor()
-  /// On-device live caption generation ("Captions (beta)"). Off by default; only
-  /// runs on live streams on tvOS 26+. Fully isolated from the playback path —
-  /// it consumes the audio-only playlist via its own side-channel.
-  @State var captionController = CaptionController()
-  /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
-  /// loader delegate weakly, so the proxy must be owned here to stay alive.
-  @State var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
   @State var playback: StreamPlayback?
   @State var errorMessage: String?
   @State var isOffline = false
@@ -436,23 +416,14 @@ struct PlayerView: View {
   /// faster than the 1 Hz latency monitor — so the anti-stall slow-down can react
   /// to a draining buffer before it empties into a hard stall.
   @State var rateControlTask: Task<Void, Never>?
-  // The live-latency and playback-watchdog tasks rewrite a large set of
-  // bookkeeping values once per second. Storing them as `@State` re-executed the
-  // entire (very large) PlayerView body every tick, which rebuilt the focused
-  // quality button and made its focus highlight visibly flash ~once a second.
-  // They live in a plain (non-Observable) reference box instead: mutating the
-  // box's properties never invalidates the view, so the per-second monitoring
-  // no longer churns the UI. The forwarding computed properties below keep the
-  // original names so the monitoring code reads unchanged. UI that needs the
-  // latency reading goes through `latencyReadout` (an `@Observable` the badge
-  // leaf observes), so only the badge — not the whole player — updates.
-  @State var mon = PlaybackMonitorBox()
-  @State var latencyReadout = LatencyReadout()
+  // The latency / watchdog / rewind monitoring boxes (`mon`, `latencyReadout`,
+  // `rewindReadout`), the scrub-input coordinator and the trackpad monitor now
+  // live on `PlayerModel` and are reached via forwarding accessors. They use
+  // plain (non-`@Observable`) reference boxes so the once-per-second / per-frame
+  // monitoring never invalidates the whole player; only the latency badge and
+  // rewind transport observe the `@Observable` readouts. See `PlayerModel.swift`.
 
   // MARK: Stream Rewind (DVR)
-  /// Observed by the rewind transport bar only, so its once-per-second updates
-  /// don't churn the whole player (same isolation pattern as `latencyReadout`).
-  @State var rewindReadout = RewindReadout()
   /// True while the viewer has explicitly paused the live stream. Pausing keeps
   /// the playhead in place while the DVR window keeps growing, so resuming/seeking
   /// stays inside the retained window. Also gates the stall watchdog so an
@@ -476,8 +447,6 @@ struct PlayerView: View {
   /// seconds even when "at live"; this flag lets us pin the orb to the right edge
   /// and show LIVE deterministically until the viewer actually rewinds.
   @State var pinnedToLive = true
-  /// Drives the analog (precision) trackpad scrubbing while the bar is focused.
-  @State var scrubInput = ScrubInputCoordinator()
   /// Selected VOD playback rate. Applied whenever VOD playback (re)starts so it
   /// survives pause/resume and seek. Ignored for live (always 1.0).
   @State var vodPlaybackRate: Float = 1.0
@@ -684,11 +653,10 @@ struct PlayerView: View {
   @State var chatFrozenMessages: [ChatMessage]?
   /// Messages to advance per up/down swipe while scrolling.
   let chatScrollStep = 4
-  /// Swipe-to-scroll (Siri Remote trackpad) state. The monitor reports the
-  /// finger's position; a loop maps finger *travel* to scroll position so the
-  /// chat follows a swipe and holds still when the finger does. Discrete presses
-  /// still step (and press-and-hold repeats).
-  @State var trackpad = RemoteTrackpadMonitor()
+  /// Swipe-to-scroll (Siri Remote trackpad) state. The `trackpad` monitor (now on
+  /// `PlayerModel`) reports the finger's position; a loop maps finger *travel* to
+  /// scroll position so the chat follows a swipe and holds still when the finger
+  /// does. Discrete presses still step (and press-and-hold repeats).
   @State var trackpadScrollTask: Task<Void, Never>?
   @State var trackpadScrollIndex: Double = 0
   @State var lastSentScrollIndex: Int = -1

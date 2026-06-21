@@ -374,8 +374,10 @@ struct SettingsView: View {
         }
       } else {
         HStack(spacing: 24) {
-          Icon(glyph: .userPlus, size: 40)
-            .foregroundStyle(.secondary)
+          Image("twitch-logo")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(height: 40)
 
           VStack(alignment: .leading, spacing: 4) {
             Text("Sign in with Twitch")
@@ -456,8 +458,10 @@ struct SettingsView: View {
         }
       } else {
         HStack(spacing: 24) {
-          Icon(glyph: .brandYoutube, size: 40)
-            .foregroundStyle(youTubeRed)
+          Image("youtube-logo")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(height: 40)
 
           VStack(alignment: .leading, spacing: 4) {
             Text("Connect YouTube")

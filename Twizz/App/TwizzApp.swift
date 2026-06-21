@@ -11,6 +11,7 @@ struct TwizzApp: App {
 
   init() {
     SDImageCodersManager.shared.addCoder(SDImageWebPCoder.shared)
+    ImageCacheConfigurator.configure()
     ChatAppearanceMigration.runIfNeeded()
   }
 

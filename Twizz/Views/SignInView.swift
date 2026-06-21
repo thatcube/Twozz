@@ -321,12 +321,44 @@ struct SignInWaitingView: View {
 
   /// Download every emote into SDWebImage's (disk-backed, cross-launch) cache up
   /// front and mark each ready as it lands, so they render instantly on cycle —
-  /// and only after the image actually exists.
+  /// and only after the image actually exists. Bounded to a few concurrent
+  /// downloads so the sign-in screen doesn't kick off ~two dozen requests at once
+  /// (which starved the auth-polling network calls and spiked memory on tvOS).
   private func warmEmotes() {
-    for emoteLine in Self.lines {
-      guard let url = emoteLine.url else { continue }
-      SDWebImageManager.shared.loadImage(with: url, options: [.retryFailed], progress: nil) { _, _, _, _, finished, _ in
-        if finished { ready.insert(emoteLine.emote) }
+    let emoteLines = Self.lines
+    Task { @MainActor in
+      await withTaskGroup(of: (String, Bool).self) { group in
+        let maxConcurrent = 4
+        var nextIndex = 0
+
+        func startNext() {
+          while nextIndex < emoteLines.count {
+            let line = emoteLines[nextIndex]
+            nextIndex += 1
+            guard let url = line.url else { continue }
+            let emote = line.emote
+            group.addTask { (emote, await Self.warm(url)) }
+            return
+          }
+        }
+
+        for _ in 0..<maxConcurrent { startNext() }
+        for await (emote, finished) in group {
+          if finished { ready.insert(emote) }
+          startNext()
+        }
+      }
+    }
+  }
+
+  /// Load a single emote into SDWebImage's cache, bridging its completion handler
+  /// into `async` so `warmEmotes` can bound concurrency. Returns whether the load
+  /// finished with an image available.
+  private static func warm(_ url: URL) async -> Bool {
+    await withCheckedContinuation { continuation in
+      SDWebImageManager.shared.loadImage(with: url, options: [.retryFailed], progress: nil) {
+        _, _, _, _, finished, _ in
+        continuation.resume(returning: finished)
       }
     }
   }

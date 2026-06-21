@@ -215,7 +215,7 @@ struct StreamChannelCard: View {
     // overlay it can't affect the anchor's size, so the badge stays in frame.
     Color.primary.opacity(0.08)
       .overlay {
-        AsyncImage(url: channel.thumbnailURL) { image in
+        LiveThumbnail(url: channel.thumbnailURL) { image in
           image.resizable().scaledToFill()
         } placeholder: {
           Color.clear

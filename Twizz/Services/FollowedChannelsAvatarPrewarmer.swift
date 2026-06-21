@@ -10,15 +10,23 @@ import Foundation
 /// prewarmed: they must always reflect the current moment. Best-effort and low
 /// priority; idempotent and bounded by the shared `NSCache`.
 ///
+/// Tracks which avatar URLs it has already warmed so each follows/directory
+/// update only fetches the *newly added* avatars, instead of re-walking the
+/// entire (potentially large) list on every refresh.
+///
 /// `@MainActor` only to preserve the exact isolation this had on the
 /// `@MainActor` service. Foundation-only so it can back a future iOS target.
 @MainActor
-struct FollowedChannelsAvatarPrewarmer {
+final class FollowedChannelsAvatarPrewarmer {
+  private var warmedURLs: Set<URL> = []
+
   func prewarm(_ channels: [FollowedChannel]) {
-    let urls = channels.compactMap(\.profileImageURL)
-    guard !urls.isEmpty else { return }
+    let newURLs = channels
+      .compactMap(\.profileImageURL)
+      .filter { warmedURLs.insert($0).inserted }
+    guard !newURLs.isEmpty else { return }
     Task(priority: .utility) {
-      for url in urls {
+      for url in newURLs {
         if Task.isCancelled { return }
         await ImageMemoryCache.shared.prewarm(url)
       }

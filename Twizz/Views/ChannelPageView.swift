@@ -80,7 +80,9 @@ struct ChannelPageView: View {
   }
 
   /// Twitch's anonymous live preview thumbnail for this channel, used by the
-  /// interactive live card. Refreshed each presentation via a cache-busting id.
+  /// interactive live card. `LiveThumbnail` requests it uncached and refreshes it
+  /// each presentation via a cache-busting token, so it's always the current
+  /// moment of the stream.
   private var liveThumbnailURL: URL? {
     let login = (profile?.login ?? target.login).lowercased()
     guard !login.isEmpty else { return nil }
@@ -406,7 +408,7 @@ struct ChannelPageView: View {
   }
 
   private var liveThumbnail: some View {
-    CachedAsyncImage(url: liveThumbnailURL) { image in
+    LiveThumbnail(url: liveThumbnailURL) { image in
       image.resizable().scaledToFill()
     } placeholder: {
       Rectangle().fill(Color.primary.opacity(0.10))

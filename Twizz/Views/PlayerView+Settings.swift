@@ -27,7 +27,7 @@ extension PlayerView {
   /// The focus target for the first control on whichever settings page is shown.
   var firstChatSettingsFocus: Focusable {
     switch chatSettingsPage {
-    case .appearance, .playback, .events, .captions:
+    case .appearance, .events, .captions:
       return .chatAdvancedBack
     case .main:
       let index =
@@ -52,8 +52,6 @@ extension PlayerView {
           mainSettingsContent
         case .appearance:
           appearanceSettingsContent
-        case .playback:
-          playbackSettingsContent
         case .events:
           eventsSettingsContent
         case .captions:
@@ -161,331 +159,156 @@ extension PlayerView {
       }
       .focusSection()
 
-      settingsDisclosureRow(
-        title: "Captions (beta)",
-        detail: captionsSettingsSummary,
-        focusTag: .chatCaptionsButton
-      ) {
-        openSubpage(.captions)
-      }
-      .focusSection()
-
-      settingsDisclosureRow(
-        title: "Playback & Diagnostics",
-        detail: preferredQuality == "Auto" ? livePlaybackProfile.pickerLabel : nil,
-        focusTag: .chatMoreButton
-      ) {
-        openSubpage(.playback)
-      }
-      .focusSection()
+      multistreamSettingsContent
     }
   }
 
-  // MARK: Playback & diagnostics sub-page
+  // MARK: Multistream section (main page)
 
-  var playbackSettingsContent: some View {
-    VStack(alignment: .leading, spacing: 30) {
-      subpageHeader("Playback & Diagnostics")
+  /// Merge other platforms' chat into the Twitch feed. On by default; the inline
+  /// handle/URL fields let you correct the auto-detected target when it's wrong.
+  /// Lives on the main page (not buried under a sub-page) so it stays easy to
+  /// reach. The latency/diagnostics controls that used to share this sub-page now
+  /// live in the native Playback menu instead.
+  var multistreamSettingsContent: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      settingsSectionHeader("Multistream")
 
-      VStack(alignment: .leading, spacing: 7) {
-        settingsSectionHeader("Stream Sync")
-
-        settingsPill(
-          title: chatSyncToStream ? "Synced to Stream Delay" : "Match Stream Delay",
-          isSelected: chatSyncToStream,
-          focusTag: .chatSyncToggle
-        ) {
-          chatSyncToStream.toggle()
-          applyChatSyncSettings()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        Text(chatSyncStatusDescription)
-          .font(.caption2)
-          .foregroundStyle(chatSettingsForeground.opacity(0.6))
-          .fixedSize(horizontal: false, vertical: true)
+      settingsPill(
+        title: "Merge with YouTube Chat",
+        isSelected: experimentalYouTubeMergeEnabled,
+        focusTag: .youtubeMergeToggle
+      ) {
+        experimentalYouTubeMergeEnabled.toggle()
       }
-      .focusSection()
+      .frame(maxWidth: .infinity, alignment: .leading)
 
-      VStack(alignment: .leading, spacing: 7) {
-        settingsSectionHeader("Playback")
-
-        settingsPill(
-          title: streamRewindEnabled ? "Stream Rewind On" : "Stream Rewind Off",
-          isSelected: streamRewindEnabled,
-          focusTag: .chatRewindToggle
-        ) {
-          streamRewindEnabled.toggle()
+      Button {
+        // Seed the keyboard with the value the field is showing so editing
+        // starts from the resolved default rather than a blank line.
+        if experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+          .isEmpty,
+          !youtubeMergeDefaultTarget.isEmpty
+        {
+          experimentalYouTubeMergeChannelOrURL = youtubeMergeDefaultTarget
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        settingsPill(
-          title: showViewerCount ? "Viewer Count On" : "Viewer Count Off",
-          isSelected: showViewerCount,
-          focusTag: .chatViewerCountToggle
-        ) {
-          showViewerCount.toggle()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        settingsPill(
-          title: showLatencyBadge ? "Latency Readout On" : "Latency Readout Off",
-          isSelected: showLatencyBadge,
-          focusTag: .chatLatencyToggle
-        ) {
-          showLatencyBadge.toggle()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        settingsPill(
-          title: showLatencyDiagnostics ? "Diagnostics Overlay On" : "Diagnostics Overlay Off",
-          isSelected: showLatencyDiagnostics,
-          focusTag: .chatDiagnosticsToggle
-        ) {
-          showLatencyDiagnostics.toggle()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        if showLatencyDiagnostics {
-          // Advanced kill-switch: prefetch promotion (the low-latency proxy) is
-          // on by default and powers both Auto profiles. Exposed here only so it
-          // can be disabled while diagnosing a playback issue.
-          settingsPill(
-            title: lowLatencyProxyEnabled ? "Prefetch Proxy On" : "Prefetch Proxy Off",
-            isSelected: lowLatencyProxyEnabled,
-            focusTag: .chatLowLatencyToggle
-          ) {
-            lowLatencyProxyEnabled.toggle()
-          }
+        youtubeInputActivationToken &+= 1
+      } label: {
+        Text(youtubeMergeDisplayText)
+          .font(.subheadline)
+          .foregroundStyle(focus == .youtubeMergeURL ? .black : chatSettingsForeground)
+          .lineLimit(1)
+          .truncationMode(.tail)
           .frame(maxWidth: .infinity, alignment: .leading)
-
-          // Experimental: swap the video to the streamer's YouTube simulcast to
-          // compare real on-device latency against the proxied Twitch path. This
-          // is now selected from the quality menu's Stream Source submenu (only
-          // shown when a simulcast resolves); the current source + its detailed
-          // readout are surfaced in the Diagnostics overlay.
-
-          // Debug-only: outgoing raids can't be triggered on demand, so this
-          // injects a simulated one (raiding to Monstercat, a near-24/7 stream)
-          // to exercise the auto-follow banner + redirect. Visible only while the
-          // Diagnostics overlay is enabled.
-          settingsPill(
-            title: "Simulate Outgoing Raid",
-            isSelected: false,
-            focusTag: .simulateRaidButton
-          ) {
-            simulateOutgoingRaid()
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-
-          // Debug-only: real incoming raids depend on another channel raiding
-          // this one, so this injects a simulated raid (from Monstercat, with a
-          // big viewer count so it clears the small-raid filter) to exercise the
-          // banner, its channel avatar, and the auto-dismiss. Visible only while
-          // the Diagnostics overlay is enabled.
-          settingsPill(
-            title: "Simulate Incoming Raid",
-            isSelected: false,
-            focusTag: .simulateIncomingRaidButton
-          ) {
-            showChatSettings = false
-            Task {
-              try? await Task.sleep(for: .milliseconds(600))
-              simulateIncomingRaid()
-            }
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-
-          // Debug-only: there's no way to force a watched channel offline, so
-          // this drops straight into the offline empty state to exercise its
-          // layout, copy, and View Channel / Try Again actions. Visible only
-          // while the Diagnostics overlay is enabled.
-          settingsPill(
-            title: "Simulate Stream Offline",
-            isSelected: false,
-            focusTag: .simulateOfflineButton
-          ) {
-            showChatSettings = false
-            presentOfflineState()
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-
-          // Debug-only: real polls/predictions/hype-trains only fire when a
-          // broadcaster runs one, so this cycles a sample moment through all
-          // four banner types (poll → prediction → hype train → goal → clear)
-          // to exercise the overlay on-device. Visible only while the
-          // Diagnostics overlay is enabled.
-          settingsPill(
-            title: "Simulate Interactive Moment",
-            isSelected: false,
-            focusTag: .simulateMomentButton
-          ) {
-            simulateInteractiveMoment()
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-
-          // Debug-only: real follows rarely go live on cue, so this injects a
-          // simulated "just went live" toast (for Monstercat, a near-24/7
-          // stream) to exercise the toast, its auto-dismiss countdown, and the
-          // "Watch" channel switch. Visible only while Diagnostics is enabled.
-          settingsPill(
-            title: "Simulate Go Live",
-            isSelected: false,
-            focusTag: .simulateGoLiveButton
-          ) {
-            showChatSettings = false
-            // Let the settings sheet finish dismissing before the toast appears,
-            // otherwise it surfaces mid-transition and the focus engine can't
-            // reliably hand focus to its "Watch" button.
-            Task {
-              try? await Task.sleep(for: .milliseconds(600))
-              goLive?.simulateGoLive()
-            }
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
-
-        Text(
-          "Choose Auto · Low Latency or Auto · High Quality from the quality picker to trade latency against quality. Stream Rewind keeps recent video buffered so you can pause and rewind live — focus the scrub bar, then swipe or press left/right to jump back or forward 10s and click or press play/pause to pause. Diagnostics shows live render/bitrate/buffer and freeze/jump events, plus an advanced prefetch-proxy switch."
-        )
-        .font(.caption2)
-        .foregroundStyle(chatSettingsForeground.opacity(0.6))
-        .fixedSize(horizontal: false, vertical: true)
-      }
-      .focusSection()
-
-      VStack(alignment: .leading, spacing: 7) {
-        settingsSectionHeader("Experimental")
-
-        settingsPill(
-          title: "Merge with YouTube Chat",
-          isSelected: experimentalYouTubeMergeEnabled,
-          focusTag: .youtubeMergeToggle
-        ) {
-          experimentalYouTubeMergeEnabled.toggle()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        Button {
-          // Seed the keyboard with the value the field is showing so editing
-          // starts from the resolved default rather than a blank line.
-          if experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty,
-            !youtubeMergeDefaultTarget.isEmpty
-          {
-            experimentalYouTubeMergeChannelOrURL = youtubeMergeDefaultTarget
-          }
-          youtubeInputActivationToken &+= 1
-        } label: {
-          Text(youtubeMergeDisplayText)
-            .font(.subheadline)
-            .foregroundStyle(focus == .youtubeMergeURL ? .black : chatSettingsForeground)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 28)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .modifier(ChatGlassFieldStyle(isFocused: focus == .youtubeMergeURL))
-            .background(
-              ChatKeyboardHostField(
-                text: $experimentalYouTubeMergeChannelOrURL,
-                activationToken: youtubeInputActivationToken,
-                onSubmit: {},
-                returnKeyType: .done,
-                dismissesOnReturn: true,
-                keyboardPrompt: "YouTube handle or channel URL"
-              )
-              .allowsHitTesting(false)
-              .accessibilityHidden(true)
+          .padding(.horizontal, 28)
+          .frame(maxWidth: .infinity)
+          .frame(height: 52)
+          .modifier(ChatGlassFieldStyle(isFocused: focus == .youtubeMergeURL))
+          .background(
+            ChatKeyboardHostField(
+              text: $experimentalYouTubeMergeChannelOrURL,
+              activationToken: youtubeInputActivationToken,
+              onSubmit: {},
+              returnKeyType: .done,
+              dismissesOnReturn: true,
+              keyboardPrompt: "YouTube handle or channel URL"
             )
-        }
-        .buttonStyle(ChatInputButtonStyle())
-        .focusEffectDisabled()
-        .focused($focus, equals: .youtubeMergeURL)
-        .frame(maxWidth: .infinity)
-        .animation(.easeOut(duration: 0.18), value: focus == .youtubeMergeURL)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+          )
+      }
+      .buttonStyle(ChatInputButtonStyle())
+      .focusEffectDisabled()
+      .focused($focus, equals: .youtubeMergeURL)
+      .frame(maxWidth: .infinity)
+      .animation(.easeOut(duration: 0.18), value: focus == .youtubeMergeURL)
 
-        if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
-          HStack(spacing: 6) {
-            if status.hasPrefix("YouTube chat connected") {
-              Icon(glyph: .circleCheckFilled, size: 18)
-                .foregroundStyle(.green)
-            }
-
-            Text(status)
-              .font(.caption2)
-              .foregroundStyle(chatSettingsForeground.opacity(0.76))
-              .fixedSize(horizontal: false, vertical: true)
+      if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
+        HStack(spacing: 6) {
+          if status.hasPrefix("YouTube chat connected") {
+            Icon(glyph: .circleCheckFilled, size: 18)
+              .foregroundStyle(.green)
           }
-        }
 
-        settingsPill(
-          title: "Merge with Kick Chat",
-          isSelected: experimentalKickMergeEnabled,
-          focusTag: .kickMergeToggle
-        ) {
-          experimentalKickMergeEnabled.toggle()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 4)
-
-        Button {
-          // Seed the keyboard with the value the field is showing so editing
-          // starts from the resolved default rather than a blank line.
-          if experimentalKickMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty,
-            !kickMergeDefaultTarget.isEmpty
-          {
-            experimentalKickMergeChannelOrURL = kickMergeDefaultTarget
-          }
-          kickInputActivationToken &+= 1
-        } label: {
-          Text(kickMergeDisplayText)
-            .font(.subheadline)
-            .foregroundStyle(focus == .kickMergeURL ? .black : chatSettingsForeground)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 28)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .modifier(ChatGlassFieldStyle(isFocused: focus == .kickMergeURL))
-            .background(
-              ChatKeyboardHostField(
-                text: $experimentalKickMergeChannelOrURL,
-                activationToken: kickInputActivationToken,
-                onSubmit: {},
-                returnKeyType: .done,
-                dismissesOnReturn: true,
-                keyboardPrompt: "Kick handle or channel URL"
-              )
-              .allowsHitTesting(false)
-              .accessibilityHidden(true)
-            )
-        }
-        .buttonStyle(ChatInputButtonStyle())
-        .focusEffectDisabled()
-        .focused($focus, equals: .kickMergeURL)
-        .frame(maxWidth: .infinity)
-        .animation(.easeOut(duration: 0.18), value: focus == .kickMergeURL)
-
-        if let status = chat.kickStatusMessage, experimentalKickMergeEnabled {
-          HStack(spacing: 6) {
-            if status.hasPrefix("Kick chat connected") {
-              Icon(glyph: .circleCheckFilled, size: 18)
-                .foregroundStyle(.green)
-            }
-
-            Text(status)
-              .font(.caption2)
-              .foregroundStyle(chatSettingsForeground.opacity(0.76))
-              .fixedSize(horizontal: false, vertical: true)
-          }
+          Text(status)
+            .font(.caption2)
+            .foregroundStyle(chatSettingsForeground.opacity(0.76))
+            .fixedSize(horizontal: false, vertical: true)
         }
       }
-      .focusSection()
+
+      settingsPill(
+        title: "Merge with Kick Chat",
+        isSelected: experimentalKickMergeEnabled,
+        focusTag: .kickMergeToggle
+      ) {
+        experimentalKickMergeEnabled.toggle()
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.top, 4)
+
+      Button {
+        // Seed the keyboard with the value the field is showing so editing
+        // starts from the resolved default rather than a blank line.
+        if experimentalKickMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+          .isEmpty,
+          !kickMergeDefaultTarget.isEmpty
+        {
+          experimentalKickMergeChannelOrURL = kickMergeDefaultTarget
+        }
+        kickInputActivationToken &+= 1
+      } label: {
+        Text(kickMergeDisplayText)
+          .font(.subheadline)
+          .foregroundStyle(focus == .kickMergeURL ? .black : chatSettingsForeground)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 28)
+          .frame(maxWidth: .infinity)
+          .frame(height: 52)
+          .modifier(ChatGlassFieldStyle(isFocused: focus == .kickMergeURL))
+          .background(
+            ChatKeyboardHostField(
+              text: $experimentalKickMergeChannelOrURL,
+              activationToken: kickInputActivationToken,
+              onSubmit: {},
+              returnKeyType: .done,
+              dismissesOnReturn: true,
+              keyboardPrompt: "Kick handle or channel URL"
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+          )
+      }
+      .buttonStyle(ChatInputButtonStyle())
+      .focusEffectDisabled()
+      .focused($focus, equals: .kickMergeURL)
+      .frame(maxWidth: .infinity)
+      .animation(.easeOut(duration: 0.18), value: focus == .kickMergeURL)
+
+      if let status = chat.kickStatusMessage, experimentalKickMergeEnabled {
+        HStack(spacing: 6) {
+          if status.hasPrefix("Kick chat connected") {
+            Icon(glyph: .circleCheckFilled, size: 18)
+              .foregroundStyle(.green)
+          }
+
+          Text(status)
+            .font(.caption2)
+            .foregroundStyle(chatSettingsForeground.opacity(0.76))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+
+      Text(
+        "Merge a creator's YouTube and Kick chat into the Twitch feed. We auto-detect the matching channel; if it's wrong, enter the handle or URL above."
+      )
+      .font(.caption2)
+      .foregroundStyle(chatSettingsForeground.opacity(0.6))
+      .fixedSize(horizontal: false, vertical: true)
     }
+    .focusSection()
   }
 
   // MARK: Events sub-page
@@ -746,12 +569,6 @@ extension PlayerView {
   }
 
   // MARK: Settings controls
-
-  /// Summary shown on the main-page "Captions (beta)" drill-in row.
-  var captionsSettingsSummary: String {
-    guard CaptionController.isSupported else { return "Unavailable" }
-    return captionsEnabled ? "On" : "Off"
-  }
 
   /// Captions sub-page: the on/off toggle plus an explanation. On-device live
   /// captions are gated to capable hardware (tvOS 26+); on older OSes this
@@ -1185,17 +1002,41 @@ extension PlayerView {
   }
 
   func closeSubpage() {
+    // Captions is entered standalone from the native Playback menu (it has no
+    // main-page parent row anymore), so its Back button dismisses the whole
+    // panel rather than returning to the chat main page.
+    if chatSettingsPage == .captions {
+      toggleChatSettings()
+      return
+    }
     let returnFocus: Focusable
     switch chatSettingsPage {
-    case .playback: returnFocus = .chatMoreButton
     case .events: returnFocus = .chatEventsButton
-    case .captions: returnFocus = .chatCaptionsButton
     default: returnFocus = .chatAdvancedButton
     }
     chatSettingsPage = .main
     lastChatSettingsFocus = returnFocus
     Task { @MainActor in
       focus = returnFocus
+    }
+  }
+
+  /// Opens the captions panel directly from the native Playback menu's
+  /// "Caption Options…". Captions are a playback concern surfaced in their own
+  /// dedicated panel (with its own "Captions" header), not under chat settings.
+  func openCaptions() {
+    if !showChat {
+      toggleChatVisibility()
+    }
+    chatSettingsPage = .captions
+    showChatSettings = true
+    let target: Focusable = .chatAdvancedBack
+    lastChatSettingsFocus = target
+    // Defer focus so the menu's dismissal animation settles before the panel
+    // claims focus, otherwise the engine can drop it mid-transition.
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(60))
+      focus = target
     }
   }
 

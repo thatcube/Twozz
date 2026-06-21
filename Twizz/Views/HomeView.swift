@@ -70,7 +70,6 @@ struct HomeView: View {
 
   @Environment(\.colorScheme) private var systemColorScheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @Environment(\.glassDisabled) private var glassDisabled
   @FocusState private var focusedItemID: String?
 
   private let firstLaunchSignInPromptKey = "hasPromptedFirstLaunchSignIn"
@@ -399,6 +398,18 @@ struct HomeView: View {
     }
   }
 
+  /// Shared rail layout constants handed to each extracted Home section so they
+  /// build the same card layout HomeView used inline.
+  private var railStyle: HomeRailStyle {
+    HomeRailStyle(
+      focusHorizontalInset: focusHorizontalInset,
+      focusVerticalInset: focusVerticalInset,
+      cardCornerRadius: cardCornerRadius,
+      mediaCornerRadius: mediaCornerRadius,
+      railVerticalPadding: channelRailVerticalPadding
+    )
+  }
+
   private var homeTab: some View {
     GeometryReader { proxy in
       let rail = channelRailMetrics(
@@ -408,11 +419,47 @@ struct HomeView: View {
 
       ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 72) {
-          followingSection(rail: rail)
-          recommendedForYouSection(rail: rail)
-          topStreamsSection(rail: rail)
-          recommendedCategoriesSection(rail: rail)
-          authBanner
+          HomeFollowingSection(
+            channels: followingRowChannels,
+            rail: rail,
+            style: railStyle,
+            showingFollowingDirectory: $showingFollowingDirectory,
+            onRefresh: { performManualRefresh() },
+            onWatch: { openFollowingChannel($0) },
+            onGoToChannel: { channel in
+              if isYouTubeOnly(channel) {
+                playYouTube(channel)
+              } else {
+                channelPageTarget = ChannelPageTarget(channel: channel)
+              }
+            },
+            focusedItemID: $focusedItemID
+          )
+          HomeRecommendedForYouSection(
+            personalizedEnabled: personalizedEnabled,
+            rail: rail,
+            style: railStyle,
+            onWatch: { selectedChannel = $0 },
+            onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
+            onNotInterested: { markNotInterested($0) },
+            focusedItemID: $focusedItemID
+          )
+          HomeTopStreamsSection(
+            channels: topStreams,
+            rail: rail,
+            style: railStyle,
+            onWatch: { selectedChannel = $0 },
+            onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
+            onNotInterested: { markNotInterested($0) },
+            focusedItemID: $focusedItemID
+          )
+          HomeRecommendedCategoriesSection(
+            rail: rail,
+            style: railStyle,
+            homePath: $homePath,
+            focusedItemID: $focusedItemID
+          )
+          HomeAuthBanner(onSignIn: { showSignIn = true })
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.horizontal, AppLayout.horizontalPadding)
@@ -421,99 +468,6 @@ struct HomeView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
-  }
-
-  private func followingSection(rail: ChannelRailMetrics) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      HStack {
-        Text(follows.isUsingDemoData ? "Trending" : "Following")
-          .font(.system(size: 32, weight: .bold))
-          .accessibilityAddTraits(.isHeader)
-
-        if follows.isLoading {
-          ProgressView()
-            .scaleEffect(0.85)
-        }
-
-        Spacer()
-
-        HStack(spacing: 8) {
-          if !follows.isUsingDemoData {
-            Button {
-              showingFollowingDirectory = true
-            } label: {
-              Text("See All")
-                .font(.system(size: 24, weight: .semibold))
-            }
-            .accessibilityLabel("See all followed channels")
-          }
-
-          Button {
-            performManualRefresh()
-          } label: {
-            Image(systemName: "arrow.clockwise")
-              .font(.system(size: 28, weight: .semibold))
-          }
-          .accessibilityLabel("Refresh")
-        }
-      }
-
-      if let errorMessage = follows.errorMessage {
-        Text(errorMessage)
-          .font(.footnote)
-          .foregroundStyle(.orange)
-      }
-
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: rail.spacing) {
-          ForEach(followingRowChannels) { channel in
-            let itemID = "following-\(channel.id)"
-            let isFocused = focusedItemID == itemID
-
-            StreamChannelCard(
-              channel: channel,
-              isFocused: isFocused,
-              layout: .rail(
-                mediaWidth: rail.mediaWidth,
-                mediaHeight: rail.mediaHeight,
-                focusHorizontalInset: focusHorizontalInset,
-                focusVerticalInset: focusVerticalInset,
-                cardCornerRadius: cardCornerRadius,
-                mediaCornerRadius: mediaCornerRadius
-              ),
-              showsGameName: true,
-              onWatch: { openFollowingChannel($0) },
-              onGoToChannel: { channel in
-                if isYouTubeOnly(channel) {
-                  playYouTube(channel)
-                } else {
-                  channelPageTarget = ChannelPageTarget(channel: channel)
-                }
-              }
-            )
-            .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-            .focusable(true)
-            .focused($focusedItemID, equals: itemID)
-            .focusEffectDisabled()
-            .onTapGesture {
-              openFollowingChannel(channel)
-            }
-            .accessibilityAddTraits(.isButton)
-            .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-            .animation(AppLayout.focusScaleAnimation, value: isFocused)
-            .zIndex(isFocused ? 2 : 0)
-          }
-        }
-        .padding(.vertical, channelRailVerticalPadding)
-      }
-      .scrollClipDisabled()
-
-      if followingRowChannels.isEmpty {
-        Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
-          .foregroundStyle(.secondary)
-      }
-    }
-    .focusSection()
   }
 
   // MARK: - YouTube subscriptions
@@ -611,176 +565,10 @@ struct HomeView: View {
       title: channel.displayName)
   }
 
-  @ViewBuilder
-  private func recommendedForYouSection(rail: ChannelRailMetrics) -> some View {
-    let channels = personalized.channels
-
-    if personalizedEnabled, !channels.isEmpty {
-      VStack(alignment: .leading, spacing: 2) {
-        HStack {
-          Text("Recommended for you")
-            .font(.system(size: 32, weight: .bold))
-            .accessibilityAddTraits(.isHeader)
-
-          if personalized.isLoading {
-            ProgressView()
-              .scaleEffect(0.85)
-          }
-
-          Spacer()
-        }
-
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: rail.spacing) {
-            ForEach(channels) { channel in
-              let itemID = "foryou-\(channel.id)"
-              let isFocused = focusedItemID == itemID
-
-              StreamChannelCard(
-                channel: channel,
-                isFocused: isFocused,
-                layout: .rail(
-                  mediaWidth: rail.mediaWidth,
-                  mediaHeight: rail.mediaHeight,
-                  focusHorizontalInset: focusHorizontalInset,
-                  focusVerticalInset: focusVerticalInset,
-                  cardCornerRadius: cardCornerRadius,
-                  mediaCornerRadius: mediaCornerRadius
-                ),
-                showsGameName: true,
-                onWatch: { selectedChannel = $0 },
-                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
-                onNotInterested: { markNotInterested($0) }
-              )
-              .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-              .focusable(true)
-              .focused($focusedItemID, equals: itemID)
-              .focusEffectDisabled()
-              .onTapGesture {
-                selectedChannel = channel
-              }
-              .accessibilityAddTraits(.isButton)
-              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(AppLayout.focusScaleAnimation, value: isFocused)
-              .zIndex(isFocused ? 2 : 0)
-            }
-          }
-          .padding(.vertical, channelRailVerticalPadding)
-        }
-        .scrollClipDisabled()
-      }
-      .focusSection()
-    }
-  }
-
   private func recomputeTopStreams() {
     let blocked = feedback.blockedLogins
     topStreams = recommendations.channels.filter {
       !blocked.contains($0.login.lowercased())
-    }
-  }
-
-  @ViewBuilder
-  private func topStreamsSection(rail: ChannelRailMetrics) -> some View {
-    let top = topStreams
-
-    if !top.isEmpty {
-      VStack(alignment: .leading, spacing: 2) {
-        HStack {
-          Text("Top streams")
-            .font(.system(size: 32, weight: .bold))
-            .accessibilityAddTraits(.isHeader)
-
-          if recommendations.isLoading {
-            ProgressView()
-              .scaleEffect(0.85)
-          }
-
-          Spacer()
-        }
-
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: rail.spacing) {
-            ForEach(top) { channel in
-              let itemID = "topstreams-\(channel.id)"
-              let isFocused = focusedItemID == itemID
-
-              StreamChannelCard(
-                channel: channel,
-                isFocused: isFocused,
-                layout: .rail(
-                  mediaWidth: rail.mediaWidth,
-                  mediaHeight: rail.mediaHeight,
-                  focusHorizontalInset: focusHorizontalInset,
-                  focusVerticalInset: focusVerticalInset,
-                  cardCornerRadius: cardCornerRadius,
-                  mediaCornerRadius: mediaCornerRadius
-                ),
-                showsGameName: true,
-                onWatch: { selectedChannel = $0 },
-                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) },
-                onNotInterested: { markNotInterested($0) }
-              )
-              .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-              .focusable(true)
-              .focused($focusedItemID, equals: itemID)
-              .focusEffectDisabled()
-              .onTapGesture {
-                selectedChannel = channel
-              }
-              .accessibilityAddTraits(.isButton)
-              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(AppLayout.focusScaleAnimation, value: isFocused)
-              .zIndex(isFocused ? 2 : 0)
-            }
-          }
-          .padding(.vertical, channelRailVerticalPadding)
-        }
-        .scrollClipDisabled()
-      }
-      .focusSection()
-    }
-  }
-
-  @ViewBuilder
-  private func recommendedCategoriesSection(rail: ChannelRailMetrics) -> some View {
-    if !recommendations.categories.isEmpty {
-      let categoryWidth = max(180, min(240, rail.mediaWidth * 0.6))
-
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Recommended categories")
-          .font(.system(size: 32, weight: .bold))
-          .accessibilityAddTraits(.isHeader)
-
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: rail.spacing) {
-            ForEach(recommendations.categories) { category in
-              let itemID = "category-\(category.id)"
-              let isFocused = focusedItemID == itemID
-
-              CategoryCardView(
-                category: category,
-                isFocused: isFocused,
-                width: categoryWidth
-              )
-              .contentShape(RoundedRectangle(cornerRadius: CategoryCardView.contentShapeCornerRadius))
-              .focusable(true)
-              .focused($focusedItemID, equals: itemID)
-              .focusEffectDisabled()
-              .onTapGesture {
-                homePath.append(category)
-              }
-              .accessibilityAddTraits(.isButton)
-              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(AppLayout.focusScaleAnimation, value: isFocused)
-              .zIndex(isFocused ? 2 : 0)
-            }
-          }
-          .padding(.vertical, channelRailVerticalPadding)
-        }
-        .scrollClipDisabled()
-      }
-      .focusSection()
     }
   }
 
@@ -790,44 +578,6 @@ struct HomeView: View {
       trailingSafeArea: trailingSafeArea,
       visibleCardCount: streamCardSize.visibleCardCount
     )
-  }
-
-  @ViewBuilder
-  private var authBanner: some View {
-    if !auth.isAuthenticated {
-      HStack(spacing: 28) {
-        Icon(glyph: .userPlus, size: 44)
-          .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
-
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Sign in with Twitch")
-            .font(.title2.weight(.bold))
-          Text("Connect your account to see the channels you follow and join the chat.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-        }
-
-        Spacer(minLength: 24)
-
-        Button("Sign In") {
-          showSignIn = true
-        }
-        .font(.headline)
-      }
-      .padding(.vertical, 32)
-      .padding(.horizontal, 40)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(
-        RoundedRectangle(cornerRadius: 28)
-          .fill(glassDisabled ? AnyShapeStyle(Color.twizzOpaqueGlass) : AnyShapeStyle(.ultraThinMaterial))
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: 28)
-          .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-      )
-      .padding(.top, 12)
-      .focusSection()
-    }
   }
 
   /// On the very first app launch (and only then), present the Twitch sign-in
@@ -1012,7 +762,7 @@ struct HomeView: View {
     .environment(AppEnvironment())
 }
 
-// MARK: - Refresh toast
+// MARK: - Home presentation helpers
 
 /// One multiview session launch — wraps the chosen roster so the cover can be
 /// presented with `fullScreenCover(item:)`, which (unlike `isPresented` plus a
@@ -1028,43 +778,4 @@ struct YouTubePlaybackTarget: Identifiable {
   let id = UUID()
   let videoID: String
   let title: String?
-}
-
-enum RefreshToastState {
-  case refreshing
-  case done
-}/// Small pill that confirms a manual Home refresh is happening / finished, so a
-/// re-tap of the Home tab gives the viewer visible feedback.
-private struct RefreshToastView: View {
-  let state: RefreshToastState
-  @Environment(\.glassDisabled) private var glassDisabled
-
-  var body: some View {
-    HStack(spacing: 14) {
-      switch state {
-      case .refreshing:
-        ProgressView()
-          .scaleEffect(0.9)
-        Text("Refreshing…")
-      case .done:
-        Icon(glyph: .circleCheckFilled, size: 30)
-          .foregroundStyle(.green)
-        Text("Refreshed")
-      }
-    }
-    .font(.headline)
-    .padding(.horizontal, 30)
-    .padding(.vertical, 18)
-    .background {
-      if glassDisabled {
-        Capsule().fill(Color.twizzOpaqueGlass)
-          .overlay(Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 1))
-      } else if #available(tvOS 26.0, *) {
-        Capsule().glassEffect(.regular, in: Capsule())
-      } else {
-        Capsule().fill(.ultraThinMaterial)
-      }
-    }
-    .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-  }
 }

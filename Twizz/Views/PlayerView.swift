@@ -371,16 +371,9 @@ struct PlayerView: View {
   @State var vodTimeObserver: Any?
   /// Debug-only cursor for the "Simulate Interactive Moment" cycle button.
   @State var debugMomentIndex = 0
-  @State var playback: StreamPlayback?
-  @State var errorMessage: String?
-  @State var isOffline = false
-  @State var isLoading = true
   @State var showChat: Bool =
     UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
   @State var chatReplayStartMessageID: ChatMessage.ID?
-  /// Live resolution AVPlayer's adaptive (Auto) selection is currently showing,
-  /// e.g. "1080p60". Drives the "Auto (1080p60)" label on the quality button.
-  @State var resolvedQualityName: String?
   @State var showSignInSheet = false
   @State var showChatSettings = false
   @State var chatSettingsPage: ChatSettingsPage = .main
@@ -490,29 +483,9 @@ struct PlayerView: View {
     get { mon.latencyOutlierStreak }
     nonmutating set { mon.latencyOutlierStreak = newValue }
   }
-  // The real (pre-proxy) source URL of the currently loaded item, so we can tell
-  // whether a quality switch actually needs to replace the item. AVURLAsset.url
-  // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
-  // for this comparison directly.
-  @State var currentSourceURL: URL?
-  // Experimental alternate video source (e.g. a streamer's YouTube simulcast),
-  // surfaced under the Diagnostics overlay to A/B latency against the Twitch
-  // path. When active, the player drops the Twitch-only proxy/headers and the
-  // edge-chasing rate controller so the alternate source gets a fair read.
-  @State var isUsingAltSource = false
-  @State var altYouTubeMasterURL: URL?
-  @State var altSourceStatus: String?
-  // Throttles automatic alt-source manifest re-resolution after a 403/expiry so a
-  // failing googlevideo URL is refreshed without hammering YouTube.
-  @State var lastAltResolveAt = Date.distantPast
-  @State var altResolveInFlight = false
-  // Caps automatic alt-source retries after a 403 so a blocked manifest doesn't
-  // trigger an endless re-resolve loop that gets the IP flagged by YouTube.
-  @State var altFailedRetries = 0
-  // Whether the active channel actually has a resolvable YouTube simulcast.
-  // Probed on channel load; gates the Stream Source picker in the quality menu
-  // so we never offer "YouTube" for a channel that isn't simulcasting.
-  @State var youtubeSourceAvailable = false
+  // The real (pre-proxy) source URL, alt-source bookkeeping and the video-output
+  // frame tap now live on `PlayerModel` (see "Playback engine state" /
+  // "Alternate source" there) and are reached via forwarding accessors.
   var isPlaybackActive: Bool {
     get { mon.isPlaybackActive }
     nonmutating set { mon.isPlaybackActive = newValue }
@@ -625,9 +598,6 @@ struct PlayerView: View {
   }
   /// True while the stream-stability watchdog has us in deep-buffer stability mode.
   var isStreamUnstable: Bool { mon.streamUnstableSince != nil }
-  @State var lastStallNotificationAt = Date.distantPast
-  @State var suppressLowLatencyToggleReload = false
-  @State var consecutiveLoadFailures = 0
   @State var lastControlFocus: Focusable = .quality
   /// Non-nil while chat is "soft paused" (Twitch-style): the list is frozen so
   /// the viewer can read, with a countdown that auto-resumes. A second Up press
@@ -784,15 +754,6 @@ struct PlayerView: View {
   @State var diagIsFrozen = false
   @State var diagFrozenSince: Date?
   @State var diagSessionStartedAt: Date?
-  /// Taps decoded frames off the current item so the decode-freeze watchdog can
-  /// tell "no new picture" apart from "playhead not advancing". Rebuilt with each
-  /// item in `makeItem`; nil while no video item is loaded.
-  @State var playerItemVideoOutput: AVPlayerItemVideoOutput?
-  /// Non-nil once the playback clock is advancing but the video output has stopped
-  /// producing fresh frames — the "frozen picture while captions/chat keep
-  /// scrolling" decode wedge that every playhead/buffer-based watchdog misses.
-  /// Cleared the moment a new frame arrives.
-  @State var videoDecodeFrozenSince: Date?
 
   let controlsAutoHideSeconds: Double = 10
   /// How much live history the Stream Rewind DVR retains (and therefore how far

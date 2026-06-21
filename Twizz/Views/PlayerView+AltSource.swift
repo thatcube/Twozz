@@ -31,15 +31,6 @@ extension PlayerView {
     return item
   }
 
-  /// Toggles between the Twitch source and the channel's YouTube simulcast.
-  func toggleAltYouTubeSource() {
-    if isUsingAltSource {
-      switchToTwitchSource()
-    } else {
-      Task { await switchToAltYouTubeSource() }
-    }
-  }
-
   /// Resolves the active channel's YouTube simulcast HLS and plays it. Stops the
   /// Twitch-only control loops (edge-chasing rate controller + stall watchdog,
   /// whose recovery would reload the Twitch source) while active; the read-only
@@ -104,6 +95,51 @@ extension PlayerView {
     startPlayback()
     startRateController()
     startPlaybackWatchdog()
+  }
+
+  // MARK: - Stream source selection (quality-menu picker)
+
+  /// Ordered source options for the quality menu's Stream Source submenu. The
+  /// YouTube row is only meaningful when `youtubeSourceAvailable` is true; the
+  /// menu hides the whole submenu otherwise.
+  var streamSourceOptions: [String] { ["Twitch", "YouTube"] }
+
+  /// Picker selection index: 0 = Twitch, 1 = YouTube simulcast.
+  var selectedStreamSourceIndex: Int { isUsingAltSource ? 1 : 0 }
+
+  /// Applies a Stream Source picker choice, switching the active video source.
+  func selectStreamSource(at index: Int) {
+    let wantYouTube = (index == 1)
+    if wantYouTube != isUsingAltSource {
+      if wantYouTube {
+        Task { await switchToAltYouTubeSource() }
+      } else {
+        switchToTwitchSource()
+      }
+    }
+    focus = .quality
+    scheduleHide()
+  }
+
+  /// Probes whether the active channel has a resolvable YouTube simulcast and
+  /// updates `youtubeSourceAvailable`. Runs on channel load so the quality
+  /// menu only offers the YouTube source when one actually resolves. Best-effort
+  /// and read-only; a failure just leaves the source unavailable.
+  func refreshYouTubeSourceAvailability() async {
+    youtubeSourceAvailable = false
+    guard !isVOD else { return }
+    let login = activeChannel
+    guard !login.isEmpty else { return }
+
+    var target = youtubeAutoResolvedTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+    if target.isEmpty {
+      target = await Self.resolveYouTubeTarget(forTwitchLogin: login)
+    }
+    guard login == activeChannel, !target.isEmpty else { return }
+
+    let master = await AltSourceService.youtubeHLSMaster(forTarget: target)
+    guard login == activeChannel else { return }
+    youtubeSourceAvailable = (master != nil)
   }
 
   /// Polls the alternate-source item each monitor tick and reports its *real*

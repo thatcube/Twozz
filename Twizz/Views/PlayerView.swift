@@ -526,6 +526,10 @@ struct PlayerView: View {
   // Caps automatic alt-source retries after a 403 so a blocked manifest doesn't
   // trigger an endless re-resolve loop that gets the IP flagged by YouTube.
   @State var altFailedRetries = 0
+  // Whether the active channel actually has a resolvable YouTube simulcast.
+  // Probed on channel load; gates the Stream Source picker in the quality menu
+  // so we never offer "YouTube" for a channel that isn't simulcasting.
+  @State var youtubeSourceAvailable = false
   var isPlaybackActive: Bool {
     get { mon.isPlaybackActive }
     nonmutating set { mon.isPlaybackActive = newValue }
@@ -1616,6 +1620,7 @@ struct PlayerView: View {
       isUsingAltSource = false
       altYouTubeMasterURL = nil
       altSourceStatus = nil
+      youtubeSourceAvailable = false
       // The rewind window is per-stream: drop the previous channel's DVR history.
       lowLatencyProxy.resetDVR()
       // …and any resolved/active hand-off into the previous channel's VOD.
@@ -1626,6 +1631,9 @@ struct PlayerView: View {
     }
     .task(id: activeChannel) {
       await refreshYouTubeAutoTarget()
+    }
+    .task(id: activeChannel) {
+      await refreshYouTubeSourceAvailability()
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
       guard !isVOD else { return }
@@ -2118,6 +2126,10 @@ struct PlayerView: View {
               }
             }
           },
+          sourceAvailable: youtubeSourceAvailable,
+          sourceOptions: streamSourceOptions,
+          sourceSelectedIndex: selectedStreamSourceIndex,
+          onSelectSource: { selectStreamSource(at: $0) },
           sleepOptions: sleepTimerOptionLabels,
           sleepSelectedIndex: sleepSelectionIndex,
           sleepIsArmed: sleepTimerIsArmed,
@@ -2250,6 +2262,19 @@ struct PlayerView: View {
     }
     let pin = preferredQuality == "Auto" ? "Auto/adaptive" : "\(preferredQuality) (pinned)"
     lines.append("Mode: \(mode) · \(pin)")
+
+    // Stream source readout (moved here from the settings panel). When the
+    // YouTube simulcast is active, surface the detailed alt-source proof
+    // (real asset host + frame-decode status) so it's visible on the overlay.
+    if isUsingAltSource {
+      lines.append("Source: YouTube simulcast")
+      if let altSourceStatus {
+        lines.append("  \(altSourceStatus)")
+      }
+    } else {
+      let avail = youtubeSourceAvailable ? " (YouTube available)" : ""
+      lines.append("Source: Twitch\(avail)")
+    }
     if isStreamUnstable {
       let trigger = streamUnstableWasPredicted ? "predictive" : "observed"
       lines.append(
@@ -3548,6 +3573,12 @@ private struct QualityMenu: View, Equatable {
   let onSelect: (Int) -> Void
   let onMenuPresented: () -> Void
   let onMenuDismissed: () -> Void
+  // Stream source, nested as a submenu (Twitch / YouTube simulcast). Only shown
+  // when the channel actually has a resolvable YouTube simulcast.
+  let sourceAvailable: Bool
+  let sourceOptions: [String]
+  let sourceSelectedIndex: Int
+  let onSelectSource: (Int) -> Void
   // Sleep timer, nested as a submenu under the quality list (no extra button).
   let sleepOptions: [String]
   let sleepSelectedIndex: Int
@@ -3559,6 +3590,9 @@ private struct QualityMenu: View, Equatable {
       && lhs.selectedOption == rhs.selectedOption
       && lhs.buttonLabel == rhs.buttonLabel
       && lhs.reservedWidthLabels == rhs.reservedWidthLabels
+      && lhs.sourceAvailable == rhs.sourceAvailable
+      && lhs.sourceOptions == rhs.sourceOptions
+      && lhs.sourceSelectedIndex == rhs.sourceSelectedIndex
       && lhs.sleepSelectedIndex == rhs.sleepSelectedIndex
       && lhs.sleepIsArmed == rhs.sleepIsArmed
   }
@@ -3571,6 +3605,26 @@ private struct QualityMenu: View, Equatable {
       get: { options.firstIndex(of: selectedOption) ?? 0 },
       set: { onSelect($0) }
     )
+  }
+
+  private var sourceSelection: Binding<Int> {
+    Binding(
+      get: { sourceSelectedIndex },
+      set: { onSelectSource($0) }
+    )
+  }
+
+  /// Submenu row label for the nested Quality picker, e.g. "Quality · Auto
+  /// (1080p60)", so the current rendition is visible without drilling in.
+  private var qualityMenuLabel: String {
+    "Quality · \(buttonLabel)"
+  }
+
+  /// Submenu row label for the nested Stream Source picker, e.g.
+  /// "Source · YouTube".
+  private var sourceMenuLabel: String {
+    guard sourceOptions.indices.contains(sourceSelectedIndex) else { return "Source" }
+    return "Source · \(sourceOptions[sourceSelectedIndex])"
   }
 
   private var sleepSelection: Binding<Int> {
@@ -3600,18 +3654,42 @@ private struct QualityMenu: View, Equatable {
       }
 
       Menu {
-        // A `Picker` is Apple's recommended single-selection control inside a
-        // menu: it renders a checkmark in a reserved leading gutter so every
-        // row's text stays aligned (no per-row shift), unlike hand-placed
-        // checkmark labels.
-        Picker("Quality", selection: selection) {
-          ForEach(Array(options.enumerated()), id: \.element) { index, option in
-            Text(displayLabel(option)).tag(index)
+        // Quality is now a nested submenu alongside Stream Source and Sleep
+        // timer. The lifecycle hooks live on this submenu's row (a direct child
+        // of the top-level menu) so they fire on the top menu's open/close, not
+        // when drilling into a sibling submenu.
+        Menu {
+          // A `Picker` is Apple's recommended single-selection control inside a
+          // menu: it renders a checkmark in a reserved leading gutter so every
+          // row's text stays aligned (no per-row shift), unlike hand-placed
+          // checkmark labels.
+          Picker("Quality", selection: selection) {
+            ForEach(Array(options.enumerated()), id: \.element) { index, option in
+              Text(displayLabel(option)).tag(index)
+            }
           }
+          .pickerStyle(.inline)
+        } label: {
+          Label(qualityMenuLabel, systemImage: "rectangle.on.rectangle")
         }
-        .pickerStyle(.inline)
         .onAppear(perform: onMenuPresented)
         .onDisappear(perform: onMenuDismissed)
+
+        // Stream Source: swap the live video between Twitch and the streamer's
+        // YouTube simulcast (lower latency). Only offered when a YouTube
+        // simulcast actually resolved for this channel.
+        if sourceAvailable {
+          Menu {
+            Picker("Source", selection: sourceSelection) {
+              ForEach(Array(sourceOptions.enumerated()), id: \.element) { index, option in
+                Text(option).tag(index)
+              }
+            }
+            .pickerStyle(.inline)
+          } label: {
+            Label(sourceMenuLabel, systemImage: "dot.radiowaves.left.and.right")
+          }
+        }
 
         Divider()
 

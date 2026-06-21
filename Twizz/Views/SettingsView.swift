@@ -9,13 +9,14 @@ import UIKit
 /// as compact, focusable pills on the right. This keeps the whole screen
 /// dense enough that every section (including Account) is visible at once.
 struct SettingsView: View {
-  @Bindable var themeManager: ThemeManager
-  let auth: TwitchAuthSession
-  var youtubeAuth: YouTubeAuthSession
-  var youtubeSubscriptions: YouTubeSubscriptionsService
-  var follows: FollowedChannelsService
-  var goLiveSettings: GoLiveNotificationSettings
-  var recommendationFeedback: RecommendationFeedbackService
+  @Environment(AppEnvironment.self) private var environment
+  private var themeManager: ThemeManager { environment.themeManager }
+  private var auth: TwitchAuthSession { environment.auth }
+  private var youtubeAuth: YouTubeAuthSession { environment.youtubeAuth }
+  private var youtubeSubscriptions: YouTubeSubscriptionsService { environment.youtubeSubscriptions }
+  private var follows: FollowedChannelsService { environment.follows }
+  private var goLiveSettings: GoLiveNotificationSettings { environment.goLiveSettings }
+  private var recommendationFeedback: RecommendationFeedbackService { environment.feedback }
   var onRequestSignIn: () -> Void = {}
   var onRequestYouTubeSignIn: () -> Void = {}
   var onClearWatchHistory: () -> Void = {}

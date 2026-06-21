@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - SearchView
 
 struct SearchView: View {
-  let auth: TwitchAuthSession
   @Binding var selectedChannel: FollowedChannel?
   @Binding var channelPageTarget: ChannelPageTarget?
 

@@ -12,19 +12,29 @@ struct HomeView: View {
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
 
   @State private var selectedSidebarTab: SidebarTab = .home
-  @State private var auth = TwitchAuthSession()
-  @State private var follows = FollowedChannelsService()
-  @State private var recommendations = RecommendationsService()
-  @State private var personalized = PersonalizedRecommendationsService()
-  @State private var watchHistory = WatchHistoryService()
-  @State private var feedback = RecommendationFeedbackService()
-  @State private var affinity = StreamerAffinityService()
-  @State private var youtubeAliases = TwitchYouTubeAliasService()
-  @State private var youtubeLive = YouTubeLiveSnapshotService()
-  @State private var youtubeAuth = YouTubeAuthSession()
-  @State private var youtubeSubscriptions = YouTubeSubscriptionsService()
-  @State private var youtubeResolver = YouTubeLiveResolver()
-  @State private var themeManager = ThemeManager()
+
+  /// App-level composition root: the long-lived, app-global services. Owned by
+  /// `AppEnvironment` (instantiated once in `TwizzApp`) and injected here via
+  /// `.environment(_:)`, so HomeView is no longer the de-facto composition root.
+  @Environment(AppEnvironment.self) private var environment
+
+  // Thin forwarding accessors so the rest of HomeView keeps reading these
+  // services by their familiar names while ownership lives in `environment`.
+  private var auth: TwitchAuthSession { environment.auth }
+  private var follows: FollowedChannelsService { environment.follows }
+  private var recommendations: RecommendationsService { environment.recommendations }
+  private var personalized: PersonalizedRecommendationsService { environment.personalized }
+  private var watchHistory: WatchHistoryService { environment.watchHistory }
+  private var feedback: RecommendationFeedbackService { environment.feedback }
+  private var affinity: StreamerAffinityService { environment.affinity }
+  private var youtubeAliases: TwitchYouTubeAliasService { environment.youtubeAliases }
+  private var youtubeLive: YouTubeLiveSnapshotService { environment.youtubeLive }
+  private var youtubeAuth: YouTubeAuthSession { environment.youtubeAuth }
+  private var youtubeSubscriptions: YouTubeSubscriptionsService { environment.youtubeSubscriptions }
+  private var youtubeResolver: YouTubeLiveResolver { environment.youtubeResolver }
+  private var themeManager: ThemeManager { environment.themeManager }
+  private var goLive: GoLiveWatcher { environment.goLive }
+  private var goLiveSettings: GoLiveNotificationSettings { environment.goLiveSettings }
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
   @State private var pendingWatchChannel: FollowedChannel?
@@ -42,8 +52,6 @@ struct HomeView: View {
   @State private var youtubePlayback: YouTubePlaybackTarget?
   @AppStorage(YouTubePreferences.showSubscriptionsKey) private var showYouTubeSubscriptions = true
   @State private var refreshToast: RefreshToastState?
-  @State private var goLive = GoLiveWatcher()
-  @State private var goLiveSettings = GoLiveNotificationSettings()
   /// "Top streams" — the most-viewed live channels (after the language filter),
   /// in viewer-count order, with only "Not interested" channels removed. Cached
   /// here and recomputed only when the source list or block list changes, so we
@@ -155,11 +163,10 @@ struct HomeView: View {
             }
             .navigationDestination(isPresented: $showingFollowingDirectory) {
               FollowingDirectoryView(
-                follows: follows,
-                auth: auth,
                 selectedChannel: $selectedChannel,
                 channelPageTarget: $channelPageTarget
               )
+              .environment(environment)
             }
         }
       }
@@ -198,7 +205,6 @@ struct HomeView: View {
 
       tabContainer {
         SearchView(
-          auth: auth,
           selectedChannel: $selectedChannel,
           channelPageTarget: $channelPageTarget
         )
@@ -210,13 +216,6 @@ struct HomeView: View {
 
       tabContainer {
         SettingsView(
-          themeManager: themeManager,
-          auth: auth,
-          youtubeAuth: youtubeAuth,
-          youtubeSubscriptions: youtubeSubscriptions,
-          follows: follows,
-          goLiveSettings: goLiveSettings,
-          recommendationFeedback: feedback,
           onRequestSignIn: { showSignIn = true },
           onRequestYouTubeSignIn: { showYouTubeSignIn = true },
           onClearWatchHistory: {
@@ -1010,6 +1009,7 @@ struct HomeView: View {
 
 #Preview {
   HomeView(deepLinkRouter: DeepLinkRouter())
+    .environment(AppEnvironment())
 }
 
 // MARK: - Refresh toast

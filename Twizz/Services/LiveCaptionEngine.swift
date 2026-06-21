@@ -56,6 +56,10 @@ actor LiveCaptionEngine {
     private var pollLoop: Task<Void, Never>?
     private var processedSegments: Set<String> = []
     private let fallbackSegmentDuration: Double = 2.0
+    /// When `playlistURL` turns out to be a *master* playlist (the YouTube
+    /// simulcast hands us a master, not a media, playlist), the media playlist we
+    /// resolve from it once and then poll. `nil` until resolved / not needed.
+    private var resolvedMediaURL: URL?
 
     /// Decoded segments held until the player's playhead reaches them, so the
     /// recognizer transcribes audio in lockstep with what's on screen rather than
@@ -196,6 +200,7 @@ actor LiveCaptionEngine {
         transcriber = nil
         processedSegments.removeAll()
         pending.removeAll()
+        resolvedMediaURL = nil
     }
 
     /// A result is "volatile" while playback hasn't been finalized past its end —
@@ -266,9 +271,27 @@ actor LiveCaptionEngine {
     /// Fetches the playlist and buffers every newly-seen segment's decoded audio
     /// (tagged with its PROGRAM-DATE-TIME). Returns how long to wait before the
     /// next poll. Feeding into the recognizer is deferred to `drainPending`.
+    ///
+    /// `playlistURL` may be a *media* playlist (Twitch hands us the audio-only
+    /// rendition directly) or a *master* playlist (the YouTube simulcast). For a
+    /// master, resolve a media/audio rendition once and poll that thereafter.
     private func pollOnce() async throws -> Double {
-        let text = try await fetchText(playlistURL)
-        let segments = parseSegments(text, relativeTo: playlistURL)
+        let source = resolvedMediaURL ?? playlistURL
+        let text = try await fetchText(source)
+
+        if resolvedMediaURL == nil,
+           let media = Self.selectMediaPlaylist(fromMaster: text, relativeTo: source) {
+            resolvedMediaURL = media
+            let mediaText = try await fetchText(media)
+            return await processMediaPlaylist(mediaText, relativeTo: media)
+        }
+        return await processMediaPlaylist(text, relativeTo: source)
+    }
+
+    /// Buffers newly-seen segments from a *media* playlist's text and returns the
+    /// poll cadence (the last segment's duration).
+    private func processMediaPlaylist(_ text: String, relativeTo base: URL) async -> Double {
+        let segments = parseSegments(text, relativeTo: base)
         guard !segments.isEmpty else { return fallbackSegmentDuration }
 
         if processedSegments.count > 256 {
@@ -420,6 +443,63 @@ actor LiveCaptionEngine {
 
     private func parseDate(_ string: String) -> Date? {
         dateParser.date(from: string) ?? plainDateParser.date(from: string)
+    }
+
+    /// Picks the media playlist to pull caption audio from when the fetched
+    /// playlist is a *master* playlist (variants only, no segments). Prefers a
+    /// dedicated audio rendition (`#EXT-X-MEDIA:TYPE=AUDIO,…,URI="…"`); otherwise
+    /// the lowest-`BANDWIDTH` `#EXT-X-STREAM-INF` variant. Any variant carries the
+    /// same audio, so the lowest one is the cheapest usable source.
+    ///
+    /// Returns `nil` when `text` is already a media playlist (it has `#EXTINF`
+    /// segments) or no variant can be found — in which case the caller polls the
+    /// original URL unchanged (Twitch already hands us a media playlist).
+    static func selectMediaPlaylist(fromMaster text: String, relativeTo base: URL) -> URL? {
+        let lines = text.components(separatedBy: .newlines).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        // A media playlist has segments; never treat it as a master.
+        if lines.contains(where: { $0.hasPrefix("#EXTINF:") }) { return nil }
+
+        // Prefer an explicit audio rendition.
+        for line in lines where line.hasPrefix("#EXT-X-MEDIA:") && line.contains("TYPE=AUDIO") {
+            if let uri = attributeValue("URI", in: line),
+               let url = URL(string: uri, relativeTo: base)?.absoluteURL {
+                return url
+            }
+        }
+
+        // Otherwise the lowest-bandwidth variant. `#EXT-X-STREAM-INF` is followed
+        // by its playlist URI on the next non-comment line.
+        var bestBandwidth = Int.max
+        var bestURL: URL?
+        var pendingBandwidth: Int?
+        for line in lines {
+            if line.hasPrefix("#EXT-X-STREAM-INF:") {
+                pendingBandwidth = attributeValue("BANDWIDTH", in: line).flatMap { Int($0) } ?? 0
+            } else if let bandwidth = pendingBandwidth, !line.isEmpty, !line.hasPrefix("#") {
+                if bandwidth < bestBandwidth, let url = URL(string: line, relativeTo: base)?.absoluteURL {
+                    bestBandwidth = bandwidth
+                    bestURL = url
+                }
+                pendingBandwidth = nil
+            }
+        }
+        return bestURL
+    }
+
+    /// Reads an HLS attribute-list value (e.g. `BANDWIDTH=160000` or
+    /// `URI="audio.m3u8"`) from a tag line, stripping surrounding quotes.
+    private static func attributeValue(_ name: String, in line: String) -> String? {
+        guard let range = line.range(of: name + "=") else { return nil }
+        let rest = line[range.upperBound...]
+        if rest.first == "\"" {
+            let afterQuote = rest.dropFirst()
+            guard let end = afterQuote.firstIndex(of: "\"") else { return nil }
+            return String(afterQuote[..<end])
+        }
+        let value = rest.prefix { $0 != "," }
+        return value.isEmpty ? nil : String(value)
     }
 
     private func parseSegments(_ text: String, relativeTo base: URL) -> [Segment] {

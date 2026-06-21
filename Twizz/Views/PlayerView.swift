@@ -1299,6 +1299,10 @@ struct PlayerView: View {
     .onChange(of: captionsEnabled) { _, _ in syncCaptions() }
     .onChange(of: captionsTimingOffset) { _, _ in syncCaptions() }
     .onChange(of: captionAudioSourceURL) { _, _ in syncCaptions() }
+    // Switching between the Twitch and YouTube simulcast sources changes which
+    // stream's audio the captions must transcribe; re-sync so captions follow
+    // the active source (and recover when switching back to Twitch).
+    .onChange(of: isUsingAltSource) { _, _ in syncCaptions() }
     .onChange(of: isLoading) { _, _ in syncCaptions() }
     .onChange(of: isOffline) { _, _ in syncCaptions() }
     .fullScreenCover(isPresented: $showSignInSheet) {
@@ -1331,12 +1335,27 @@ struct PlayerView: View {
   /// streams, which is the "works on some streams, not others" inconsistency.
   /// Any rendition carries the same audio track, so the lowest one is the
   /// cheapest usable source.
+  ///
+  /// When the YouTube simulcast is the active source, captions must transcribe
+  /// **that** stream's audio, not Twitch's — so we hand the engine the YouTube
+  /// master playlist (it resolves a media/audio rendition itself). Pointing the
+  /// engine at the Twitch audio while YouTube plays is why captions appeared
+  /// broken on the YouTube source.
   var captionAudioSourceURL: URL? {
+    if isUsingAltSource { return altYouTubeMasterURL }
     guard let qualities = playback?.qualities, !qualities.isEmpty else { return nil }
     if let audioOnly = qualities.first(where: { $0.isAudioOnly }) {
       return audioOnly.url
     }
     return qualities.min(by: { $0.bitrate < $1.bitrate })?.url
+  }
+
+  /// HTTP headers the caption engine uses to fetch its audio playlist/segments.
+  /// Must match the identity of the active source: the YouTube simulcast needs a
+  /// browser User-Agent (googlevideo blocks the default UA), Twitch needs its
+  /// player Referer/Origin.
+  var captionAudioSourceHeaders: [String: String] {
+    isUsingAltSource ? Self.altSourceHTTPHeaders : PlaybackService.streamHeaders
   }
 
   /// Reconcile the on-device caption engine with current playback state. Cheap
@@ -1347,7 +1366,7 @@ struct PlayerView: View {
     captionController.sync(
       enabled: captionsEnabled,
       playlistURL: captionAudioSourceURL,
-      headers: PlaybackService.streamHeaders,
+      headers: captionAudioSourceHeaders,
       isLive: !isVOD,
       isReady: !isLoading && errorMessage == nil && !isOffline,
       timingOffset: captionsTimingOffset,

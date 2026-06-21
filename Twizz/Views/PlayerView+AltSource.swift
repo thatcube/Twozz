@@ -6,6 +6,16 @@ import SwiftUI
 // latency against the proxied Twitch path. Diagnostic-only; toggled from the
 // Diagnostics section of the chat settings panel.
 extension PlayerView {
+  /// HTTP headers for fetching an alternate (YouTube) source. A browser
+  /// User-Agent is required because googlevideo throttles/blocks AVPlayer's (and
+  /// URLSession's) default tvOS UA — without it the variant playlist and
+  /// segments never load. Shared by the player asset and the caption engine so
+  /// both pull the YouTube simulcast with the same identity.
+  static let altSourceHTTPHeaders: [String: String] = [
+    "User-Agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+  ]
+
   /// Builds a plain AVPlayerItem for an alternate-source master playlist:
   /// no low-latency proxy (the proxy rewrites Twitch playlists / promotes
   /// `#EXT-X-TWITCH-PREFETCH`, which alternate sources don't carry). A browser
@@ -14,11 +24,8 @@ extension PlayerView {
   /// and playback stalls on a black frame even though the manifest resolved.
   func makeAltSourceItem(url: URL) -> AVPlayerItem {
     currentSourceURL = url
-    let headers = [
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    ]
-    let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+    let asset = AVURLAsset(
+      url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": Self.altSourceHTTPHeaders])
     let item = AVPlayerItem(asset: asset)
     item.audioTimePitchAlgorithm = .timeDomain
     item.canUseNetworkResourcesForLiveStreamingWhilePaused = true

@@ -268,7 +268,7 @@ struct PlayerView: View {
 
 
   /// The currently-active channel, which can change if the user follows a raid.
-  @State var activeChannel: String = ""
+  /// (State now on PlayerModel.)
 
   @Environment(\.dismiss) var dismiss
   @Environment(\.themePalette) var palette
@@ -315,16 +315,14 @@ struct PlayerView: View {
   /// with whatever handle was last entered).
   @State var experimentalYouTubeMergeChannelOrURL = ""
   /// Best-effort YouTube target derived from the active Twitch channel (its
-  /// social links, then description, then a name-based guess).
-  @State var youtubeAutoResolvedTarget = ""
+  /// social links, then description, then a name-based guess). (State on PlayerModel.)
   @AppStorage("experimentalKickMergeEnabled") var experimentalKickMergeEnabled = false
   /// Optional manual override for the Kick merge target. Per-channel and
   /// non-persistent for the same reason as the YouTube override, so a handle
   /// entered for one streamer never leaks into another.
   @State var experimentalKickMergeChannelOrURL = ""
   /// Best-effort Kick target derived from the active Twitch channel (its social
-  /// links, then description, then a name-based guess).
-  @State var kickAutoResolvedTarget = ""
+  /// links, then description, then a name-based guess). (State on PlayerModel.)
   @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
   @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
   @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
@@ -362,45 +360,17 @@ struct PlayerView: View {
   @AppStorage("showPredictionEvents") var showPredictionEvents = true
   @AppStorage("showGoalEvents") var showGoalEvents = true
 
-  @State var chat = ChatService()
-  /// Twitch login -> Kick slug overrides for streamers whose Kick name differs
-  /// from their Twitch login and isn't derivable from their profile.
-  @State var kickAliases = KickAliasService()
-  /// Drives chat replay when in VOD mode (reveals comments up to the playhead).
-  @State var replay = VODChatReplayService()
+  /// Owns the playback engine + chat/events/captions services and the per-frame
+  /// monitoring boxes. The engine members are reached by their original names via
+  /// the forwarding accessors in `PlayerModel.swift`.
+  @State var model = PlayerModel()
   /// Periodic player time observer used in VOD mode to sync chat replay + the
-  /// seek readout to the playhead.
-  @State var vodTimeObserver: Any?
-  /// Detects *outgoing* raids (the watched channel raiding away) via EventSub.
-  @State var eventSub = EventSubService()
-
-  /// Surfaces live polls / predictions / hype trains / goals for the watched
-  /// channel via Twitch's private Hermes WebSocket (read-only).
-  @State var hermes = HermesEventService()
+  /// seek readout to the playhead. (vodTimeObserver now on PlayerModel.)
   /// Debug-only cursor for the "Simulate Interactive Moment" cycle button.
   @State var debugMomentIndex = 0
-  @State var player = AVPlayer()
-  /// Drives the audio-only visualizer orb. Reacts to real audio when the player
-  /// item exposes a tappable audio track (best effort on live HLS), otherwise
-  /// runs an ambient animation.
-  @State var audioLevelMonitor = AudioLevelMonitor()
-  /// On-device live caption generation ("Captions (beta)"). Off by default; only
-  /// runs on live streams on tvOS 26+. Fully isolated from the playback path —
-  /// it consumes the audio-only playlist via its own side-channel.
-  @State var captionController = CaptionController()
-  /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
-  /// loader delegate weakly, so the proxy must be owned here to stay alive.
-  @State var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
-  @State var playback: StreamPlayback?
-  @State var errorMessage: String?
-  @State var isOffline = false
-  @State var isLoading = true
   @State var showChat: Bool =
     UserDefaults.standard.object(forKey: "showChatByDefault") as? Bool ?? true
-  @State var chatReplayStartMessageID: ChatMessage.ID?
-  /// Live resolution AVPlayer's adaptive (Auto) selection is currently showing,
-  /// e.g. "1080p60". Drives the "Auto (1080p60)" label on the quality button.
-  @State var resolvedQualityName: String?
+  // chatReplayStartMessageID now lives in PlayerModel.
   @State var showSignInSheet = false
   @State var showChatSettings = false
   @State var chatSettingsPage: ChatSettingsPage = .main
@@ -408,94 +378,37 @@ struct PlayerView: View {
   /// floating panel to its content and animate when the page/content changes.
   @State var chatSettingsContentHeight: CGFloat = 0
   @State var showControls = false
-  @State var streamTitle: String = ""
-  @State var channelDisplayName: String = ""
-  @State var channelAvatarURL: URL?
+  // streamTitle / channelDisplayName / channelAvatarURL now live in PlayerModel.
   @State var channelPageTarget: ChannelPageTarget?
   /// When the user picks a "More like this" channel from the channel page, we
   /// stash its login and switch to it once the page cover finishes dismissing.
-  @State var pendingSwitchLogin: String?
+  /// (pendingSwitchLogin now on PlayerModel.)
   @State var chatDraft: String = ""
   @State var chatInputActivationToken: Int = 0
   @State var youtubeInputActivationToken: Int = 0
   @State var kickInputActivationToken: Int = 0
   @State var highlightKeywordsActivationToken: Int = 0
-  @State var isSendingChat = false
-  @State var chatSendError: String?
-  /// When chat sync is active, a sent message is held until it appears in the
-  /// delayed stream. This is the wall-clock moment it should surface.
-  @State var chatSyncSendDeadline: Date?
-  @State var chatSyncSendDelay: Double = 0
-  @State var chatSyncSendClearTask: Task<Void, Never>?
+  // Chat send/sync state now lives in PlayerModel.
   @State var hideTask: Task<Void, Never>?
   @State var focusRecoveryTask: Task<Void, Never>?
   @State var isQualityMenuPresented = false
-  @State var latencyTask: Task<Void, Never>?
-  @State var playbackWatchdogTask: Task<Void, Never>?
-  /// Drives the adaptive playback-rate controller at a sub-second cadence — far
-  /// faster than the 1 Hz latency monitor — so the anti-stall slow-down can react
-  /// to a draining buffer before it empties into a hard stall.
-  @State var rateControlTask: Task<Void, Never>?
-  // The live-latency and playback-watchdog tasks rewrite a large set of
-  // bookkeeping values once per second. Storing them as `@State` re-executed the
-  // entire (very large) PlayerView body every tick, which rebuilt the focused
-  // quality button and made its focus highlight visibly flash ~once a second.
-  // They live in a plain (non-Observable) reference box instead: mutating the
-  // box's properties never invalidates the view, so the per-second monitoring
-  // no longer churns the UI. The forwarding computed properties below keep the
-  // original names so the monitoring code reads unchanged. UI that needs the
-  // latency reading goes through `latencyReadout` (an `@Observable` the badge
-  // leaf observes), so only the badge — not the whole player — updates.
-  @State var mon = PlaybackMonitorBox()
-  @State var latencyReadout = LatencyReadout()
+  // latencyTask / playbackWatchdogTask / rateControlTask now live in PlayerModel.
+  // The adaptive playback-rate controller runs at a sub-second cadence — far
+  // faster than the 1 Hz latency monitor — so the anti-stall slow-down can react
+  // to a draining buffer before it empties into a hard stall.
+  // The latency / watchdog / rewind monitoring boxes (`mon`, `latencyReadout`,
+  // `rewindReadout`), the scrub-input coordinator and the trackpad monitor now
+  // live on `PlayerModel` and are reached via forwarding accessors. They use
+  // plain (non-`@Observable`) reference boxes so the once-per-second / per-frame
+  // monitoring never invalidates the whole player; only the latency badge and
+  // rewind transport observe the `@Observable` readouts. See `PlayerModel.swift`.
 
-  // MARK: Stream Rewind (DVR)
-  /// Observed by the rewind transport bar only, so its once-per-second updates
-  /// don't churn the whole player (same isolation pattern as `latencyReadout`).
-  @State var rewindReadout = RewindReadout()
-  /// True while the viewer has explicitly paused the live stream. Pausing keeps
-  /// the playhead in place while the DVR window keeps growing, so resuming/seeking
-  /// stays inside the retained window. Also gates the stall watchdog so an
-  /// intentional pause is never mistaken for a freeze.
-  @State var isUserPaused = false
-  /// True while the viewer is actively scrubbing the rewind bar (analog trackpad
-  /// glide). Gates the latency monitor's rate-force and the stall watchdog so
-  /// repositioning the playhead is never mistaken for a freeze or fought.
-  @State var isScrubbing = false
-  /// Live scrub position (seconds on the player timeline) while a trackpad jog is
-  /// in progress. The orb tracks this instantly for buttery feedback; the actual
-  /// `AVPlayerItem.seek` is throttled/coalesced against it.
-  @State var scrubTargetSeconds: Double?
-  /// Throttle clock for the coalesced scrub seeks issued during a jog.
-  @State var lastScrubSeekAt = Date.distantPast
-  /// Debounced "settle" that commits a final frame-accurate seek and clears the
-  /// intended position once rapid stepping/jogging stops.
-  @State var scrubCommitTask: Task<Void, Never>?
-  /// True while the playhead is following the live edge. The real seekable edge
-  /// quantizes in segment-sized steps, so `behindLiveSeconds` wobbles a few
-  /// seconds even when "at live"; this flag lets us pin the orb to the right edge
-  /// and show LIVE deterministically until the viewer actually rewinds.
-  @State var pinnedToLive = true
-  /// Drives the analog (precision) trackpad scrubbing while the bar is focused.
-  @State var scrubInput = ScrubInputCoordinator()
-  /// Selected VOD playback rate. Applied whenever VOD playback (re)starts so it
-  /// survives pause/resume and seek. Ignored for live (always 1.0).
-  @State var vodPlaybackRate: Float = 1.0
-
-  // MARK: - Stream Rewind → in-progress VOD hand-off
-
-  /// The channel's in-progress broadcast VOD, once resolved. `isActive` flips when
-  /// playback has actually crossed the DVR floor into the VOD. `nil` means either
-  /// not yet resolved or no VOD is available for hand-off.
-  @State var liveVODHandoff: LiveVODHandoff?
-  /// When we last attempted to resolve the in-progress VOD. Throttles re-resolves
-  /// so a viewer who reaches the floor before the VOD is available retries later
-  /// (rather than hammering the network or giving up forever). Reset on channel
-  /// switch / raid alongside the DVR buffers.
-  @State var lastBroadcastVODResolveAt = Date.distantPast
-  /// Guards against firing overlapping hand-off / return transitions while one is
-  /// already in flight.
-  @State var vodHandoffTransitionInFlight = false
+  // MARK: Stream Rewind (DVR) / scrub / VOD hand-off
+  // The rewind/scrub/VOD-handoff engine state (isUserPaused, isScrubbing,
+  // scrubTargetSeconds, lastScrubSeekAt, scrubCommitTask, pinnedToLive,
+  // vodPlaybackRate, liveVODHandoff, lastBroadcastVODResolveAt,
+  // vodHandoffTransitionInFlight) now lives on `PlayerModel` and is reached via
+  // forwarding accessors; see `PlayerModel.swift` for the per-property docs.
 
   var wallClockLatencySeconds: Double? {
     get { mon.wallClockLatencySeconds }
@@ -521,29 +434,9 @@ struct PlayerView: View {
     get { mon.latencyOutlierStreak }
     nonmutating set { mon.latencyOutlierStreak = newValue }
   }
-  // The real (pre-proxy) source URL of the currently loaded item, so we can tell
-  // whether a quality switch actually needs to replace the item. AVURLAsset.url
-  // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
-  // for this comparison directly.
-  @State var currentSourceURL: URL?
-  // Experimental alternate video source (e.g. a streamer's YouTube simulcast),
-  // surfaced under the Diagnostics overlay to A/B latency against the Twitch
-  // path. When active, the player drops the Twitch-only proxy/headers and the
-  // edge-chasing rate controller so the alternate source gets a fair read.
-  @State var isUsingAltSource = false
-  @State var altYouTubeMasterURL: URL?
-  @State var altSourceStatus: String?
-  // Throttles automatic alt-source manifest re-resolution after a 403/expiry so a
-  // failing googlevideo URL is refreshed without hammering YouTube.
-  @State var lastAltResolveAt = Date.distantPast
-  @State var altResolveInFlight = false
-  // Caps automatic alt-source retries after a 403 so a blocked manifest doesn't
-  // trigger an endless re-resolve loop that gets the IP flagged by YouTube.
-  @State var altFailedRetries = 0
-  // Whether the active channel actually has a resolvable YouTube simulcast.
-  // Probed on channel load; gates the Stream Source picker in the quality menu
-  // so we never offer "YouTube" for a channel that isn't simulcasting.
-  @State var youtubeSourceAvailable = false
+  // The real (pre-proxy) source URL, alt-source bookkeeping and the video-output
+  // frame tap now live on `PlayerModel` (see "Playback engine state" /
+  // "Alternate source" there) and are reached via forwarding accessors.
   var isPlaybackActive: Bool {
     get { mon.isPlaybackActive }
     nonmutating set { mon.isPlaybackActive = newValue }
@@ -656,45 +549,17 @@ struct PlayerView: View {
   }
   /// True while the stream-stability watchdog has us in deep-buffer stability mode.
   var isStreamUnstable: Bool { mon.streamUnstableSince != nil }
-  @State var lastStallNotificationAt = Date.distantPast
-  @State var suppressLowLatencyToggleReload = false
-  @State var consecutiveLoadFailures = 0
   @State var lastControlFocus: Focusable = .quality
   /// Non-nil while chat is "soft paused" (Twitch-style): the list is frozen so
   /// the viewer can read, with a countdown that auto-resumes. A second Up press
-  /// promotes it to manual scroll mode.
-  @State var chatSoftPauseRemaining: Int?
-  @State var softPauseTask: Task<Void, Never>?
+  /// promotes it to manual scroll mode. (State now on PlayerModel.)
   let softPauseSeconds = 10
-  /// True once the viewer has promoted the pause into manual scroll mode. Focus
-  /// stays on the composer; up/down swipes drive `chatScrollTarget` directly,
-  /// because tvOS will not reliably hand (and keep) focus on the chat ScrollView.
-  @State var isChatScrolling = false
-  /// The message currently pinned near the top of the viewport while scrolling,
-  /// tracked by id so incoming messages don't shift our place.
-  @State var chatScrollAnchorID: ChatMessage.ID?
-  /// Latest scroll instruction handed to ChatView. The nonce makes repeated
-  /// scrolls to the same id still register as a change.
-  @State var chatScrollTarget: ChatScrollTarget?
-  @State var chatScrollNonce = 0
-  /// Snapshot of the chat list captured when the viewer pauses/scrolls. While
-  /// non-nil it is the single source of truth for both rendering and scroll math,
-  /// so a busy channel (where the live buffer is constantly trimmed from the
-  /// front) can't shift the list out from under the reader. Cleared on resume.
-  @State var chatFrozenMessages: [ChatMessage]?
   /// Messages to advance per up/down swipe while scrolling.
   let chatScrollStep = 4
-  /// Swipe-to-scroll (Siri Remote trackpad) state. The monitor reports the
-  /// finger's position; a loop maps finger *travel* to scroll position so the
-  /// chat follows a swipe and holds still when the finger does. Discrete presses
-  /// still step (and press-and-hold repeats).
-  @State var trackpad = RemoteTrackpadMonitor()
-  @State var trackpadScrollTask: Task<Void, Never>?
-  @State var trackpadScrollIndex: Double = 0
-  @State var lastSentScrollIndex: Int = -1
-  /// When the swipe loop last moved the scroll, used to suppress the discrete
-  /// focus-move events a swipe also emits so a swipe and a press don't double up.
-  @State var lastGestureScrollAt = Date.distantPast
+  /// Swipe-to-scroll (Siri Remote trackpad) state. The `trackpad` monitor (now on
+  /// `PlayerModel`) reports the finger's position; a loop maps finger *travel* to
+  /// scroll position so the chat follows a swipe and holds still when the finger
+  /// does. Discrete presses still step (and press-and-hold repeats). (State on PlayerModel.)
   /// Finger position magnitude below this reads as "not touching" (lifted).
   let chatScrollTouchEpsilon: Double = 0.02
   /// Per-frame finger movement below this reads as "resting" (no swipe), so a
@@ -711,8 +576,7 @@ struct PlayerView: View {
   let chatScrollMomentumMin: Double = 0.04
   /// Press-and-hold auto-repeat. tvOS won't emit system key-repeat here because
   /// focus is trapped on the composer, so we drive an accelerating repeat
-  /// ourselves while the finger stays pressed/down on the pad.
-  @State var chatHoldTask: Task<Void, Never>?
+  /// ourselves while the finger stays pressed/down on the pad. (State on PlayerModel.)
   /// Delay after click-down before the continuous hold-scroll engages, so a quick
   /// tap stays a single discrete step.
   let chatHoldInitialDelay: Double = 0.2
@@ -722,9 +586,6 @@ struct PlayerView: View {
   let chatHoldMaxVelocity: Double = 1.4
   /// Per-frame multiplier that ramps the hold speed up (acceleration).
   let chatHoldVelocityAccel: Double = 1.035
-  /// When the hold last scrolled, used to swallow the single discrete move event
-  /// the click also emits on release.
-  @State var lastHoldRepeatAt = Date.distantPast
   /// When the composer last became focused, used to ignore a stray up-swipe that
   /// rides in on a diagonal move from the chat-toggle button (accidental pause).
   @State var chatInputFocusedAt = Date.distantPast
@@ -761,33 +622,13 @@ struct PlayerView: View {
   /// transient focus jump when toggling an option resizes the panel.
   @State var chatFocusPin: Focusable?
   @State var chatFocusPinTask: Task<Void, Never>?
-  @State var raidBannerDismissTask: Task<Void, Never>?
-  /// Resolved avatar of the channel currently raiding us, shown in the incoming
-  /// raid banner (mirrors the go-live toast). Best-effort; nil while it loads.
-  @State var incomingRaidAvatarURL: URL?
-  /// The outgoing raid currently being followed (with a cancel window).
-  @State var outgoingRaid: OutgoingRaidEvent?
-  @State var outgoingRaidSecondsRemaining = 0
-  @State var outgoingRaidFollowTask: Task<Void, Never>?
+  // Raid banner state (incoming/outgoing) now lives in PlayerModel.
 
   // MARK: Sleep timer (hidden inside the Quality menu)
   // A single countdown task pauses playback after a chosen duration so the
   // Apple TV can sleep when the viewer dozes off. It lives inside the Quality
   // menu (no dedicated button) and surfaces a small top-right countdown badge.
-  @State var sleepTimerTask: Task<Void, Never>?
-  /// Wall-clock instant playback should pause at, for the timed durations.
-  @State var sleepDeadline: Date?
-  /// "End of stream" mode: sleep when the channel goes offline, not on a clock.
-  @State var sleepUntilStreamEnds = false
-  /// Seconds left before sleep, republished each second for the countdown badge.
-  @State var sleepRemainingSeconds: Int?
-  /// Index of the chosen option, so the submenu shows a checkmark.
-  @State var sleepSelectionIndex = 0
-  /// Shown ~30s before a timed sleep so an awake viewer can keep watching.
-  @State var showStillWatching = false
-  /// True once the timer fires: playback is paused under a dim "Sleeping"
-  /// overlay until the viewer presses to resume.
-  @State var isSleeping = false
+  // Sleep-timer state now lives in PlayerModel.
 
   // MARK: Stream Rewind → VOD hand-off tuning
 
@@ -803,28 +644,8 @@ struct PlayerView: View {
   let broadcastVODResolveCooldownSeconds: Double = 30
 
   // MARK: Diagnostics (experimental troubleshooting overlay)
-  // Counters and a rolling event log so freezes/jumps can be observed on-device
-  // and reported back, rather than inferred. Only meaningful while the overlay
-  // toggle is on; reset on each fresh load.
-  @State var diagStallCount = 0
-  @State var diagJumpCount = 0
-  @State var diagReloadCount = 0
-  @State var diagEvents: [DiagnosticsEvent] = []
-  @State var diagLastPlayheadSeconds: Double?
-  @State var diagLastSampleAt: Date?
-  @State var diagWasStalled = false
-  @State var diagIsFrozen = false
-  @State var diagFrozenSince: Date?
-  @State var diagSessionStartedAt: Date?
-  /// Taps decoded frames off the current item so the decode-freeze watchdog can
-  /// tell "no new picture" apart from "playhead not advancing". Rebuilt with each
-  /// item in `makeItem`; nil while no video item is loaded.
-  @State var playerItemVideoOutput: AVPlayerItemVideoOutput?
-  /// Non-nil once the playback clock is advancing but the video output has stopped
-  /// producing fresh frames — the "frozen picture while captions/chat keep
-  /// scrolling" decode wedge that every playhead/buffer-based watchdog misses.
-  /// Cleared the moment a new frame arrives.
-  @State var videoDecodeFrozenSince: Date?
+  // The diagnostics counters / rolling event log / freeze-tracking state now live
+  // on `PlayerModel` and are reached via forwarding accessors.
 
   let controlsAutoHideSeconds: Double = 10
   /// How much live history the Stream Rewind DVR retains (and therefore how far

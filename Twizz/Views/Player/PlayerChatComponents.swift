@@ -119,6 +119,34 @@ struct QualityMenu: View, Equatable {
   let sleepSelectedIndex: Int
   let sleepIsArmed: Bool
   let onSelectSleep: (Int) -> Void
+  // Stream Rewind + Viewer Count: user-facing playback toggles relocated out of
+  // the old custom Playback page into this native menu.
+  let rewindEnabled: Bool
+  let onToggleRewind: () -> Void
+  let viewerCountEnabled: Bool
+  let onToggleViewerCount: () -> Void
+  // Captions: demoted here (low priority — auto-generated). On/off plus an
+  // "Options…" deep-link to the captions appearance panel. Hidden on
+  // unsupported hardware.
+  let captionsSupported: Bool
+  let captionsEnabled: Bool
+  let onToggleCaptions: () -> Void
+  let onOpenCaptionOptions: () -> Void
+  // Diagnostics submenu: the "never touched" latency/debug knobs, tucked one
+  // level deeper. The Simulate actions only appear while the overlay is on.
+  let latencyBadgeEnabled: Bool
+  let onToggleLatencyBadge: () -> Void
+  let diagnosticsEnabled: Bool
+  let onToggleDiagnostics: () -> Void
+  let chatSyncEnabled: Bool
+  let onToggleChatSync: () -> Void
+  let prefetchProxyEnabled: Bool
+  let onTogglePrefetchProxy: () -> Void
+  let onSimulateOutgoingRaid: () -> Void
+  let onSimulateIncomingRaid: () -> Void
+  let onSimulateOffline: () -> Void
+  let onSimulateMoment: () -> Void
+  let onSimulateGoLive: () -> Void
 
   nonisolated static func == (lhs: QualityMenu, rhs: QualityMenu) -> Bool {
     lhs.options == rhs.options
@@ -130,6 +158,14 @@ struct QualityMenu: View, Equatable {
       && lhs.sourceSelectedIndex == rhs.sourceSelectedIndex
       && lhs.sleepSelectedIndex == rhs.sleepSelectedIndex
       && lhs.sleepIsArmed == rhs.sleepIsArmed
+      && lhs.rewindEnabled == rhs.rewindEnabled
+      && lhs.viewerCountEnabled == rhs.viewerCountEnabled
+      && lhs.captionsSupported == rhs.captionsSupported
+      && lhs.captionsEnabled == rhs.captionsEnabled
+      && lhs.latencyBadgeEnabled == rhs.latencyBadgeEnabled
+      && lhs.diagnosticsEnabled == rhs.diagnosticsEnabled
+      && lhs.chatSyncEnabled == rhs.chatSyncEnabled
+      && lhs.prefetchProxyEnabled == rhs.prefetchProxyEnabled
   }
 
   /// Drives the inline `Picker` selection. Reading derives the current index
@@ -167,6 +203,30 @@ struct QualityMenu: View, Equatable {
       get: { sleepSelectedIndex },
       set: { onSelectSleep($0) }
     )
+  }
+
+  // Boolean menu toggles. Toggle passes the new value; we ignore it and route
+  // through the closure, which flips the underlying @AppStorage on PlayerView.
+  private var rewindBinding: Binding<Bool> {
+    Binding(get: { rewindEnabled }, set: { _ in onToggleRewind() })
+  }
+  private var viewerCountBinding: Binding<Bool> {
+    Binding(get: { viewerCountEnabled }, set: { _ in onToggleViewerCount() })
+  }
+  private var captionsBinding: Binding<Bool> {
+    Binding(get: { captionsEnabled }, set: { _ in onToggleCaptions() })
+  }
+  private var latencyBadgeBinding: Binding<Bool> {
+    Binding(get: { latencyBadgeEnabled }, set: { _ in onToggleLatencyBadge() })
+  }
+  private var diagnosticsBinding: Binding<Bool> {
+    Binding(get: { diagnosticsEnabled }, set: { _ in onToggleDiagnostics() })
+  }
+  private var chatSyncBinding: Binding<Bool> {
+    Binding(get: { chatSyncEnabled }, set: { _ in onToggleChatSync() })
+  }
+  private var prefetchProxyBinding: Binding<Bool> {
+    Binding(get: { prefetchProxyEnabled }, set: { _ in onTogglePrefetchProxy() })
   }
 
   private var sleepMenuLabel: String {
@@ -239,6 +299,33 @@ struct QualityMenu: View, Equatable {
 
         Divider()
 
+        // Playback toggles relocated from the old custom Playback page. Native
+        // Toggles render as checkmark rows in the menu.
+        Toggle(isOn: rewindBinding) {
+          Label("Stream Rewind", systemImage: "gobackward")
+        }
+        Toggle(isOn: viewerCountBinding) {
+          Label("Viewer Count", systemImage: "person.2")
+        }
+
+        // Captions: deliberately low-key here rather than a dedicated transport
+        // button. On/off inline; the fiddly appearance controls hide behind
+        // "Caption Options…", which opens the dedicated captions panel.
+        if captionsSupported {
+          Toggle(isOn: captionsBinding) {
+            Label("Captions", systemImage: "captions.bubble")
+          }
+          if captionsEnabled {
+            Button {
+              onOpenCaptionOptions()
+            } label: {
+              Label("Caption Options…", systemImage: "textformat")
+            }
+          }
+        }
+
+        Divider()
+
         // Sleep timer kept as a nested submenu so Quality stays the primary,
         // one-tap control while the timer hides one level deeper.
         Menu {
@@ -250,6 +337,47 @@ struct QualityMenu: View, Equatable {
           .pickerStyle(.inline)
         } label: {
           Label(sleepMenuLabel, systemImage: "moon.zzz")
+        }
+
+        // Diagnostics: the latency/debug knobs end users never touch, tucked one
+        // level deeper. Prefetch proxy + the Simulate actions only surface once
+        // the Diagnostics overlay is on.
+        Menu {
+          Toggle(isOn: latencyBadgeBinding) {
+            Label("Latency Readout", systemImage: "speedometer")
+          }
+          Toggle(isOn: diagnosticsBinding) {
+            Label("Diagnostics Overlay", systemImage: "waveform.path.ecg")
+          }
+          Toggle(isOn: chatSyncBinding) {
+            Label("Match Stream Delay", systemImage: "timer")
+          }
+
+          if diagnosticsEnabled {
+            Toggle(isOn: prefetchProxyBinding) {
+              Label("Prefetch Proxy", systemImage: "bolt.horizontal")
+            }
+
+            Divider()
+
+            Button { onSimulateOutgoingRaid() } label: {
+              Label("Simulate Outgoing Raid", systemImage: "arrowshape.turn.up.right")
+            }
+            Button { onSimulateIncomingRaid() } label: {
+              Label("Simulate Incoming Raid", systemImage: "arrowshape.turn.up.left")
+            }
+            Button { onSimulateOffline() } label: {
+              Label("Simulate Stream Offline", systemImage: "wifi.slash")
+            }
+            Button { onSimulateMoment() } label: {
+              Label("Simulate Interactive Moment", systemImage: "sparkles")
+            }
+            Button { onSimulateGoLive() } label: {
+              Label("Simulate Go Live", systemImage: "dot.radiowaves.left.and.right")
+            }
+          }
+        } label: {
+          Label("Diagnostics", systemImage: "stethoscope")
         }
       } label: {
         qualityLabelText(buttonLabel)

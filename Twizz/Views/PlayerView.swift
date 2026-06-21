@@ -98,7 +98,7 @@ struct PlayerView: View {
   @AppStorage(PersistenceKey.chatHighlightKeywords) var chatHighlightKeywords = ""
   @AppStorage(PersistenceKey.chatLayoutMode) var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
   @AppStorage(PersistenceKey.chatSyncToStream) var chatSyncToStream = false
-  @AppStorage(PersistenceKey.experimentalYouTubeMergeEnabled) var experimentalYouTubeMergeEnabled = false
+  @AppStorage(PersistenceKey.experimentalYouTubeMergeEnabled) var experimentalYouTubeMergeEnabled = true
   /// Optional manual override for the YouTube merge target. Kept per-channel and
   /// non-persistent so a value entered for one streamer never leaks into another
   /// (previously this was global `@AppStorage`, which made every channel merge
@@ -106,7 +106,7 @@ struct PlayerView: View {
   @State var experimentalYouTubeMergeChannelOrURL = ""
   /// Best-effort YouTube target derived from the active Twitch channel (its
   /// social links, then description, then a name-based guess). (State on PlayerModel.)
-  @AppStorage(PersistenceKey.experimentalKickMergeEnabled) var experimentalKickMergeEnabled = false
+  @AppStorage(PersistenceKey.experimentalKickMergeEnabled) var experimentalKickMergeEnabled = true
   /// Optional manual override for the Kick merge target. Per-channel and
   /// non-persistent for the same reason as the YouTube override, so a handle
   /// entered for one streamer never leaks into another.
@@ -633,29 +633,14 @@ struct PlayerView: View {
     case chatScroller
     case raidFollowCancel
     case sleepKeepWatching, sleepResume
-    case simulateRaidButton
-    case simulateIncomingRaidButton
-    case simulateOfflineButton
-    case simulateMomentButton
-    case simulateGoLiveButton
     case chatSettingsButton
     // Stream Rewind transport bar
     case rewindScrubber
     // Main settings page
     case chatPresetOption(Int)
     case chatAdvancedButton
-    case chatMoreButton
-    /// Main-page drill-in row that opens the Captions sub-page.
-    case chatCaptionsButton
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
-    case chatSyncToggle
-    case chatLowLatencyToggle
-    case chatAltSourceToggle
-    case chatRewindToggle
-    case chatViewerCountToggle
-    case chatLatencyToggle
-    case chatDiagnosticsToggle
     case chatCaptionsToggle
     case chatCaptionsBackgroundOption(Int)
     case chatCaptionsColorOption(Int)
@@ -687,15 +672,14 @@ struct PlayerView: View {
 
   /// Which page of the chat settings panel is currently shown.
   enum ChatSettingsPage: Hashable {
-    /// Top-level: presets, layout, and drill-in rows.
+    /// Top-level: presets, layout, multistream, and drill-in rows.
     case main
     /// Fine-grained version of the Size preset (text/emote/line/spacing).
     case appearance
-    /// Playback, stream sync, diagnostics, and experimental toggles.
-    case playback
     /// Per-event visibility toggles (raids, hype trains, polls, etc.).
     case events
-    /// On-device live captions ("Captions (beta)").
+    /// On-device live captions ("Captions (beta)"), opened standalone from the
+    /// native Playback menu's "Caption Options…".
     case captions
   }
 

@@ -166,7 +166,41 @@ extension PlayerView {
           sleepOptions: sleepTimerOptionLabels,
           sleepSelectedIndex: sleepSelectionIndex,
           sleepIsArmed: sleepTimerIsArmed,
-          onSelectSleep: { selectSleepTimer(at: $0) }
+          onSelectSleep: { selectSleepTimer(at: $0) },
+          rewindEnabled: streamRewindEnabled,
+          onToggleRewind: { streamRewindEnabled.toggle() },
+          viewerCountEnabled: showViewerCount,
+          onToggleViewerCount: { showViewerCount.toggle() },
+          captionsSupported: CaptionController.isSupported,
+          captionsEnabled: captionsEnabled,
+          onToggleCaptions: { captionsEnabled.toggle() },
+          onOpenCaptionOptions: { openCaptions() },
+          latencyBadgeEnabled: showLatencyBadge,
+          onToggleLatencyBadge: { showLatencyBadge.toggle() },
+          diagnosticsEnabled: showLatencyDiagnostics,
+          onToggleDiagnostics: { showLatencyDiagnostics.toggle() },
+          chatSyncEnabled: chatSyncToStream,
+          onToggleChatSync: {
+            chatSyncToStream.toggle()
+            applyChatSyncSettings()
+          },
+          prefetchProxyEnabled: lowLatencyProxyEnabled,
+          onTogglePrefetchProxy: { lowLatencyProxyEnabled.toggle() },
+          onSimulateOutgoingRaid: { simulateOutgoingRaid() },
+          onSimulateIncomingRaid: {
+            Task {
+              try? await Task.sleep(for: .milliseconds(600))
+              simulateIncomingRaid()
+            }
+          },
+          onSimulateOffline: { presentOfflineState() },
+          onSimulateMoment: { simulateInteractiveMoment() },
+          onSimulateGoLive: {
+            Task {
+              try? await Task.sleep(for: .milliseconds(600))
+              goLive?.simulateGoLive()
+            }
+          }
         )
         .equatable()
         .focusRemoved(controlButtonRemoved(.quality))
@@ -529,17 +563,8 @@ extension PlayerView {
     case .chatSettingsButton,
       .chatPresetOption,
       .chatAdvancedButton,
-      .chatMoreButton,
       .chatWidthOption,
       .chatLayoutOption,
-      .chatSyncToggle,
-      .chatLowLatencyToggle,
-      .chatAltSourceToggle,
-      .chatRewindToggle,
-      .chatViewerCountToggle,
-      .chatLatencyToggle,
-      .chatDiagnosticsToggle,
-      .chatCaptionsButton,
       .chatCaptionsToggle,
       .chatCaptionsBackgroundOption,
       .chatCaptionsColorOption,
@@ -550,11 +575,6 @@ extension PlayerView {
       .chatPollEventToggle,
       .chatPredictionEventToggle,
       .chatGoalEventToggle,
-      .simulateRaidButton,
-      .simulateIncomingRaidButton,
-      .simulateOfflineButton,
-      .simulateMomentButton,
-      .simulateGoLiveButton,
       .youtubeMergeToggle,
       .youtubeMergeURL,
       .kickMergeToggle,

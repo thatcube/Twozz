@@ -23,19 +23,26 @@ private final class NightShiftOverlayWindow: UIWindow {
 
 // MARK: - Tint view
 
-/// The SwiftUI content the overlay window hosts: a single warm fill whose color
-/// and opacity track the manager. `allowsHitTesting(false)` is belt-and-braces
-/// alongside the window's `hitTest` override.
+/// The SwiftUI content the overlay window hosts: a black **dimming** layer (true
+/// brightness reduction — keeps blacks black) with a translucent **warm** layer
+/// on top for the color cast. Splitting them lets Dimness and Warmth be adjusted
+/// independently. `allowsHitTesting(false)` is belt-and-braces alongside the
+/// window's `hitTest` override.
 private struct NightShiftTintView: View {
   var manager: NightShiftManager
 
   var body: some View {
-    Rectangle()
-      .fill(manager.currentTint)
-      .ignoresSafeArea()
-      .allowsHitTesting(false)
-      .animation(.easeInOut(duration: 0.6), value: manager.currentOpacity)
-      .animation(.easeInOut(duration: 0.6), value: manager.warmth)
+    ZStack {
+      manager.currentWarmTint
+        .opacity(manager.currentWarmOpacity)
+      Color.black
+        .opacity(manager.currentDimOpacity)
+    }
+    .ignoresSafeArea()
+    .allowsHitTesting(false)
+    .animation(.easeInOut(duration: 0.6), value: manager.currentDimOpacity)
+    .animation(.easeInOut(duration: 0.6), value: manager.currentWarmOpacity)
+    .animation(.easeInOut(duration: 0.6), value: manager.warmth)
   }
 }
 

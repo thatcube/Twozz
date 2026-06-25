@@ -39,6 +39,8 @@ if [[ "${GIT_CONFIG_KEY_0:-}" == "safe.bareRepository" ]]; then
   export GIT_CONFIG_VALUE_0=all
 fi
 
+_xcbuild_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Non-fatal secrets sanity check. The app's Config/App.xcconfig pulls local
 # build secrets in via `#include? "<name>.xcconfig.local"` lines (gitignored,
 # per-worktree). When one of those files is missing or empty the include
@@ -49,7 +51,6 @@ fi
 # without secrets on purpose, so this never fails the build. All output goes to
 # stderr so stdout (parsed by callers, e.g. -showBuildSettings) stays clean.
 if [[ "$*" != *"-showBuildSettings"* ]]; then
-  _xcbuild_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   _xcbuild_app_xcconfig="$_xcbuild_root/Config/App.xcconfig"
   if [[ -f "$_xcbuild_app_xcconfig" ]]; then
     while IFS= read -r _inc; do
@@ -63,4 +64,15 @@ if [[ "$*" != *"-showBuildSettings"* ]]; then
   fi
 fi
 
-exec xcodebuild "$@"
+# Derive the build number from the git commit count and pass it as a build
+# setting, so CFBundleVersion is the real monotonic count for BOTH the app and
+# its Top Shelf extension. Doing it as a setting (rather than patching the built
+# Info.plist afterwards) means the value is baked in during normal plist
+# processing and can't be silently reverted to the project default of "1".
+_xcbuild_build_number="$(git -C "$_xcbuild_root" rev-list --count HEAD 2>/dev/null || true)"
+_xcbuild_extra=()
+if [[ -n "$_xcbuild_build_number" && "$*" != *"CURRENT_PROJECT_VERSION="* ]]; then
+  _xcbuild_extra+=("CURRENT_PROJECT_VERSION=$_xcbuild_build_number")
+fi
+
+exec xcodebuild "$@" ${_xcbuild_extra[@]+"${_xcbuild_extra[@]}"}

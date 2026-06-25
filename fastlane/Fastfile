@@ -57,6 +57,11 @@ lane :build do |options|
                  " -authenticationKeyID #{ENV['ASC_KEY_ID'].shellescape}" \
                  " -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID'].shellescape}"
   end
+  # Bake the build number from the git commit count as a build setting so the
+  # app and its Top Shelf extension share the real monotonic CFBundleVersion
+  # (mirrors tools/xcbuild.sh; avoids the default "1").
+  build_number = `git rev-list --count HEAD`.strip
+  prov_args += " CURRENT_PROJECT_VERSION=#{build_number}" unless build_number.empty?
   build_app(
     project: XCODEPROJ,
     scheme: SCHEME,

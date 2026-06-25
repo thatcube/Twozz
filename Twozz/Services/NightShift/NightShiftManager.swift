@@ -87,6 +87,25 @@ enum NightShiftDimness: String, CaseIterable, Identifiable, Codable {
   }
 }
 
+// MARK: - Schedule mode
+
+/// How the on/off schedule is decided. `solar` follows the chosen region's
+/// sunset/sunrise (the original behaviour); `manual` uses two fixed clock times
+/// the viewer picks, in the device's local time zone.
+enum NightShiftScheduleMode: String, CaseIterable, Identifiable, Codable {
+  case solar
+  case manual
+
+  var id: String { rawValue }
+
+  var displayName: String {
+    switch self {
+    case .solar: return "Auto"
+    case .manual: return "Manual"
+    }
+  }
+}
+
 // MARK: - Manager
 
 /// Owns the Night Shift settings and computes the live warm-wash color the
@@ -96,9 +115,16 @@ enum NightShiftDimness: String, CaseIterable, Identifiable, Codable {
 @MainActor
 @Observable
 final class NightShiftManager {
-  /// How long the wash takes to fade fully in after sunset / fully out before
-  /// sunrise. Mirrors the gentle ramp f.lux/Night Shift use.
-  private static let transition: TimeInterval = 90 * 60
+  /// How long the wash takes to fade fully in after the on-event / out before the
+  /// off-event. User-adjustable via `fadeMinutes`; mirrors the gentle ramp
+  /// f.lux/Night Shift use.
+  private var transitionInterval: TimeInterval { Double(fadeMinutes) * 60 }
+
+  /// The set of fade durations (in minutes) the UI steps through.
+  static let fadeOptions: [Int] = [15, 30, 45, 60, 90, 120, 180, 240, 300]
+
+  /// Minute granularity the manual on/off time steppers nudge by.
+  static let manualStepMinutes = 15
 
   var isEnabled: Bool {
     didSet { UserDefaults.standard.set(isEnabled, forKey: PersistenceKey.nightShiftEnabled) }
@@ -114,6 +140,26 @@ final class NightShiftManager {
 
   var dimness: NightShiftDimness {
     didSet { UserDefaults.standard.set(dimness.rawValue, forKey: PersistenceKey.nightShiftDimness) }
+  }
+
+  /// Whether the on/off schedule follows the region's sun or fixed manual times.
+  var scheduleMode: NightShiftScheduleMode {
+    didSet { UserDefaults.standard.set(scheduleMode.rawValue, forKey: PersistenceKey.nightShiftScheduleMode) }
+  }
+
+  /// Manual "turns on" / "turns off" clock times, stored as minutes since local
+  /// midnight (0…1439). Only consulted when `scheduleMode == .manual`.
+  var manualOnMinutes: Int {
+    didSet { UserDefaults.standard.set(manualOnMinutes, forKey: PersistenceKey.nightShiftManualOnMinutes) }
+  }
+
+  var manualOffMinutes: Int {
+    didSet { UserDefaults.standard.set(manualOffMinutes, forKey: PersistenceKey.nightShiftManualOffMinutes) }
+  }
+
+  /// How many minutes the wash takes to ramp from off to full (and back).
+  var fadeMinutes: Int {
+    didSet { UserDefaults.standard.set(fadeMinutes, forKey: PersistenceKey.nightShiftFadeMinutes) }
   }
 
   /// When true (set while the Night Shift settings screen is visible), the ramp
@@ -147,6 +193,11 @@ final class NightShiftManager {
       .flatMap(NightShiftWarmth.init(rawValue:)) ?? .warmer
     dimness = defaults.string(forKey: PersistenceKey.nightShiftDimness)
       .flatMap(NightShiftDimness.init(rawValue:)) ?? .medium
+    scheduleMode = defaults.string(forKey: PersistenceKey.nightShiftScheduleMode)
+      .flatMap(NightShiftScheduleMode.init(rawValue:)) ?? .solar
+    manualOnMinutes = defaults.object(forKey: PersistenceKey.nightShiftManualOnMinutes) as? Int ?? (20 * 60)
+    manualOffMinutes = defaults.object(forKey: PersistenceKey.nightShiftManualOffMinutes) as? Int ?? (6 * 60)
+    fadeMinutes = defaults.object(forKey: PersistenceKey.nightShiftFadeMinutes) as? Int ?? 90
 
     let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.tick = Date() }
@@ -159,6 +210,40 @@ final class NightShiftManager {
 
   var region: NightShiftRegion {
     NightShiftRegion.region(id: regionID) ?? NightShiftRegion.guessFromCurrentTimeZone()
+  }
+
+  /// Time zone the schedule is reckoned in: the region's zone in Auto mode, the
+  /// device's local zone for manually-entered clock times.
+  var activeTimeZone: TimeZone {
+    switch scheduleMode {
+    case .solar: return region.timeZone
+    case .manual: return .current
+    }
+  }
+
+  /// Short human label for the current fade duration, e.g. "90m", "1h", "1.5h".
+  var fadeDescription: String { Self.fadeLabel(minutes: fadeMinutes) }
+
+  static func fadeLabel(minutes: Int) -> String {
+    if minutes < 60 { return "\(minutes)m" }
+    let hours = Double(minutes) / 60
+    return hours == hours.rounded()
+      ? "\(Int(hours))h"
+      : String(format: "%.1fh", hours)
+  }
+
+  /// Formats a minutes-since-midnight value as a clock time in `timeZone`.
+  func clockLabel(minutes: Int, timeZone: TimeZone = .current) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+    let normalized = ((minutes % 1440) + 1440) % 1440
+    let base = calendar.startOfDay(for: Date())
+    let date = calendar.date(byAdding: .minute, value: normalized, to: base) ?? base
+    let formatter = DateFormatter()
+    formatter.timeZone = timeZone
+    formatter.locale = .current
+    formatter.setLocalizedDateFormatFromTemplate("jmm")
+    return formatter.string(from: date)
   }
 
   /// 0…1 ramp for the current moment (0 by day, 1 deep at night). A running
@@ -176,21 +261,21 @@ final class NightShiftManager {
   var previewClockText: String {
     guard let previewDate else { return "" }
     let formatter = DateFormatter()
-    formatter.timeZone = region.timeZone
+    formatter.timeZone = activeTimeZone
     formatter.locale = .current
     formatter.setLocalizedDateFormatFromTemplate("jmm")
     return formatter.string(from: previewDate)
   }
 
   /// Animate a full midnight → midnight day in `duration` seconds, sweeping the
-  /// overlay through the real sunset/sunrise ramp so the viewer can watch how it
+  /// overlay through the active schedule's ramp so the viewer can watch how it
   /// warms and dims across a day, then return to live.
   func runDayNightPreview(duration: TimeInterval = 9) {
     guard isEnabled else { return }
     previewTimer?.invalidate()
 
     var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = region.timeZone
+    calendar.timeZone = activeTimeZone
     previewStart = calendar.startOfDay(for: Date())
     previewStep = 0
     previewProgress = 0
@@ -235,37 +320,83 @@ final class NightShiftManager {
 
   // MARK: Schedule
 
-  /// Today's sunset and the next sunrise for the selected region, used to show a
-  /// human-readable status in Settings.
+  /// A human-readable status line for Settings, covering both schedule modes.
   func scheduleSummary(now: Date = Date()) -> String {
-    let region = self.region
-    let tz = region.timeZone
-    guard let today = SolarTime.sunriseSunset(
-      latitude: region.latitude, longitude: region.longitude, on: now, timeZone: tz
-    ) else {
-      return "Sunrise/sunset unavailable at this location today."
-    }
+    let fade = fadeDescription
+    switch scheduleMode {
+    case .manual:
+      let on = clockLabel(minutes: manualOnMinutes)
+      let off = clockLabel(minutes: manualOffMinutes)
+      if !isEnabled {
+        return "Off. Manual: on \(on), off \(off)."
+      }
+      if isActiveNow {
+        let percent = Int((currentIntensity * 100).rounded())
+        return "Active now (\(percent)%). Manual: on \(on), off \(off) · \(fade) fade."
+      }
+      return "Idle until \(on). Manual · \(fade) fade."
 
-    let formatter = DateFormatter()
-    formatter.timeZone = tz
-    formatter.dateFormat = "h:mm a"
+    case .solar:
+      let region = self.region
+      let tz = region.timeZone
+      guard let today = SolarTime.sunriseSunset(
+        latitude: region.latitude, longitude: region.longitude, on: now, timeZone: tz
+      ) else {
+        return "Sunrise/sunset unavailable at this location today."
+      }
 
-    let sunset = formatter.string(from: today.sunset)
-    let sunrise = formatter.string(from: today.sunrise)
+      let formatter = DateFormatter()
+      formatter.timeZone = tz
+      formatter.dateFormat = "h:mm a"
 
-    if !isEnabled {
-      return "Off. \(region.name): sunset \(sunset), sunrise \(sunrise)."
+      let sunset = formatter.string(from: today.sunset)
+      let sunrise = formatter.string(from: today.sunrise)
+
+      if !isEnabled {
+        return "Off. \(region.name): sunset \(sunset), sunrise \(sunrise)."
+      }
+      if isActiveNow {
+        let percent = Int((currentIntensity * 100).rounded())
+        return "Active now (\(percent)%). \(region.name) sunrise \(sunrise) · \(fade) fade."
+      }
+      return "Idle until sunset (\(sunset)) in \(region.name) · \(fade) fade."
     }
-    if isActiveNow {
-      let percent = Int((currentIntensity * 100).rounded())
-      return "Active now (\(percent)%). \(region.name) sunrise \(sunrise)."
-    }
-    return "Idle until sunset (\(sunset)) in \(region.name)."
   }
 
   // MARK: Ramp math
 
   private func intensity(at date: Date) -> Double {
+    switch scheduleMode {
+    case .manual:
+      return manualIntensity(at: date)
+    case .solar:
+      return solarIntensity(at: date)
+    }
+  }
+
+  /// Ramp driven by the viewer's two fixed clock times (local zone), handling the
+  /// usual case where the window wraps past midnight.
+  private func manualIntensity(at date: Date) -> Double {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .current
+    let startOfToday = calendar.startOfDay(for: date)
+    // The active window may have started today or yesterday (when it wraps
+    // midnight), so test both candidate start days.
+    for dayOffset in [0, -1] {
+      guard
+        let base = calendar.date(byAdding: .day, value: dayOffset, to: startOfToday),
+        let on = calendar.date(byAdding: .minute, value: manualOnMinutes, to: base),
+        let rawOff = calendar.date(byAdding: .minute, value: manualOffMinutes, to: base)
+      else { continue }
+      let off = rawOff <= on ? rawOff.addingTimeInterval(86_400) : rawOff
+      if date >= on, date < off {
+        return ramp(now: date, dusk: on, dawn: off)
+      }
+    }
+    return 0
+  }
+
+  private func solarIntensity(at date: Date) -> Double {
     let region = self.region
     let tz = region.timeZone
     guard let today = SolarTime.sunriseSunset(
@@ -300,13 +431,15 @@ final class NightShiftManager {
     }
   }
 
-  /// Triangle-clamped ramp: 0 at `dusk`, up over `transition`, hold at 1, down
-  /// over `transition` to 0 at `dawn`. Taking the min of the two legs also
-  /// gracefully handles short summer nights shorter than `2 × transition`.
+  /// Triangle-clamped ramp: 0 at `dusk`, up over `transitionInterval`, hold at 1,
+  /// down over `transitionInterval` to 0 at `dawn`. Taking the min of the two legs
+  /// also gracefully handles windows shorter than `2 × transitionInterval` (the
+  /// wash simply peaks below full strength).
   private func ramp(now: Date, dusk: Date, dawn: Date) -> Double {
     guard now > dusk, now < dawn else { return 0 }
-    let up = now.timeIntervalSince(dusk) / Self.transition
-    let down = dawn.timeIntervalSince(now) / Self.transition
+    let interval = max(transitionInterval, 1)
+    let up = now.timeIntervalSince(dusk) / interval
+    let down = dawn.timeIntervalSince(now) / interval
     return Swift.max(0, Swift.min(1, Swift.min(up, down)))
   }
 }

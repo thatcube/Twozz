@@ -9,11 +9,20 @@ struct SettingsNightShiftSection: View {
 
   @Environment(\.glassDisabled) private var glassDisabled
 
+  /// Shared height for every control's tappable content, so the labels sitting
+  /// above them line up across Location/Schedule/time/Dimness/Warmth regardless
+  /// of whether the control is a menu pill or a stepper.
+  private let controlHeight: CGFloat = 44
+
   /// Which control currently holds focus. Focusing either arrow of the Dimness or
   /// Warmth stepper flips the overlay to full strength so each step is visible
   /// live; other controls leave the live schedule untouched.
   private enum NSControl: Hashable {
+    case scheduleDown, scheduleUp
     case location
+    case onDown, onUp
+    case offDown, offUp
+    case fadeDown, fadeUp
     case dimnessDown, dimnessUp
     case warmthDown, warmthUp
     case preview
@@ -22,7 +31,7 @@ struct SettingsNightShiftSection: View {
     var previewsLive: Bool {
       switch self {
       case .dimnessDown, .dimnessUp, .warmthDown, .warmthUp: return true
-      case .location, .preview: return false
+      default: return false
       }
     }
   }
@@ -48,40 +57,88 @@ struct SettingsNightShiftSection: View {
       if nightShift.isEnabled {
         groupDivider
 
-        HStack(alignment: .bottom, spacing: 32) {
-          labeledMenu("Location", value: nightShift.region.name, focus: .location) { regionPicker }
+        VStack(alignment: .leading, spacing: 20) {
+          // Row 1 — when the wash runs.
+          HStack(alignment: .bottom, spacing: 32) {
+            stepper(
+              "Schedule",
+              levels: NightShiftScheduleMode.allCases,
+              selected: nightShift.scheduleMode,
+              display: { $0.displayName },
+              down: .scheduleDown,
+              up: .scheduleUp,
+              valueWidth: 110,
+              commit: { nightShift.scheduleMode = $0 }
+            )
 
-          stepper(
-            "Dimness",
-            levels: NightShiftDimness.allCases,
-            selected: nightShift.dimness,
-            display: { $0.displayName },
-            down: .dimnessDown,
-            up: .dimnessUp,
-            commit: { nightShift.dimness = $0 }
-          )
-          stepper(
-            "Warmth",
-            levels: NightShiftWarmth.allCases,
-            selected: nightShift.warmth,
-            display: { $0.displayName },
-            down: .warmthDown,
-            up: .warmthUp,
-            commit: { nightShift.warmth = $0 }
-          )
+            if nightShift.scheduleMode == .solar {
+              labeledMenu("Location", value: nightShift.region.name, focus: .location) { regionPicker }
+            } else {
+              timeStepper(
+                "Turns on",
+                minutes: nightShift.manualOnMinutes,
+                down: .onDown,
+                up: .onUp,
+                commit: { nightShift.manualOnMinutes = $0 }
+              )
+              timeStepper(
+                "Turns off",
+                minutes: nightShift.manualOffMinutes,
+                down: .offDown,
+                up: .offUp,
+                commit: { nightShift.manualOffMinutes = $0 }
+              )
+            }
 
-          Spacer(minLength: 24)
+            stepper(
+              "Fade",
+              levels: NightShiftManager.fadeOptions,
+              selected: clampedFade,
+              display: { NightShiftManager.fadeLabel(minutes: $0) },
+              down: .fadeDown,
+              up: .fadeUp,
+              valueWidth: 90,
+              commit: { nightShift.fadeMinutes = $0 }
+            )
 
-          DayNightDial(
-            intensity: nightShift.currentIntensity,
-            progress: nightShift.previewProgress
-          )
-          .frame(width: 120, height: 64)
+            Spacer(minLength: 24)
+          }
+          .focusSection()
 
-          previewButton
+          // Row 2 — how the wash looks, plus the day preview.
+          HStack(alignment: .bottom, spacing: 32) {
+            stepper(
+              "Dimness",
+              levels: NightShiftDimness.allCases,
+              selected: nightShift.dimness,
+              display: { $0.displayName },
+              down: .dimnessDown,
+              up: .dimnessUp,
+              commit: { nightShift.dimness = $0 }
+            )
+            stepper(
+              "Warmth",
+              levels: NightShiftWarmth.allCases,
+              selected: nightShift.warmth,
+              display: { $0.displayName },
+              down: .warmthDown,
+              up: .warmthUp,
+              commit: { nightShift.warmth = $0 }
+            )
+
+            Spacer(minLength: 24)
+
+            DayNightDial(
+              intensity: nightShift.currentIntensity,
+              progress: nightShift.previewProgress
+            )
+            .frame(width: 120, height: 64)
+
+            previewButton
+          }
+          .focusSection()
         }
         .padding(.vertical, 16)
-        .focusSection()
       }
     }
     .padding(.horizontal, 28)
@@ -89,7 +146,7 @@ struct SettingsNightShiftSection: View {
     .onChange(of: focusedControl) { _, control in
       // Full-strength preview only while a Dimness/Warmth arrow is focused, so the
       // viewer can calibrate at deep-night intensity; it switches off the moment
-      // focus moves to Location, the preview button, or off the section entirely.
+      // focus moves elsewhere or off the section entirely.
       nightShift.isPreviewing = control?.previewsLive ?? false
     }
     .onChange(of: nightShift.isEnabled) { _, enabled in
@@ -98,6 +155,14 @@ struct SettingsNightShiftSection: View {
     .onDisappear {
       nightShift.isPreviewing = false
     }
+  }
+
+  /// `fadeMinutes` snapped to the nearest available preset, so the Fade stepper
+  /// always has a valid index even if a persisted value falls between options.
+  private var clampedFade: Int {
+    NightShiftManager.fadeOptions.min(by: {
+      abs($0 - nightShift.fadeMinutes) < abs($1 - nightShift.fadeMinutes)
+    }) ?? 90
   }
 
   /// Compact "fast-forward a day" trigger; the simulated clock replaces the label
@@ -110,14 +175,14 @@ struct SettingsNightShiftSection: View {
         .font(.headline)
         .monospacedDigit()
         .frame(minWidth: 150, alignment: .leading)
+        .frame(height: controlHeight)
     }
     .settingsProminentActionButtonStyle()
     .focused($focusedControl, equals: .preview)
   }
 
-  /// A small inline label paired with its dropdown trigger, used to pack Location,
-  /// Dimness, and Warmth onto a single line. `focus` ties the trigger into the
-  /// section's focus tracking.
+  /// A small inline label paired with its dropdown trigger. `focus` ties the
+  /// trigger into the section's focus tracking.
   private func labeledMenu<Content: View>(
     _ label: String,
     value: String,
@@ -125,24 +190,24 @@ struct SettingsNightShiftSection: View {
     @ViewBuilder picker: () -> Content
   ) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(label)
-        .font(.system(size: 24, weight: .semibold))
-        .foregroundStyle(.secondary)
+      controlLabel(label)
       Menu {
         picker()
       } label: {
         SettingPill(title: value, isSelected: false, showsMenuIndicator: true)
+          .frame(height: controlHeight)
       }
       .settingsProminentActionButtonStyle()
       .focused($focusedControl, equals: focus)
     }
   }
 
-  /// A labeled left/right stepper for Dimness/Warmth. Each press of an arrow
-  /// commits the next level immediately, so — paired with the full-strength
-  /// preview that turns on while an arrow is focused — the overlay updates live as
-  /// you step. Stepping is the *select* action; left/right swipes still move focus
-  /// between controls as usual, so there's no dropdown to trap focus.
+  /// A labeled left/right stepper over a discrete list of levels (Schedule, Fade,
+  /// Dimness, Warmth). Each arrow press commits the adjacent level immediately, so
+  /// — paired with the full-strength preview while a Dimness/Warmth arrow is
+  /// focused — the overlay updates live as you step, with no dropdown to trap
+  /// focus. Stepping is the *select* action; left/right swipes still move focus
+  /// between controls as usual.
   private func stepper<Level: Hashable>(
     _ label: String,
     levels: [Level],
@@ -150,21 +215,17 @@ struct SettingsNightShiftSection: View {
     display: (Level) -> String,
     down: NSControl,
     up: NSControl,
+    valueWidth: CGFloat = 150,
     commit: @escaping (Level) -> Void
   ) -> some View {
     let index = levels.firstIndex(of: selected) ?? 0
     return VStack(alignment: .leading, spacing: 8) {
-      Text(label)
-        .font(.system(size: 24, weight: .semibold))
-        .foregroundStyle(.secondary)
+      controlLabel(label)
       HStack(spacing: 14) {
         stepArrow(.chevronLeft, focus: down, enabled: index > 0) {
           if index > 0 { commit(levels[index - 1]) }
         }
-        Text(display(selected))
-          .font(.headline)
-          .lineLimit(1)
-          .frame(minWidth: 150)
+        stepperValue(display(selected), width: valueWidth)
         stepArrow(.chevronRight, focus: up, enabled: index < levels.count - 1) {
           if index < levels.count - 1 { commit(levels[index + 1]) }
         }
@@ -172,7 +233,49 @@ struct SettingsNightShiftSection: View {
     }
   }
 
-  /// One arrow of a stepper. Stays focusable at the ends (so focus — and the live
+  /// A labeled stepper for a manual clock time. Unlike `stepper`, the arrows wrap
+  /// around midnight and never disable, nudging the time by ±15 minutes per press.
+  private func timeStepper(
+    _ label: String,
+    minutes: Int,
+    down: NSControl,
+    up: NSControl,
+    commit: @escaping (Int) -> Void
+  ) -> some View {
+    let step = NightShiftManager.manualStepMinutes
+    return VStack(alignment: .leading, spacing: 8) {
+      controlLabel(label)
+      HStack(spacing: 14) {
+        stepArrow(.chevronLeft, focus: down, enabled: true) {
+          commit(wrappedMinutes(minutes - step))
+        }
+        stepperValue(nightShift.clockLabel(minutes: minutes), width: 150)
+        stepArrow(.chevronRight, focus: up, enabled: true) {
+          commit(wrappedMinutes(minutes + step))
+        }
+      }
+    }
+  }
+
+  private func wrappedMinutes(_ raw: Int) -> Int {
+    ((raw % 1440) + 1440) % 1440
+  }
+
+  private func controlLabel(_ text: String) -> some View {
+    Text(text)
+      .font(.system(size: 24, weight: .semibold))
+      .foregroundStyle(.secondary)
+  }
+
+  private func stepperValue(_ text: String, width: CGFloat) -> some View {
+    Text(text)
+      .font(.headline)
+      .lineLimit(1)
+      .frame(minWidth: width)
+      .frame(height: controlHeight)
+  }
+
+  /// One arrow of a stepper. Stays focusable at the ends (so focus — and any live
   /// preview — isn't lost when you reach Min/Max); it just dims and no-ops there.
   private func stepArrow(
     _ glyph: Glyph,
@@ -182,6 +285,7 @@ struct SettingsNightShiftSection: View {
   ) -> some View {
     Button(action: action) {
       Icon(glyph: glyph, size: 36)
+        .frame(width: 40, height: controlHeight)
         .opacity(enabled ? 1 : 0.3)
     }
     .settingsProminentActionButtonStyle()

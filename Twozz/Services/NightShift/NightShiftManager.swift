@@ -12,41 +12,52 @@ import SwiftUI
 /// remote-friendly idiom (raw sliders are awkward on the Siri Remote).
 enum NightShiftWarmth: String, CaseIterable, Identifiable, Codable {
   case none
+  case light
   case warm
   case warmer
   case warmest
+  case onFire
 
   var id: String { rawValue }
 
   var displayName: String {
     switch self {
     case .none: return "None"
+    case .light: return "Kinda Warm"
     case .warm: return "Warm"
-    case .warmer: return "Warmer"
-    case .warmest: return "Warmest"
+    case .warmer: return "Toasty"
+    case .warmest: return "Roasting"
+    case .onFire: return "On Fire"
     }
   }
 
-  /// The filter colour — a **pure red** (no green, no blue). Drawn source-over
-  /// (see `NightShiftTintView`), a pure red scales the green and blue channels of
-  /// the content behind it down by the layer's alpha while preserving red, so the
-  /// screen shifts toward red like the system Color Filters — never an orange or
-  /// white cast. Every level uses the same red; only the strength below changes.
-  var tint: Color {
-    switch self {
-    case .none: return .clear
-    default: return Color(red: 1.0, green: 0.0, blue: 0.0)
-    }
-  }
-
-  /// Strength of the red filter at the deepest point of night — i.e. how far the
-  /// green/blue channels are pulled out. Higher = deeper, more saturated red.
+  /// Strength of the warm tint at the deepest point of night — how far the
+  /// green/blue channels are scaled down by the multiply. Higher = deeper, more
+  /// saturated.
   var peakOpacity: Double {
     switch self {
     case .none: return 0.0
-    case .warm: return 0.35
-    case .warmer: return 0.55
-    case .warmest: return 0.78
+    case .light: return 0.30
+    case .warm: return 0.55
+    case .warmer: return 0.80
+    case .warmest: return 0.95
+    case .onFire: return 1.0
+    }
+  }
+
+  /// How aggressively green is pulled down relative to blue — i.e. the **hue**.
+  /// Blue is always killed fully (`×(1−warm)`); green is killed at this fraction
+  /// of that rate. A low value keeps lots of green → **orange/amber**; a high
+  /// value strips green too → **red**. So the scale rides orange → orange-red →
+  /// near-pure-red as you climb the levels.
+  var greenKill: Double {
+    switch self {
+    case .none: return 0.0
+    case .light: return 0.50
+    case .warm: return 0.50
+    case .warmer: return 0.65
+    case .warmest: return 0.70
+    case .onFire: return 1.0
     }
   }
 }
@@ -60,28 +71,34 @@ enum NightShiftWarmth: String, CaseIterable, Identifiable, Codable {
 /// This is the closest thing to a real brightness reduction available on tvOS,
 /// which exposes no backlight/brightness API to apps.
 enum NightShiftDimness: String, CaseIterable, Identifiable, Codable {
+  case none
   case subtle
   case medium
   case strong
+  case intense
   case max
 
   var id: String { rawValue }
 
   var displayName: String {
     switch self {
-    case .subtle: return "Subtle"
-    case .medium: return "Medium"
-    case .strong: return "Strong"
-    case .max: return "Max"
+    case .none: return "None"
+    case .subtle: return "Low"
+    case .medium: return "Sorta Dark"
+    case .strong: return "Dark"
+    case .intense: return "Squinting"
+    case .max: return "Can't See"
     }
   }
 
   /// Peak black-layer opacity at the deepest point of night.
   var peakOpacity: Double {
     switch self {
-    case .subtle: return 0.30
-    case .medium: return 0.52
+    case .none: return 0.0
+    case .subtle: return 0.38
+    case .medium: return 0.55
     case .strong: return 0.72
+    case .intense: return 0.84
     case .max: return 0.90
     }
   }
@@ -312,8 +329,32 @@ final class NightShiftManager {
     currentIntensity * warmth.peakOpacity
   }
 
-  /// Hue of the warm layer (alpha applied separately via `currentWarmOpacity`).
-  var currentWarmTint: Color { warmth.tint }
+  /// The single opaque colour the overlay **multiplies** the whole app by. This is
+  /// what makes Night Shift a true tint rather than a wash painted on top:
+  /// multiplying scales each channel of the content *down* and never adds light,
+  /// so black stays black (unlike source-over, which lifts darks toward the tint
+  /// colour and looks bright). Mirrors the system Color Filters.
+  ///
+  /// - Red is kept (only scaled by dimness), so the picture warms by losing
+  ///   green/blue, not by gaining red.
+  /// - Blue is killed quickly with warmth (a warm screen has no blue).
+  /// - Green is killed at the level's `greenKill` fraction of the blue rate, so
+  ///   the leftover green is what reads as **orange/amber**. Low levels keep lots
+  ///   of green (orange); the top "On Fire" level strips nearly all of it (red),
+  ///   so the scale rides orange → orange-red → near-pure-red.
+  /// - Daytime (both 0) resolves to white → ×1 → no change.
+  ///
+  ///       r = 1 − dim
+  ///       g = (1 − dim) × (1 − warm × greenKill)
+  ///       b = (1 − dim) × (1 − warm)
+  var overlayMultiplyColor: Color {
+    let dim = currentDimOpacity
+    let warm = currentWarmOpacity
+    let red = 1 - dim
+    let green = (1 - dim) * (1 - warm * warmth.greenKill)
+    let blue = (1 - dim) * (1 - warm)
+    return Color(red: red, green: green, blue: blue)
+  }
 
   /// Whether the overlay is painting anything right now.
   var isActiveNow: Bool { currentDimOpacity > 0.001 || currentWarmOpacity > 0.001 }

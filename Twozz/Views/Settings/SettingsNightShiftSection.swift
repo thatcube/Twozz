@@ -108,7 +108,7 @@ struct SettingsNightShiftSection: View {
           // Row 2 — how the wash looks, plus the day preview.
           HStack(alignment: .bottom, spacing: 32) {
             stepper(
-              "Dimness",
+              "Darkness",
               levels: NightShiftDimness.allCases,
               selected: nightShift.dimness,
               display: { $0.displayName },

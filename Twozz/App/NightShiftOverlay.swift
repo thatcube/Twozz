@@ -1,65 +1,52 @@
 import SwiftUI
 import UIKit
 
-/// Installs Night Shift's warm wash so it floats above *everything* — including
-/// the player and other `fullScreenCover`s — without ever stealing focus.
+/// Installs Night Shift's tint so it floats above *everything* — including the
+/// player and other `fullScreenCover`s — without ever stealing focus, and tints
+/// by **multiplying** the app rather than painting a wash on top.
 ///
-/// Why a separate `UIWindow` rather than a SwiftUI `.overlay`: the player, chat,
-/// multiview, and sign-in screens are all presented as full-screen covers, which
-/// sit in their own presentation context above `HomeView`'s view tree. An overlay
-/// attached inside `HomeView` would be covered by them (and wouldn't tint the
-/// video at all). A dedicated passthrough window at a high window level is the one
-/// place that reliably sits on top of the whole app, mirroring how the system's
-/// own Night Shift covers the entire screen.
-
-// MARK: - Passthrough window
-
-/// A window that never intercepts touches or focus — it only paints. Returning
-/// `nil` from `hitTest` keeps the tvOS focus engine from ever routing to it, so
-/// it's purely cosmetic.
-private final class NightShiftOverlayWindow: UIWindow {
-  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
-}
+/// Why multiply, and why it must live in the app's own window: a real
+/// colour-temperature filter (and the system's Color Filters) multiplies the
+/// screen — it scales the green/blue channels down to redden the picture while
+/// leaving red (and therefore black) untouched, so nothing is brightened.
+/// Source-over compositing can't do that; it always lifts dark pixels toward the
+/// tint colour, which reads as a bright orange/red glow. Core Animation honours a
+/// `multiplyBlendMode` compositing filter only when the tint layer composites
+/// *within the same window* as the content — tvOS's window server ignores it
+/// across separate windows. So instead of a dedicated overlay window, we add a
+/// passthrough tint view directly into the app's main window and push it to the
+/// front with a very high `zPosition`, which keeps it above the modally-presented
+/// covers (player, chat, multiview, sign-in) that are sibling subviews of that
+/// same window.
 
 // MARK: - Tint view
 
-/// The SwiftUI content the overlay window hosts: a **red filter** layer for the
-/// colour cast with a black **dimming** layer on top for brightness reduction.
-/// Splitting them lets Warmth and Dimness be adjusted independently.
-///
-/// The filter colour is a *pure red* (zero green, zero blue). tvOS composites the
-/// overlay window over the app with normal source-over alpha (it does **not**
-/// honour a cross-window multiply/compositing filter), and source-over of a pure
-/// red is what gives the f.lux / Color-Filters look: the green and blue channels
-/// of whatever is behind get scaled down by the layer's alpha while red is kept,
-/// so the picture shifts toward red rather than gaining an orange/white cast.
-/// `allowsHitTesting(false)` is belt-and-braces alongside the window's `hitTest`
-/// override.
+/// The SwiftUI content hosted in the overlay: one opaque rectangle filled with
+/// `overlayMultiplyColor`. The host view's layer multiplies it against the app
+/// (see the installer), so this colour acts as a per-channel scale — white by day
+/// (×1, invisible), redder as night deepens (green/blue scaled down). Dimness is
+/// folded into the same colour as an all-channel scale. `allowsHitTesting(false)`
+/// is belt-and-braces alongside the host view's disabled interaction.
 private struct NightShiftTintView: View {
   var manager: NightShiftManager
 
   var body: some View {
-    ZStack {
-      manager.currentWarmTint
-        .opacity(manager.currentWarmOpacity)
-      Color.black
-        .opacity(manager.currentDimOpacity)
-    }
-    .ignoresSafeArea()
-    .allowsHitTesting(false)
-    .animation(.easeInOut(duration: 0.6), value: manager.currentDimOpacity)
-    .animation(.easeInOut(duration: 0.6), value: manager.currentWarmOpacity)
-    .animation(.easeInOut(duration: 0.6), value: manager.warmth)
+    Rectangle()
+      .fill(manager.overlayMultiplyColor)
+      .ignoresSafeArea()
+      .allowsHitTesting(false)
+      .animation(.easeInOut(duration: 0.6), value: manager.currentDimOpacity)
+      .animation(.easeInOut(duration: 0.6), value: manager.currentWarmOpacity)
   }
 }
 
 // MARK: - Installer
 
-/// Creates the overlay window once a window scene is available and keeps it alive
-/// for the app's lifetime. It lives as a hidden representable inside the root view
-/// purely so SwiftUI gives it a lifecycle hook; the actual window is attached to
-/// the active `UIWindowScene`, retrying until the scene has connected (the scene
-/// is often not ready on the very first layout pass).
+/// Adds the tint view to the active window once a window is available and keeps it
+/// alive for the app's lifetime. It lives as a hidden representable inside the
+/// root view purely so SwiftUI gives it a lifecycle hook; the actual tint view is
+/// attached to the main window, retrying until the window has connected (the
+/// scene is often not ready on the very first layout pass).
 private struct NightShiftOverlayInstaller: UIViewRepresentable {
   var manager: NightShiftManager
 
@@ -79,7 +66,7 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
   @MainActor
   final class Coordinator {
     private let manager: NightShiftManager
-    private var overlayWindow: UIWindow?
+    private var hostingController: UIHostingController<NightShiftTintView>?
     private var attempts = 0
 
     init(manager: NightShiftManager) {
@@ -87,10 +74,11 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
     }
 
     func installIfNeeded() {
-      guard overlayWindow == nil else { return }
+      // Already attached to a window — nothing to do.
+      if let view = hostingController?.view, view.superview != nil { return }
 
-      guard let scene = Self.activeWindowScene() else {
-        // The scene can lag the first few layout passes — retry briefly.
+      guard let window = Self.mainWindow() else {
+        // The window can lag the first few layout passes — retry briefly.
         attempts += 1
         guard attempts < 60 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -99,31 +87,36 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
         return
       }
 
-      let window = NightShiftOverlayWindow(windowScene: scene)
-      window.frame = UIScreen.main.bounds
-      window.backgroundColor = .clear
-      window.isUserInteractionEnabled = false
-      // Above alerts and full-screen covers so the wash covers the whole app.
-      window.windowLevel = .alert + 1
+      let host = hostingController
+        ?? UIHostingController(rootView: NightShiftTintView(manager: manager))
+      hostingController = host
 
-      let host = UIHostingController(rootView: NightShiftTintView(manager: manager))
-      host.view.backgroundColor = .clear
-      host.view.isUserInteractionEnabled = false
-      window.rootViewController = host
-      window.isHidden = false
+      guard let view = host.view else { return }
+      view.backgroundColor = .clear
+      view.isUserInteractionEnabled = false
+      view.frame = window.bounds
+      view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+      // Multiply the tint against everything below it *within this window* (the
+      // one place tvOS honours the filter). A maximal zPosition keeps it drawing
+      // last — above any fullScreenCover presented later, which are sibling
+      // subviews of this same window.
+      view.layer.compositingFilter = "multiplyBlendMode"
+      view.layer.zPosition = .greatestFiniteMagnitude
 
-      overlayWindow = window
+      window.addSubview(view)
     }
 
-    private static func activeWindowScene() -> UIWindowScene? {
+    private static func mainWindow() -> UIWindow? {
       let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-      return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+      guard let scene = scenes.first(where: { $0.activationState == .foregroundActive })
+        ?? scenes.first else { return nil }
+      return scene.windows.first { $0.isKeyWindow } ?? scene.windows.first
     }
   }
 }
 
 extension View {
-  /// Attaches the global Night Shift warm-wash overlay window.
+  /// Attaches the global Night Shift tint to the app's main window.
   func installNightShiftOverlay(_ manager: NightShiftManager) -> some View {
     background(NightShiftOverlayInstaller(manager: manager))
   }

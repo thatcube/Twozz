@@ -3,9 +3,8 @@ import SwiftUI
 struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
-  private var channelRailVerticalPadding: CGFloat { CardMetrics.railVerticalPadding }
-  private var focusVerticalInset: CGFloat { CardMetrics.focusInset }
-  private var focusHorizontalInset: CGFloat { CardMetrics.focusInset }
+  private var focusVerticalInset: CGFloat { CardMetrics.cardInset }
+  private var focusHorizontalInset: CGFloat { CardMetrics.cardInset }
   private var cardCornerRadius: CGFloat { CardMetrics.cardCornerRadius }
   private var mediaCornerRadius: CGFloat { CardMetrics.mediaCornerRadius }
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
@@ -407,8 +406,7 @@ struct HomeView: View {
       focusHorizontalInset: focusHorizontalInset,
       focusVerticalInset: focusVerticalInset,
       cardCornerRadius: cardCornerRadius,
-      mediaCornerRadius: mediaCornerRadius,
-      railVerticalPadding: channelRailVerticalPadding
+      mediaCornerRadius: mediaCornerRadius
     )
   }
 
@@ -469,6 +467,7 @@ struct HomeView: View {
         .padding(.bottom, 12)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .scrollClipDisabled()
     }
   }
 
@@ -578,7 +577,8 @@ struct HomeView: View {
     ChannelRailLayout.metrics(
       availableWidth: availableWidth,
       trailingSafeArea: trailingSafeArea,
-      visibleCardCount: streamCardSize.visibleCardCount
+      visibleCardCount: streamCardSize.visibleCardCount,
+      contentHorizontalInset: CardMetrics.cardInset
     )
   }
 

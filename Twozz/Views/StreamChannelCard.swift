@@ -1,6 +1,5 @@
 import AVFoundation
 import SwiftUI
-import UIKit
 
 struct StreamChannelCard: View {
   enum Layout {
@@ -94,6 +93,7 @@ struct StreamChannelCard: View {
   let channel: FollowedChannel
   let isFocused: Bool
   var layout: Layout = .grid()
+  var presentation: CardPresentation = .framed
   var showsGameName: Bool = false
   /// When provided, a press-and-hold context menu exposes "Watch".
   var onWatch: ((FollowedChannel) -> Void)? = nil
@@ -115,43 +115,41 @@ struct StreamChannelCard: View {
   @State private var hasConfiguredPreviewPlayer = false
 
   var body: some View {
+    cardBody
+      .onAppear {
+        configurePreviewPlayerIfNeeded()
+        handleFocusChange(isFocused)
+      }
+      .onChange(of: isFocused) { _, focused in
+        handleFocusChange(focused)
+      }
+      .onDisappear {
+        stopPreviewPlayback(clearCachedURL: true)
+      }
+      .channelCardContextMenu(
+        channel: channel,
+        onWatch: onWatch,
+        onGoToChannel: onGoToChannel,
+        onNotInterested: onNotInterested
+      )
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(accessibilityLabel)
+  }
+
+  @ViewBuilder
+  private var cardBody: some View {
+    switch presentation {
+    case .framed:
+      framedCard
+    case .poster:
+      posterCard
+    }
+  }
+
+  private var framedCard: some View {
     VStack(alignment: .leading, spacing: CardMetrics.captionSpacing) {
       media
-
-      HStack(alignment: .top, spacing: CardMetrics.avatarTextSpacing) {
-        CachedAsyncImage(url: channel.profileImageURL) { image in
-          image.resizable().scaledToFill()
-        } placeholder: {
-          Circle()
-            .fill(Color.primary.opacity(0.14))
-        }
-        .frame(width: layout.avatarSize, height: layout.avatarSize)
-        .clipShape(Circle())
-
-        VStack(alignment: .leading, spacing: CardMetrics.captionLineSpacing) {
-          Text(channel.displayName)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-
-          Text(channel.title.isEmpty ? "No title" : channel.title)
-            .font(.footnote)
-            .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
-            .lineLimit(2, reservesSpace: true)
-            .minimumScaleFactor(0.8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-          if showsGameName {
-            Text(channel.gameName)
-              .font(.caption2)
-              .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
-              .lineLimit(1)
-              .minimumScaleFactor(0.7)
-          }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-      }
+      caption
     }
     .padding(.horizontal, layout.focusHorizontalInset)
     .padding(.vertical, layout.focusVerticalInset)
@@ -166,24 +164,55 @@ struct StreamChannelCard: View {
       radius: layout.usesFocusedShadow ? CardMetrics.focusShadowRadius : 0,
       y: layout.usesFocusedShadow ? CardMetrics.focusShadowY : 0
     )
-    .onAppear {
-      configurePreviewPlayerIfNeeded()
-      handleFocusChange(isFocused)
+  }
+
+  private var posterCard: some View {
+    VStack(alignment: .leading, spacing: CardMetrics.captionSpacing + CardMetrics.focusCaptionPush) {
+      media
+      caption
+        .offset(y: isFocused ? 0 : -CardMetrics.focusCaptionPush)
     }
-    .onChange(of: isFocused) { _, focused in
-      handleFocusChange(focused)
+    .padding(.horizontal, layout.focusHorizontalInset)
+    .frame(width: railCardWidth, alignment: .leading)
+    .compositingGroup()
+    .animation(AppLayout.focusScaleAnimation, value: isFocused)
+  }
+
+  private var caption: some View {
+    HStack(alignment: .top, spacing: CardMetrics.avatarTextSpacing) {
+      CachedAsyncImage(url: channel.profileImageURL) { image in
+        image.resizable().scaledToFill()
+      } placeholder: {
+        Circle()
+          .fill(Color.primary.opacity(0.14))
+      }
+      .frame(width: layout.avatarSize, height: layout.avatarSize)
+      .clipShape(Circle())
+
+      VStack(alignment: .leading, spacing: CardMetrics.captionLineSpacing) {
+        Text(channel.displayName)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.7)
+
+        Text(channel.title.isEmpty ? "No title" : channel.title)
+          .font(.footnote)
+          .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
+          .lineLimit(2, reservesSpace: true)
+          .minimumScaleFactor(0.8)
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+        if showsGameName {
+          Text(channel.gameName)
+            .font(.caption2)
+            .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .onDisappear {
-      stopPreviewPlayback(clearCachedURL: true)
-    }
-    .channelCardContextMenu(
-      channel: channel,
-      onWatch: onWatch,
-      onGoToChannel: onGoToChannel,
-      onNotInterested: onNotInterested
-    )
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(accessibilityLabel)
   }
 
   /// A single spoken description per card: name, live/offline state, title,
@@ -223,7 +252,7 @@ struct StreamChannelCard: View {
       }
       .overlay {
         if isShowingLivePreviewSurface {
-          PreviewVideoSurface(player: previewPlayer, cornerRadius: layout.mediaCornerRadius)
+          PreviewVideoSurface(player: previewPlayer, cornerRadius: activeMediaCornerRadius)
             .opacity(livePreviewOpacity)
             .transition(.opacity)
         }
@@ -242,40 +271,18 @@ struct StreamChannelCard: View {
     .frame(width: layout.mediaWidth, height: layout.mediaHeight)
     .frame(maxWidth: layout.mediaWidth == nil ? .infinity : nil, alignment: .leading)
     .mediaAspectRatio(layout.mediaWidth == nil ? 16 / 9 : nil)
-    .clipShape(RoundedRectangle(cornerRadius: layout.mediaCornerRadius, style: .continuous))
-    .overlay {
-      // A hairline rim on the media edge. It matches the frosted-glass tone of
-      // the card so it blends in, while quietly covering the ~1-2px that tvOS's
-      // hardware video overlay plane bleeds past the rounded corners (that plane
-      // ignores CALayer corner masks, so neither the SwiftUI clip nor rounding
-      // the player layer fully contains it). Always on, so live and thumbnail
-      // tiles share the same clean edge.
-      RoundedRectangle(cornerRadius: layout.mediaCornerRadius, style: .continuous)
-        .inset(by: -0.5)
-        .stroke(mediaEdgeColor, lineWidth: 1.5)
-    }
+    .clipShape(RoundedRectangle(cornerRadius: activeMediaCornerRadius, style: .continuous))
+    .twozzMediaEdge(cornerRadius: activeMediaCornerRadius)
+    .twozzFocusHalo(
+      cornerRadius: activeMediaCornerRadius,
+      focusScale: AppLayout.focusedCardScale,
+      isFocused: presentation == .poster && isFocused
+    )
     .animation(.easeOut(duration: 0.22), value: livePreviewOpacity)
   }
 
-  /// Frosted-glass tone of the card surface immediately around the media: the
-  /// theme background nudged toward white to approximate the glass. Used for the
-  /// media edge hairline so it blends with the card while still painting over
-  /// the hardware video plane's corner bleed.
-  private static var edgeColorCache: [UIColor: Color] = [:]
-
-  private var mediaEdgeColor: Color {
-    let base = UIColor(palette.backgroundColors.last ?? .black)
-    if let cached = Self.edgeColorCache[base] { return cached }
-    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-    base.getRed(&r, green: &g, blue: &b, alpha: &a)
-    let lift: CGFloat = 0.09
-    let color = Color(
-      red: Double(r + (1 - r) * lift),
-      green: Double(g + (1 - g) * lift),
-      blue: Double(b + (1 - b) * lift)
-    )
-    Self.edgeColorCache[base] = color
-    return color
+  private var activeMediaCornerRadius: CGFloat {
+    presentation == .poster ? layout.cardCornerRadius : layout.mediaCornerRadius
   }
 
   private var railCardWidth: CGFloat? {
@@ -284,7 +291,8 @@ struct StreamChannelCard: View {
   }
 
   private var usesLiftFocusedText: Bool {
-    twozzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
+    presentation == .framed
+      && twozzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
   }
 
   /// Focused drop-shadow strength. Light mode uses a softer shadow: against a

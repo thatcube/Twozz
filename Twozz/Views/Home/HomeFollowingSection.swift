@@ -59,29 +59,24 @@ struct HomeFollowingSection: View {
           .foregroundStyle(.orange)
       }
 
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: rail.spacing) {
-          ForEach(channels) { channel in
-            HomeRailStreamCard(
-              channel: channel,
-              itemID: "following-\(channel.id)",
-              layout: style.cardLayout(for: rail),
-              onWatch: onWatch,
-              onGoToChannel: onGoToChannel,
-              onTap: { onWatch(channel) },
-              focusedItemID: $focusedItemID
-            )
-          }
+      HomeRailScrollView(rail: rail, style: style) {
+        ForEach(channels) { channel in
+          HomeRailStreamCard(
+            channel: channel,
+            itemID: "following-\(channel.id)",
+            layout: style.cardLayout(for: rail),
+            onWatch: onWatch,
+            onGoToChannel: onGoToChannel,
+            onTap: { onWatch(channel) },
+            focusedItemID: $focusedItemID
+          )
         }
-        .padding(.vertical, style.railVerticalPadding)
       }
-      .scrollClipDisabled()
 
       if channels.isEmpty {
         Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
           .foregroundStyle(.secondary)
       }
     }
-    .focusSection()
   }
 }

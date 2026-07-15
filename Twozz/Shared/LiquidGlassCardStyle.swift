@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Shared glass card surface used by reusable browsing/channel cards.
 /// Uses native Liquid Glass on modern tvOS and a lightweight fallback on older
@@ -70,6 +71,90 @@ extension View {
         glassWhenUnfocused: glassWhenUnfocused
       )
     )
+  }
+
+  /// Draws the same frosted hairline around every clipped artwork surface.
+  func twozzMediaEdge(cornerRadius: CGFloat) -> some View {
+    modifier(TwozzMediaEdgeModifier(cornerRadius: cornerRadius))
+  }
+
+  /// Plozz's borderless "Posters" focus treatment: a glass band blooms around
+  /// the artwork without changing its layout footprint.
+  func twozzFocusHalo(
+    cornerRadius: CGFloat,
+    focusScale: CGFloat,
+    isFocused: Bool
+  ) -> some View {
+    modifier(
+      TwozzFocusHaloModifier(
+        cornerRadius: cornerRadius,
+        focusScale: focusScale,
+        isFocused: isFocused
+      )
+    )
+  }
+}
+
+private struct TwozzMediaEdgeModifier: ViewModifier {
+  let cornerRadius: CGFloat
+
+  @Environment(\.themePalette) private var palette
+
+  func body(content: Content) -> some View {
+    content.overlay {
+      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        .inset(by: -0.5)
+        .stroke(mediaEdgeColor, lineWidth: 1.5)
+    }
+  }
+
+  private var mediaEdgeColor: Color {
+    let base = UIColor(palette.backgroundColors.last ?? .black)
+    var red: CGFloat = 0
+    var green: CGFloat = 0
+    var blue: CGFloat = 0
+    var alpha: CGFloat = 0
+    base.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+    let lift: CGFloat = 0.09
+    return Color(
+      red: Double(red + (1 - red) * lift),
+      green: Double(green + (1 - green) * lift),
+      blue: Double(blue + (1 - blue) * lift)
+    )
+  }
+}
+
+private struct TwozzFocusHaloModifier: ViewModifier {
+  let cornerRadius: CGFloat
+  let focusScale: CGFloat
+  let isFocused: Bool
+
+  @Environment(\.themePalette) private var palette
+
+  func body(content: Content) -> some View {
+    let inset = CardMetrics.focusHaloInset
+    content
+      .background {
+        Color.clear
+          .twozzLiquidGlassCard(
+            cornerRadius: cornerRadius + inset,
+            isFocused: true,
+            palette: palette,
+            glassWhenUnfocused: false
+          )
+          .padding(-inset)
+          .shadow(
+            color: .black.opacity(
+              palette.isLight
+                ? CardMetrics.focusShadowOpacityLight
+                : CardMetrics.focusShadowOpacity
+            ),
+            radius: CardMetrics.focusShadowRadius,
+            y: CardMetrics.focusShadowY
+          )
+          .opacity(isFocused ? 1 : 0)
+      }
+      .scaleEffect(isFocused ? focusScale : 1)
   }
 }
 

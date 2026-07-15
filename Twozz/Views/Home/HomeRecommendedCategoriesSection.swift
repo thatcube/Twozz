@@ -21,35 +21,29 @@ struct HomeRecommendedCategoriesSection: View {
           .font(.system(size: 32, weight: .bold))
           .accessibilityAddTraits(.isHeader)
 
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: rail.spacing) {
-            ForEach(recommendations.categories) { category in
-              let itemID = "category-\(category.id)"
-              let isFocused = focusedItemID == itemID
+        HomeRailScrollView(rail: rail, style: style) {
+          ForEach(recommendations.categories) { category in
+            let itemID = "category-\(category.id)"
+            let isFocused = focusedItemID == itemID
 
-              CategoryCardView(
-                category: category,
-                isFocused: isFocused,
-                width: categoryWidth
-              )
-              .contentShape(RoundedRectangle(cornerRadius: CategoryCardView.contentShapeCornerRadius))
-              .focusable(true)
-              .focused($focusedItemID, equals: itemID)
-              .focusEffectDisabled()
-              .onTapGesture {
-                homePath.append(category)
-              }
-              .accessibilityAddTraits(.isButton)
-              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(AppLayout.focusScaleAnimation, value: isFocused)
-              .zIndex(isFocused ? 2 : 0)
+            CategoryCardView(
+              category: category,
+              isFocused: isFocused,
+              width: categoryWidth,
+              presentation: .poster
+            )
+            .contentShape(RoundedRectangle(cornerRadius: CategoryCardView.contentShapeCornerRadius))
+            .focusable(true)
+            .focused($focusedItemID, equals: itemID)
+            .focusEffectDisabled()
+            .onTapGesture {
+              homePath.append(category)
             }
+            .accessibilityAddTraits(.isButton)
+            .zIndex(isFocused ? 2 : 0)
           }
-          .padding(.vertical, style.railVerticalPadding)
         }
-        .scrollClipDisabled()
       }
-      .focusSection()
     }
   }
 }

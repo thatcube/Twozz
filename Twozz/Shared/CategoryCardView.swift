@@ -7,6 +7,7 @@ struct CategoryCardView: View {
   let category: TwitchCategory
   let isFocused: Bool
   var width: CGFloat? = nil
+  var presentation: CardPresentation = .framed
 
   @Environment(\.themePalette) private var palette
   @Environment(\.glassDisabled) private var glassDisabled
@@ -17,37 +18,22 @@ struct CategoryCardView: View {
   private var artCornerRadius: CGFloat { CardMetrics.mediaCornerRadius }
   private let artRatio: CGFloat = 285.0 / 380.0
 
+  @ViewBuilder
   var body: some View {
+    switch presentation {
+    case .framed:
+      framedCard
+    case .poster:
+      posterCard
+    }
+  }
+
+  private var framedCard: some View {
     VStack(alignment: .leading, spacing: CardMetrics.captionSpacing) {
-      CachedAsyncImage(url: category.boxArtURL) { img in
-        img.resizable().scaledToFill()
-      } placeholder: {
-        Color.primary.opacity(0.08)
-      }
-      .modifier(ArtSizing(width: width, artRatio: artRatio))
-      .clipShape(RoundedRectangle(cornerRadius: artCornerRadius, style: .continuous))
-
-      VStack(alignment: .leading, spacing: CardMetrics.captionLineSpacing) {
-        Text(category.name)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
-          .lineLimit(2, reservesSpace: true)
-          .minimumScaleFactor(0.8)
-
-        if let viewers = category.viewerCount {
-          Text("\(viewers) watching")
-            .font(.caption2)
-            .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-        } else {
-          Text(" ")
-            .font(.caption2)
-            .hidden()
-        }
-      }
-      .padding(.horizontal, CardMetrics.categoryInset)
-      .padding(.bottom, CardMetrics.cardInset)
+      artwork(cornerRadius: artCornerRadius, showsFocusHalo: false)
+      caption
+        .padding(.horizontal, CardMetrics.categoryInset)
+        .padding(.bottom, CardMetrics.cardInset)
     }
     .padding(CardMetrics.categoryInset)
     .modifier(CardSizing(width: width))
@@ -58,6 +44,59 @@ struct CategoryCardView: View {
     )
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
+  }
+
+  private var posterCard: some View {
+    VStack(alignment: .leading, spacing: CardMetrics.captionSpacing + CardMetrics.focusCaptionPush) {
+      artwork(cornerRadius: outerCornerRadius, showsFocusHalo: true)
+      caption
+        .padding(.horizontal, CardMetrics.categoryInset)
+        .offset(y: isFocused ? 0 : -CardMetrics.focusCaptionPush)
+    }
+    .padding(.horizontal, CardMetrics.categoryInset)
+    .modifier(CardSizing(width: width))
+    .compositingGroup()
+    .animation(AppLayout.focusScaleAnimation, value: isFocused)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityLabel)
+  }
+
+  private var caption: some View {
+    VStack(alignment: .leading, spacing: CardMetrics.captionLineSpacing) {
+      Text(category.name)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
+        .lineLimit(2, reservesSpace: true)
+        .minimumScaleFactor(0.8)
+
+      if let viewers = category.viewerCount {
+        Text("\(viewers) watching")
+          .font(.caption2)
+          .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.7)
+      } else {
+        Text(" ")
+          .font(.caption2)
+          .hidden()
+      }
+    }
+  }
+
+  private func artwork(cornerRadius: CGFloat, showsFocusHalo: Bool) -> some View {
+    CachedAsyncImage(url: category.boxArtURL) { img in
+      img.resizable().scaledToFill()
+    } placeholder: {
+      Color.primary.opacity(0.08)
+    }
+    .modifier(ArtSizing(width: width, artRatio: artRatio))
+    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    .twozzMediaEdge(cornerRadius: cornerRadius)
+    .twozzFocusHalo(
+      cornerRadius: cornerRadius,
+      focusScale: AppLayout.focusedCardScale,
+      isFocused: showsFocusHalo && isFocused
+    )
   }
 
   /// One spoken description per category tile: name plus the viewer count when
@@ -74,7 +113,8 @@ struct CategoryCardView: View {
   static var contentShapeCornerRadius: CGFloat { CardMetrics.cardCornerRadius }
 
   private var usesLiftFocusedText: Bool {
-    twozzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
+    presentation == .framed
+      && twozzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
   }
 }
 
@@ -96,7 +136,7 @@ private struct CardSizing: ViewModifier {
 
   func body(content: Content) -> some View {
     if let width {
-      content.frame(width: width + 20)
+      content.frame(width: width + CardMetrics.categoryInset * 2)
     } else {
       content
     }

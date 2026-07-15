@@ -36,17 +36,23 @@ enum CardMetrics {
   /// full card, matching the larger single-item presentation).
   static let heroCornerRadius: CGFloat = 28
 
-  // MARK: - Focus Insets (breathing room for scale-up + internal padding)
+  // MARK: - Insets
 
-  /// Horizontal/vertical inset between the glass edge and content for standard
-  /// cards. Doubles as the focus breathing room for the scale-up animation.
+  /// Legacy roomy content inset used by dense grid/detail cards.
   static let focusInset: CGFloat = 18
 
   /// Internal content padding for compact grid cards.
   static let gridContentInset: CGFloat = 14
 
-  /// Internal padding for category (box-art) cards.
-  static let categoryInset: CGFloat = 10
+  /// Internal padding for category (box-art) cards. This must equal
+  /// ``cardInset`` so the artwork and outer card radii stay concentric.
+  static var categoryInset: CGFloat { cardInset }
+
+  /// Width of the focus-only glass halo around a borderless "poster" card.
+  static let focusHaloInset: CGFloat = 8
+
+  /// Reserved caption movement below a borderless card's focused artwork.
+  static let focusCaptionPush: CGFloat = 16
 
   // MARK: - Spacing Between Cards
 
@@ -56,6 +62,16 @@ enum CardMetrics {
 
   /// Vertical padding above/below a card rail row.
   static let railVerticalPadding: CGFloat = 24
+
+  /// Room reserved inside a clipping horizontal rail for focus scale, halo, and
+  /// shadow. The scroll view negates this down to ``railVerticalPadding`` outside
+  /// the clip, preserving the row's original footprint.
+  static let railShadowClearance: CGFloat = 60
+
+  /// Outer padding that cancels the extra in-clip shadow clearance.
+  static var railClearanceOffset: CGFloat {
+    railVerticalPadding - railShadowClearance
+  }
 
   /// Gap between the media thumbnail and the text/metadata below it.
   static let captionSpacing: CGFloat = 10
@@ -107,4 +123,12 @@ enum CardMetrics {
     let clamped = CGFloat(min(max(count, 2), 6))
     return 1.0 - (clamped - 2) * 0.08
   }
+}
+
+/// Shared visual presentation for media cards. "Poster" matches Plozz's
+/// borderless Posters option: artwork and caption only, with glass appearing as
+/// a concentric focus halo rather than an always-on frame.
+enum CardPresentation: Equatable {
+  case framed
+  case poster
 }

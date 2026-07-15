@@ -23,6 +23,7 @@ struct HomeRailStreamCard: View {
       channel: channel,
       isFocused: isFocused,
       layout: layout,
+      presentation: .poster,
       showsGameName: showsGameName,
       onWatch: onWatch,
       onGoToChannel: onGoToChannel,
@@ -36,8 +37,6 @@ struct HomeRailStreamCard: View {
       onTap()
     }
     .accessibilityAddTraits(.isButton)
-    .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-    .animation(AppLayout.focusScaleAnimation, value: isFocused)
     .zIndex(isFocused ? 2 : 0)
   }
 }

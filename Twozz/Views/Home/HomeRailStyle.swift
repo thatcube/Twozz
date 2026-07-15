@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// Shared layout constants for the Home tab's horizontal rails. Each extracted
-/// section builds the same `StreamChannelCard.Layout` from the per-width
-/// `ChannelRailMetrics` without re-declaring the inset/corner constants, so the
-/// rails stay byte-for-byte identical to the original single-file `HomeView`.
+/// Shared layout constants for the Home tab's horizontal rails.
 struct HomeRailStyle {
   var focusHorizontalInset: CGFloat
   var focusVerticalInset: CGFloat
   var cardCornerRadius: CGFloat
   var mediaCornerRadius: CGFloat
-  var railVerticalPadding: CGFloat
+
+  var railShadowClearance: CGFloat { CardMetrics.railShadowClearance }
+  var railClearanceOffset: CGFloat { CardMetrics.railClearanceOffset }
 
   /// Builds the `.rail` card layout for a given width's metrics, matching the
   /// inline `.rail(...)` HomeView used at every card-render site.
@@ -22,5 +21,36 @@ struct HomeRailStyle {
       cardCornerRadius: cardCornerRadius,
       mediaCornerRadius: mediaCornerRadius
     )
+  }
+}
+
+/// Plozz-style horizontal rail: the rail itself remains clipped so tvOS keeps
+/// correct first/last-card scroll positions, while in-clip padding preserves the
+/// focused card's halo and shadow.
+struct HomeRailScrollView<Content: View>: View {
+  let rail: ChannelRailMetrics
+  let style: HomeRailStyle
+  let content: Content
+
+  init(
+    rail: ChannelRailMetrics,
+    style: HomeRailStyle,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.rail = rail
+    self.style = style
+    self.content = content()
+  }
+
+  var body: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      LazyHStack(alignment: .top, spacing: rail.spacing) {
+        content
+      }
+      .padding(.horizontal, AppLayout.horizontalPadding)
+      .padding(.vertical, style.railShadowClearance)
+    }
+    .padding(.horizontal, -AppLayout.horizontalPadding)
+    .padding(.vertical, style.railClearanceOffset)
   }
 }

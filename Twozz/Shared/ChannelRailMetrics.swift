@@ -21,8 +21,6 @@ enum ChannelRailLayout {
   /// Fraction of the next card left peeking past the trailing edge, hinting the
   /// rail scrolls.
   static let peekCardFraction: CGFloat = 0.08
-  /// Breathing room reserved on each side of a card for its focus halo/scale.
-  static var focusHorizontalInset: CGFloat { CardMetrics.focusInset }
   static let minMediaWidth: CGFloat = 220
   static let maxMediaWidth: CGFloat = 900
 
@@ -43,12 +41,11 @@ enum ChannelRailLayout {
   static func metrics(
     availableWidth: CGFloat,
     trailingSafeArea: CGFloat = 0,
-    visibleCardCount: Int
+    visibleCardCount: Int,
+    contentHorizontalInset: CGFloat = CardMetrics.focusInset
   ) -> ChannelRailMetrics {
-    // `availableWidth` is the safe-area width. Cards begin at the left page
-    // gutter but, because the rails disable scroll clipping, they paint
-    // rightward past the safe area into the trailing overscan, so the real span
-    // is the safe width minus the single left gutter plus that overscan.
+    // Cards begin at the left page gutter inside a full-width clipping rail.
+    // The usable span therefore runs from that gutter to the trailing edge.
     let visibleWidth = max(availableWidth - AppLayout.horizontalPadding + trailingSafeArea, 1)
     let n = CGFloat(max(visibleCardCount, 1))
     let peek = peekCardFraction
@@ -56,17 +53,17 @@ enum ChannelRailLayout {
     let spacing = min(baseSpacing, 32) * spacingScale(forVisibleCardCount: visibleCardCount)
     // visibleWidth = (n + peek) * outer + n * spacing  ->  solve for outer.
     let rawOuterCardWidth = (visibleWidth - (n * spacing)) / (n + peek)
-    let minOuterCardWidth = minMediaWidth + (focusHorizontalInset * 2)
-    let maxOuterCardWidth = maxMediaWidth + (focusHorizontalInset * 2)
+    let minOuterCardWidth = minMediaWidth + (contentHorizontalInset * 2)
+    let maxOuterCardWidth = maxMediaWidth + (contentHorizontalInset * 2)
     let outerCardWidth = min(max(rawOuterCardWidth, minOuterCardWidth), maxOuterCardWidth)
-    let mediaWidth = outerCardWidth - (focusHorizontalInset * 2)
+    let mediaWidth = outerCardWidth - (contentHorizontalInset * 2)
     let mediaHeight = mediaWidth * 9 / 16
 
     return ChannelRailMetrics(
       spacing: spacing,
       mediaWidth: mediaWidth,
       mediaHeight: mediaHeight,
-      focusHorizontalInset: focusHorizontalInset
+      focusHorizontalInset: contentHorizontalInset
     )
   }
 }

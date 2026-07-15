@@ -31,26 +31,21 @@ struct HomeTopStreamsSection: View {
           Spacer()
         }
 
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: rail.spacing) {
-            ForEach(channels) { channel in
-              HomeRailStreamCard(
-                channel: channel,
-                itemID: "topstreams-\(channel.id)",
-                layout: style.cardLayout(for: rail),
-                onWatch: onWatch,
-                onGoToChannel: onGoToChannel,
-                onNotInterested: onNotInterested,
-                onTap: { onWatch(channel) },
-                focusedItemID: $focusedItemID
-              )
-            }
+        HomeRailScrollView(rail: rail, style: style) {
+          ForEach(channels) { channel in
+            HomeRailStreamCard(
+              channel: channel,
+              itemID: "topstreams-\(channel.id)",
+              layout: style.cardLayout(for: rail),
+              onWatch: onWatch,
+              onGoToChannel: onGoToChannel,
+              onNotInterested: onNotInterested,
+              onTap: { onWatch(channel) },
+              focusedItemID: $focusedItemID
+            )
           }
-          .padding(.vertical, style.railVerticalPadding)
         }
-        .scrollClipDisabled()
       }
-      .focusSection()
     }
   }
 }

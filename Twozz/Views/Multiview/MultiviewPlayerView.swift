@@ -696,8 +696,6 @@ private struct MultiviewAddView: View {
                   layout: .grid(),
                   showsGameName: true
                 )
-                .scaleEffect(focusedID == channel.id ? 1.04 : 1)
-                .animation(.easeOut(duration: 0.18), value: focusedID == channel.id)
                 .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .focusable(true)
                 .focused($focusedID, equals: channel.id)
@@ -714,4 +712,3 @@ private struct MultiviewAddView: View {
     .onExitCommand(perform: onCancel)
   }
 }
-

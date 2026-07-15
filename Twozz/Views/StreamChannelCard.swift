@@ -93,7 +93,7 @@ struct StreamChannelCard: View {
   let channel: FollowedChannel
   let isFocused: Bool
   var layout: Layout = .grid()
-  var presentation: CardPresentation = .framed
+  var focusScale: CGFloat = AppLayout.focusedCardScale
   var showsGameName: Bool = false
   /// When provided, a press-and-hold context menu exposes "Watch".
   var onWatch: ((FollowedChannel) -> Void)? = nil
@@ -105,6 +105,7 @@ struct StreamChannelCard: View {
 
   @Environment(\.themePalette) private var palette
   @Environment(\.glassDisabled) private var glassDisabled
+  @AppStorage(CardPresentation.storageKey) private var presentationRaw = CardPresentation.fallback.rawValue
   @State private var previewPlayer = AVPlayer()
   @State private var previewTask: Task<Void, Never>?
   @State private var revealVideoTask: Task<Void, Never>?
@@ -113,6 +114,7 @@ struct StreamChannelCard: View {
   @State private var isShowingLivePreviewSurface = false
   @State private var livePreviewOpacity = 0.0
   @State private var hasConfiguredPreviewPlayer = false
+  private var presentation: CardPresentation { CardPresentation.resolve(presentationRaw) }
 
   var body: some View {
     cardBody
@@ -164,6 +166,8 @@ struct StreamChannelCard: View {
       radius: layout.usesFocusedShadow ? CardMetrics.focusShadowRadius : 0,
       y: layout.usesFocusedShadow ? CardMetrics.focusShadowY : 0
     )
+    .scaleEffect(isFocused ? focusScale : 1)
+    .animation(AppLayout.focusScaleAnimation, value: isFocused)
   }
 
   private var posterCard: some View {
@@ -199,16 +203,20 @@ struct StreamChannelCard: View {
         Text(channel.title.isEmpty ? "No title" : channel.title)
           .font(.footnote)
           .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
-          .lineLimit(2, reservesSpace: true)
+          .lineLimit(
+            presentation == .poster ? 1 : 2,
+            reservesSpace: presentation == .framed
+          )
           .minimumScaleFactor(0.8)
           .frame(maxWidth: .infinity, alignment: .leading)
 
-        if showsGameName {
-          Text(channel.gameName)
+        if showsGameName || presentation == .poster {
+          Text(channel.gameName.isEmpty ? " " : channel.gameName)
             .font(.caption2)
             .foregroundStyle(usesLiftFocusedText ? palette.liftSecondaryText : Color.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+            .opacity(channel.gameName.isEmpty ? 0 : 1)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -275,7 +283,7 @@ struct StreamChannelCard: View {
     .twozzMediaEdge(cornerRadius: activeMediaCornerRadius)
     .twozzFocusHalo(
       cornerRadius: activeMediaCornerRadius,
-      focusScale: AppLayout.focusedCardScale,
+      focusScale: focusScale,
       isFocused: presentation == .poster && isFocused
     )
     .animation(.easeOut(duration: 0.22), value: livePreviewOpacity)

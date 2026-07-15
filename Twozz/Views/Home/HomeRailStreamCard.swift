@@ -23,7 +23,6 @@ struct HomeRailStreamCard: View {
       channel: channel,
       isFocused: isFocused,
       layout: layout,
-      presentation: .poster,
       showsGameName: showsGameName,
       onWatch: onWatch,
       onGoToChannel: onGoToChannel,

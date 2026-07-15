@@ -217,6 +217,7 @@ struct MultiviewSetupView: View {
       channel: channel,
       isFocused: isFocused,
       layout: .grid(),
+      focusScale: 1,
       showsGameName: true
     )
     .overlay(alignment: .topTrailing) {

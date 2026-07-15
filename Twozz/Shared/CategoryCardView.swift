@@ -7,16 +7,17 @@ struct CategoryCardView: View {
   let category: TwitchCategory
   let isFocused: Bool
   var width: CGFloat? = nil
-  var presentation: CardPresentation = .framed
 
   @Environment(\.themePalette) private var palette
   @Environment(\.glassDisabled) private var glassDisabled
+  @AppStorage(CardPresentation.storageKey) private var presentationRaw = CardPresentation.fallback.rawValue
 
   /// Match the stream cards: aggressive outer glass rounding with the inner box
   /// art rounded to the same radius the stream card media uses.
   private var outerCornerRadius: CGFloat { CardMetrics.cardCornerRadius }
   private var artCornerRadius: CGFloat { CardMetrics.mediaCornerRadius }
   private let artRatio: CGFloat = 285.0 / 380.0
+  private var presentation: CardPresentation { CardPresentation.resolve(presentationRaw) }
 
   @ViewBuilder
   var body: some View {
@@ -42,6 +43,8 @@ struct CategoryCardView: View {
       isFocused: isFocused,
       palette: palette
     )
+    .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
+    .animation(AppLayout.focusScaleAnimation, value: isFocused)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
   }
@@ -66,7 +69,10 @@ struct CategoryCardView: View {
       Text(category.name)
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(usesLiftFocusedText ? palette.liftPrimaryText : Color.primary)
-        .lineLimit(2, reservesSpace: true)
+        .lineLimit(
+          presentation == .poster ? 1 : 2,
+          reservesSpace: presentation == .framed
+        )
         .minimumScaleFactor(0.8)
 
       if let viewers = category.viewerCount {

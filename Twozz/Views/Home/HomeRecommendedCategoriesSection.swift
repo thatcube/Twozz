@@ -29,8 +29,7 @@ struct HomeRecommendedCategoriesSection: View {
             CategoryCardView(
               category: category,
               isFocused: isFocused,
-              width: categoryWidth,
-              presentation: .poster
+              width: categoryWidth
             )
             .contentShape(RoundedRectangle(cornerRadius: CategoryCardView.contentShapeCornerRadius))
             .focusable(true)

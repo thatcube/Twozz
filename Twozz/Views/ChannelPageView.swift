@@ -39,8 +39,8 @@ struct ChannelPageView: View {
   private let avatarSize: CGFloat = 96
   private let tileWidth: CGFloat = 360
   private var tileMediaHeight: CGFloat { tileWidth * 9 / 16 }
-  private var focusHInset: CGFloat { CardMetrics.focusInset }
-  private var focusVInset: CGFloat { CardMetrics.focusInset }
+  private var focusHInset: CGFloat { CardMetrics.cardInset }
+  private var focusVInset: CGFloat { CardMetrics.cardInset }
   private var cardCorner: CGFloat { CardMetrics.cardCornerRadius }
   private var mediaCorner: CGFloat { CardMetrics.mediaCornerRadius }
   private var heroCorner: CGFloat { CardMetrics.heroCornerRadius }
@@ -463,7 +463,7 @@ struct ChannelPageView: View {
             id: itemID,
             focusedID: $focusedID,
             cornerRadius: cardCorner,
-            focusedScale: AppLayout.focusedCardScale,
+            focusedScale: 1,
             prefersDefaultFocus: defaultFocusID == itemID,
             focusNamespace: focusNamespace,
             onSelect: { onDemandItem = .clip(slug: clip.slug, title: clip.title) }
@@ -507,7 +507,7 @@ struct ChannelPageView: View {
             id: itemID,
             focusedID: $focusedID,
             cornerRadius: cardCorner,
-            focusedScale: AppLayout.focusedCardScale,
+            focusedScale: 1,
             prefersDefaultFocus: defaultFocusID == itemID,
             focusNamespace: focusNamespace,
             onSelect: { onDemandItem = .vod(id: vod.id, title: vod.title) }
@@ -559,7 +559,7 @@ struct ChannelPageView: View {
                 id: "rec-\(channel.id)",
                 focusedID: $focusedID,
                 cornerRadius: cardCorner,
-                focusedScale: AppLayout.focusedCardScale,
+                focusedScale: 1,
                 prefersDefaultFocus: false,
                 focusNamespace: focusNamespace,
                 onSelect: { onWatchChannel?(channel) }

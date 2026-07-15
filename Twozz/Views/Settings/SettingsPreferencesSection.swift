@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Preferences group: appearance (theme), stream card size, open-chat default,
-/// stream language, recommendations, go-live alerts, and reduce transparency.
+/// Preferences group: appearance, card presentation, playback defaults,
+/// recommendations, alerts, and accessibility.
 struct SettingsPreferencesSection: View {
   var onClearWatchHistory: () -> Void = {}
   var onResetNotInterested: () -> Void = {}
@@ -17,8 +17,10 @@ struct SettingsPreferencesSection: View {
   @State private var showResetNotInterestedConfirm = false
   @FocusState private var focusedTheme: AppTheme?
   @FocusState private var focusedCardSize: StreamCardSize?
+  @FocusState private var focusedCardPresentation: CardPresentation?
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
+  @AppStorage(CardPresentation.storageKey) private var cardPresentationRaw = CardPresentation.fallback.rawValue
   @AppStorage(PersistenceKey.showChatByDefault) private var showChatByDefault = true
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
@@ -37,6 +39,11 @@ struct SettingsPreferencesSection: View {
       groupDivider
 
       streamCardRow
+        .padding(.vertical, 16)
+
+      groupDivider
+
+      cardPresentationRow
         .padding(.vertical, 16)
 
       groupDivider
@@ -112,6 +119,29 @@ struct SettingsPreferencesSection: View {
         }
         .settingPillStyle(isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size)
         .focused($focusedCardSize, equals: size)
+      }
+    }
+  }
+
+  private var cardPresentationRow: some View {
+    SettingRow(
+      title: "Card style",
+      subtitle: nil
+    ) {
+      ForEach(CardPresentation.allCases) { presentation in
+        Button {
+          cardPresentationRaw = presentation.rawValue
+        } label: {
+          SettingPill(
+            title: presentation.title,
+            subtitle: presentation.subtitle,
+            isSelected: CardPresentation.resolve(cardPresentationRaw) == presentation
+          )
+        }
+        .settingPillStyle(
+          isSelected: CardPresentation.resolve(cardPresentationRaw) == presentation
+        )
+        .focused($focusedCardPresentation, equals: presentation)
       }
     }
   }

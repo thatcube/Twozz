@@ -112,8 +112,6 @@ struct FollowingDirectoryView: View {
               .onTapGesture {
                 select(channel)
               }
-              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
-              .animation(AppLayout.focusScaleAnimation, value: isFocused)
               .zIndex(isFocused ? 2 : 0)
             }
           }

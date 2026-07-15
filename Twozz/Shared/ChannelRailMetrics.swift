@@ -42,7 +42,7 @@ enum ChannelRailLayout {
     availableWidth: CGFloat,
     trailingSafeArea: CGFloat = 0,
     visibleCardCount: Int,
-    contentHorizontalInset: CGFloat = CardMetrics.focusInset
+    contentHorizontalInset: CGFloat = CardMetrics.cardInset
   ) -> ChannelRailMetrics {
     // Cards begin at the left page gutter inside a full-width clipping rail.
     // The usable span therefore runs from that gutter to the trailing edge.

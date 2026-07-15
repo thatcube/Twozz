@@ -38,11 +38,9 @@ enum CardMetrics {
 
   // MARK: - Insets
 
-  /// Legacy roomy content inset used by dense grid/detail cards.
-  static let focusInset: CGFloat = 18
-
-  /// Internal content padding for compact grid cards.
-  static let gridContentInset: CGFloat = 14
+  /// Internal content padding for compact grid cards. It matches the radius
+  /// difference so the frame stays concentric at every size.
+  static var gridContentInset: CGFloat { cardInset }
 
   /// Internal padding for category (box-art) cards. This must equal
   /// ``cardInset`` so the artwork and outer card radii stay concentric.
@@ -128,7 +126,30 @@ enum CardMetrics {
 /// Shared visual presentation for media cards. "Poster" matches Plozz's
 /// borderless Posters option: artwork and caption only, with glass appearing as
 /// a concentric focus halo rather than an always-on frame.
-enum CardPresentation: Equatable {
+enum CardPresentation: String, CaseIterable, Identifiable {
   case framed
   case poster
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .framed: "Cards"
+    case .poster: "Posters"
+    }
+  }
+
+  var subtitle: String {
+    switch self {
+    case .framed: "Framed"
+    case .poster: "Artwork only"
+    }
+  }
+
+  static let storageKey = PersistenceKey.cardPresentation
+  static let fallback: CardPresentation = .poster
+
+  static func resolve(_ rawValue: String) -> CardPresentation {
+    CardPresentation(rawValue: rawValue) ?? .fallback
+  }
 }

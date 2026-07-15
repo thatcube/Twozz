@@ -70,6 +70,7 @@ enum PersistenceKey {
   static let nightShiftManualOffMinutes = "nightShiftManualOffMinutes"
   static let nightShiftFadeMinutes = "nightShiftFadeMinutes"
   static let streamCardSize = "streamCardSize"
+  static let cardPresentation = "cardPresentation"
   static let streamLanguageFilter = "streamLanguageFilter"
   static let showYouTubeSubscriptions = "showYouTubeSubscriptions"
 

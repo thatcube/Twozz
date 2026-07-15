@@ -224,7 +224,7 @@ final class GoLiveWatcher {
       streams = try await fetchFollowedStreams(clientID: clientID, accessToken: token, userID: userID)
     } catch let error as GoLiveRequestError where error.status == 401 {
       // Token likely expired mid-session: force a refresh and retry once.
-      guard let refreshed = try? await auth.refreshAccessTokenIfNeeded(force: true),
+      guard let refreshed = try? await auth.recoverAccessToken(afterUnauthorized: token),
             let retry = try? await fetchFollowedStreams(
               clientID: clientID, accessToken: refreshed, userID: userID)
       else { return false }

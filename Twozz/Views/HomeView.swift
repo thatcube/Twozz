@@ -71,6 +71,7 @@ struct HomeView: View {
 
   @Environment(\.colorScheme) private var systemColorScheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.scenePhase) private var scenePhase
   @FocusState private var focusedItemID: String?
 
   private let firstLaunchSignInPromptKey = "hasPromptedFirstLaunchSignIn"
@@ -266,6 +267,7 @@ struct HomeView: View {
     .animation(.motionAware(.easeOut(duration: 0.25), reduceMotion: reduceMotion), value: goLive.pending)
     .task {
       auth.restore()
+      auth.startSessionValidation()
       youtubeAuth.restore()
       goLive.notificationSettings = goLiveSettings
       goLive.start(using: auth)
@@ -283,6 +285,12 @@ struct HomeView: View {
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
       await youtubeSubscriptions.refresh(using: youtubeAuth)
       await refreshYouTubeSubscriptionLiveness()
+    }
+    .onChange(of: scenePhase) { _, phase in
+      guard phase == .active else { return }
+      Task {
+        await auth.validateSessionIfNeeded()
+      }
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)

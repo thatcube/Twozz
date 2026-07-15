@@ -5,19 +5,16 @@ import Foundation
 struct TopShelfCredentials: Equatable {
     var clientID: String
     var accessToken: String
-    var refreshToken: String?
     var userID: String
 }
 
-/// Shares Twitch credentials between the main app and the Top Shelf extension
-/// through the App Group `UserDefaults` suite.
+/// Shares read-only Twitch credentials from the main app to Top Shelf through
+/// the App Group `UserDefaults` suite.
 ///
 /// The extension runs in a separate process and cannot see the app's in-memory
-/// auth state, so the app mirrors these credentials into the shared suite. The
-/// suite is the single source of truth: when the extension refreshes an expired
-/// access token it writes the new tokens back here, and the app reads them on
-/// its next launch. Keeping one store avoids refresh-token rotation conflicts
-/// between the two processes.
+/// auth state. Only the main app rotates refresh tokens: an extension can be
+/// terminated after Twitch spends a refresh token but before persistence, which
+/// would irrecoverably lose the replacement token.
 enum TopShelfCredentialStore {
     // Canonical key strings. `TwitchAuthSession` references these so the app and
     // the extension always read and write the same `UserDefaults` entries.
@@ -44,19 +41,8 @@ enum TopShelfCredentialStore {
         return TopShelfCredentials(
             clientID: clientID,
             accessToken: accessToken,
-            refreshToken: nonEmpty(defaults.string(forKey: refreshTokenKey)),
             userID: userID
         )
-    }
-
-    /// Persists refreshed access/refresh tokens (e.g. after the extension
-    /// refreshes an expired token) so the app adopts them on its next launch.
-    static func updateTokens(accessToken: String, refreshToken: String?) {
-        let defaults = defaults
-        defaults.set(accessToken, forKey: accessTokenKey)
-        if let refreshToken = nonEmpty(refreshToken) {
-            defaults.set(refreshToken, forKey: refreshTokenKey)
-        }
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

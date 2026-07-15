@@ -7,7 +7,16 @@ extension TwitchAuthSession {
         if !force, let accessToken {
             return accessToken
         }
+        return try await runTokenRefresh(rejectedAccessToken: nil)
+    }
 
+    /// Recovers from a 401 without needlessly rotating again when another process
+    /// has already published a replacement access token to the shared store.
+    func recoverAccessToken(afterUnauthorized rejectedAccessToken: String) async throws -> String {
+        try await runTokenRefresh(rejectedAccessToken: rejectedAccessToken)
+    }
+
+    private func runTokenRefresh(rejectedAccessToken: String?) async throws -> String {
         // Join an already-running refresh instead of starting a second one.
         // This is what stops the in-app services (followed channels, playback,
         // chat) from racing each other onto the same single-use refresh token.
@@ -16,22 +25,27 @@ extension TwitchAuthSession {
         }
 
         let task = Task { () throws -> String in
-            try await performTokenRefresh()
+            try await performTokenRefresh(rejectedAccessToken: rejectedAccessToken)
         }
         refreshInFlight = task
         defer { refreshInFlight = nil }
         return try await task.value
     }
 
-    private func performTokenRefresh() async throws -> String {
+    private func performTokenRefresh(rejectedAccessToken: String?) async throws -> String {
         guard let clientID else {
             throw TwitchAuthRefreshError.missingClientID
         }
 
-        // The Top Shelf extension shares — and independently rotates — this same
-        // refresh token via the App Group store, so always start from the
-        // freshest persisted value rather than a possibly-stale in-memory copy.
+        // Always start from the persisted source of truth. If the token that
+        // triggered a 401 has already been replaced, use the replacement instead
+        // of spending another refresh token.
         reloadTokensFromStore()
+        if let rejectedAccessToken,
+           let storedAccessToken = accessToken,
+           storedAccessToken != rejectedAccessToken {
+            return storedAccessToken
+        }
         guard let currentRefreshToken = refreshToken else {
             throw TwitchAuthRefreshError.missingRefreshToken
         }
@@ -41,11 +55,15 @@ extension TwitchAuthSession {
                 clientID: clientID, refreshToken: currentRefreshToken)
             return applyRefreshedTokens(token)
         } catch let error as TwitchAuthHTTPError where isInvalidRefreshError(error) {
-            // Another process (typically the Top Shelf extension) may have just
-            // rotated the token out from under us. Reload the shared store and,
-            // if it now holds a *different* refresh token, retry once before
-            // declaring the session dead.
+            // A concurrent app request may have published a replacement while
+            // this request was in flight. Reload once before declaring the
+            // session dead.
             reloadTokensFromStore()
+            if let rejectedAccessToken,
+               let storedAccessToken = accessToken,
+               storedAccessToken != rejectedAccessToken {
+                return storedAccessToken
+            }
             if let reloaded = refreshToken, reloaded != currentRefreshToken {
                 do {
                     let token = try await requestRefreshToken(
@@ -81,15 +99,102 @@ extension TwitchAuthSession {
         return token.accessToken
     }
 
-    /// Pulls the latest persisted tokens from the shared App Group store. Used
-    /// before refreshing so we don't spend a refresh token the Top Shelf
-    /// extension has already rotated.
+    /// Pulls the latest persisted tokens from the shared App Group store before
+    /// any refresh/recovery decision.
     private func reloadTokensFromStore() {
-        if let storedAccess = userDefaults.string(forKey: StorageKey.accessToken) {
-            accessToken = storedAccess
+        accessToken = userDefaults.string(forKey: StorageKey.accessToken)
+        refreshToken = userDefaults.string(forKey: StorageKey.refreshToken)
+    }
+
+    func startSessionValidation() {
+        guard clientIDValidationIssue == nil,
+              accessToken != nil || refreshToken != nil else { return }
+        startValidationLoop(validateImmediately: true)
+    }
+
+    func validateSessionIfNeeded(force: Bool = false) async {
+        guard clientIDValidationIssue == nil,
+              let expectedClientID = clientID else { return }
+
+        if !force,
+           let lastValidatedAt,
+           Date().timeIntervalSince(lastValidatedAt) < Self.validationInterval {
+            return
         }
-        if let storedRefresh = userDefaults.string(forKey: StorageKey.refreshToken) {
-            refreshToken = storedRefresh
+
+        let currentAccessToken: String
+        if let accessToken {
+            currentAccessToken = accessToken
+        } else {
+            do {
+                currentAccessToken = try await refreshAccessTokenIfNeeded(force: true)
+            } catch {
+                return
+            }
+        }
+
+        do {
+            let identity = try await requestValidatedIdentity(accessToken: currentAccessToken)
+            applyValidatedIdentity(identity, expectedClientID: expectedClientID)
+        } catch let error as TwitchAuthHTTPError where error.status == 401 {
+            do {
+                let recovered = try await recoverAccessToken(
+                    afterUnauthorized: currentAccessToken)
+                let identity = try await requestValidatedIdentity(accessToken: recovered)
+                applyValidatedIdentity(identity, expectedClientID: expectedClientID)
+            } catch let refreshError as TwitchAuthRefreshError {
+                if case .missingRefreshToken = refreshError {
+                    isAuthenticated = false
+                    errorMessage = "Session expired. Sign in again to reconnect Twitch."
+                }
+            } catch {
+                // Network and server failures are transient. Preserve credentials
+                // and retry validation on the next foreground/hourly check.
+            }
+        } catch {
+            // Validation is best-effort during transient network/server failures;
+            // never discard a session unless Twitch rejects its refresh token.
+        }
+    }
+
+    private func applyValidatedIdentity(
+        _ identity: OAuthValidateResponse,
+        expectedClientID: String
+    ) {
+        guard identity.clientID.caseInsensitiveCompare(expectedClientID) == .orderedSame else {
+            isAuthenticated = false
+            errorMessage =
+                "The saved Twitch session belongs to a different Twitch client. Restore the matching client configuration or sign in again."
+            return
+        }
+
+        userID = identity.userID
+        userLogin = identity.login
+        isAuthenticated = true
+        errorMessage = nil
+        let now = Date()
+        lastValidatedAt = now
+        userDefaults.set(identity.userID, forKey: StorageKey.userID)
+        userDefaults.set(identity.login, forKey: StorageKey.userLogin)
+        userDefaults.set(now, forKey: StorageKey.lastValidatedAt)
+    }
+
+    private func startValidationLoop(validateImmediately: Bool = false) {
+        validationTask?.cancel()
+        validationTask = Task { [weak self] in
+            if validateImmediately {
+                guard let self else { return }
+                await self.validateSessionIfNeeded(force: true)
+            }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(Self.validationInterval))
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                await self.validateSessionIfNeeded(force: true)
+            }
         }
     }
 
@@ -216,6 +321,10 @@ extension TwitchAuthSession {
         } else {
             userDefaults.removeObject(forKey: StorageKey.profileImageURL)
         }
+        let now = Date()
+        lastValidatedAt = now
+        userDefaults.set(now, forKey: StorageKey.lastValidatedAt)
+        startValidationLoop()
     }
 
     private func requestDeviceCode(clientID: String) async throws -> DeviceCodeResponse {

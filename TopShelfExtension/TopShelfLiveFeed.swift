@@ -19,10 +19,8 @@ enum TopShelfLiveFeed {
         credentials: TopShelfCredentials,
         recommended: TopShelfSnapshot.Section?
     ) async -> [TopShelfSnapshot.Section]? {
-        var credentials = credentials
-
         // Following · Live now — direct, personalised, always current.
-        guard let followingItems = try? await followedLive(&credentials) else {
+        guard let followingItems = try? await followedLive(credentials) else {
             return nil
         }
 
@@ -43,7 +41,7 @@ enum TopShelfLiveFeed {
         if let recommended {
             let primaryLogins = Set(primaryItems.map { $0.login.lowercased() })
             let ids = recommended.items.map(\.id)
-            if let liveStreams = try? await liveStreams(forUserIDs: ids, &credentials) {
+            if let liveStreams = try? await liveStreams(forUserIDs: ids, credentials) {
                 let items = liveStreams
                     .filter { !primaryLogins.contains($0.userLogin.lowercased()) }
                     .prefix(maxItemsPerSection)
@@ -66,7 +64,7 @@ enum TopShelfLiveFeed {
     // MARK: - Endpoints
 
     private static func followedLive(
-        _ credentials: inout TopShelfCredentials
+        _ credentials: TopShelfCredentials
     ) async throws -> [TopShelfSnapshot.Item] {
         var components = URLComponents(string: "\(helixBase)/streams/followed")!
         components.queryItems = [
@@ -74,13 +72,13 @@ enum TopShelfLiveFeed {
             URLQueryItem(name: "first", value: "\(maxItemsPerSection)")
         ]
 
-        let streams = try await getStreams(url: components.url!, &credentials)
+        let streams = try await getStreams(url: components.url!, credentials)
         return streams.filter { $0.type == "live" }.map(item(from:))
     }
 
     private static func liveStreams(
         forUserIDs ids: [String],
-        _ credentials: inout TopShelfCredentials
+        _ credentials: TopShelfCredentials
     ) async throws -> [Stream] {
         let capped = Array(Set(ids)).prefix(100)
         guard !capped.isEmpty else { return [] }
@@ -91,22 +89,18 @@ enum TopShelfLiveFeed {
             contentsOf: capped.map { URLQueryItem(name: "user_id", value: $0) }
         )
 
-        let streams = try await getStreams(url: components.url!, &credentials)
+        let streams = try await getStreams(url: components.url!, credentials)
         return streams.filter { $0.type == "live" }
     }
 
-    /// Performs a Helix GET, transparently refreshing the access token once on a
-    /// 401 (expired token) and retrying.
+    /// Performs a Helix GET with the access token last published by the main app.
+    /// On 401 the caller falls back to the cached shelf instead of letting this
+    /// short-lived extension process rotate the canonical refresh token.
     private static func getStreams(
         url: URL,
-        _ credentials: inout TopShelfCredentials
+        _ credentials: TopShelfCredentials
     ) async throws -> [Stream] {
-        do {
-            return try await decodeStreams(url: url, credentials: credentials)
-        } catch let error as HTTPError where error.status == 401 {
-            try await refreshToken(&credentials)
-            return try await decodeStreams(url: url, credentials: credentials)
-        }
+        try await decodeStreams(url: url, credentials: credentials)
     }
 
     private static func decodeStreams(
@@ -127,34 +121,6 @@ enum TopShelfLiveFeed {
         return try JSONDecoder().decode(StreamsEnvelope.self, from: data).data
     }
 
-    private static func refreshToken(_ credentials: inout TopShelfCredentials) async throws {
-        guard let refreshToken = credentials.refreshToken else { throw HTTPError(status: 401) }
-
-        var request = URLRequest(url: URL(string: "https://id.twitch.tv/oauth2/token")!)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let body = "client_id=\(encode(credentials.clientID))"
-            + "&grant_type=refresh_token"
-            + "&refresh_token=\(encode(refreshToken))"
-        request.httpBody = body.data(using: .utf8)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        guard (200...299).contains(status) else { throw HTTPError(status: status) }
-
-        let refreshed = try JSONDecoder().decode(RefreshResponse.self, from: data)
-        credentials.accessToken = refreshed.accessToken
-        if let newRefreshToken = refreshed.refreshToken {
-            credentials.refreshToken = newRefreshToken
-        }
-
-        // Persist for the app and future extension runs (single source of truth).
-        TopShelfCredentialStore.updateTokens(
-            accessToken: refreshed.accessToken,
-            refreshToken: refreshed.refreshToken ?? refreshToken
-        )
-    }
-
     // MARK: - Mapping
 
     private static func item(from stream: Stream) -> TopShelfSnapshot.Item {
@@ -171,10 +137,6 @@ enum TopShelfLiveFeed {
             thumbnailURL: URL(string: thumbnail),
             viewerCount: stream.viewerCount
         )
-    }
-
-    private static func encode(_ value: String) -> String {
-        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? value
     }
 
     // MARK: - Wire models
@@ -203,16 +165,6 @@ enum TopShelfLiveFeed {
 
     private struct StreamsEnvelope: Decodable {
         let data: [Stream]
-    }
-
-    private struct RefreshResponse: Decodable {
-        let accessToken: String
-        let refreshToken: String?
-
-        enum CodingKeys: String, CodingKey {
-            case accessToken = "access_token"
-            case refreshToken = "refresh_token"
-        }
     }
 
     private struct HTTPError: Error {

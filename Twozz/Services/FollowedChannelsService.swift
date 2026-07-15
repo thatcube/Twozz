@@ -151,7 +151,8 @@ final class FollowedChannelsService {
       isUsingDemoData = false
     } catch let error as TwitchHelixRequestError where error.status == 401 {
       do {
-        let refreshedAccessToken = try await auth.refreshAccessTokenIfNeeded(force: true)
+        let refreshedAccessToken = try await auth.recoverAccessToken(
+          afterUnauthorized: initialAccessToken)
         channels = try await fetcher.fetchLiveFollowedChannels(
           clientID: clientID,
           accessToken: refreshedAccessToken,
@@ -223,7 +224,8 @@ final class FollowedChannelsService {
       directoryLoadedAt = Date()
     } catch let error as TwitchHelixRequestError where error.status == 401 {
       do {
-        let refreshed = try await auth.refreshAccessTokenIfNeeded(force: true)
+        let refreshed = try await auth.recoverAccessToken(
+          afterUnauthorized: accessToken)
         directory = try await fetcher.fetchFollowingDirectory(
           clientID: clientID, accessToken: refreshed, userID: userID)
         directoryLoadedAt = Date()

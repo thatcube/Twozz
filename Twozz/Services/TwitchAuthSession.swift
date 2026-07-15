@@ -40,6 +40,9 @@ final class TwitchAuthSession {
     /// would each spend the same token and the loser would be rejected with
     /// `invalid_grant`, needlessly tearing down the session.
     var refreshInFlight: Task<String, Error>?
+    var validationTask: Task<Void, Never>?
+    var lastValidatedAt: Date?
+    static let validationInterval: TimeInterval = 60 * 60
 
     var clientID: String? {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: "TWITCH_CLIENT_ID") as? String else {
@@ -96,6 +99,7 @@ final class TwitchAuthSession {
         static let userLogin = PersistenceKey.twitchUserLogin
         static let userDisplayName = PersistenceKey.twitchUserDisplayName
         static let profileImageURL = PersistenceKey.twitchProfileImageURL
+        static let lastValidatedAt = PersistenceKey.twitchLastValidatedAt
     }
 
     /// One-time copy of any auth previously stored in `UserDefaults.standard`
@@ -122,19 +126,24 @@ final class TwitchAuthSession {
     }
 
     func restore() {
-        if let issue = clientIDValidationIssue {
-            clearStoredAuthState()
-            statusMessage = nil
-            errorMessage = issue
-            return
-        }
-
         accessToken = userDefaults.string(forKey: StorageKey.accessToken)
         refreshToken = userDefaults.string(forKey: StorageKey.refreshToken)
         userID = userDefaults.string(forKey: StorageKey.userID)
         userLogin = userDefaults.string(forKey: StorageKey.userLogin)
         userDisplayName = userDefaults.string(forKey: StorageKey.userDisplayName)
         profileImageURL = userDefaults.string(forKey: StorageKey.profileImageURL).flatMap(URL.init(string:))
+        lastValidatedAt = userDefaults.object(forKey: StorageKey.lastValidatedAt) as? Date
+
+        if let issue = clientIDValidationIssue {
+            // A locally misconfigured build must never destroy otherwise valid
+            // OAuth credentials. Keep them for the next correctly configured
+            // build, but do not advertise a usable session in this one.
+            isAuthenticated = false
+            statusMessage = nil
+            errorMessage = issue
+            return
+        }
+
         isAuthenticated = accessToken != nil && userID != nil
         statusMessage = nil
         errorMessage = nil
@@ -149,6 +158,8 @@ final class TwitchAuthSession {
     func signOut() {
         pollTask?.cancel()
         pollTask = nil
+        validationTask?.cancel()
+        validationTask = nil
 
         isAuthenticated = false
         isAuthenticating = false
@@ -158,6 +169,7 @@ final class TwitchAuthSession {
         userLogin = nil
         userDisplayName = nil
         profileImageURL = nil
+        lastValidatedAt = nil
         activationCode = nil
         verificationURI = nil
         verificationURIComplete = nil
@@ -171,6 +183,7 @@ final class TwitchAuthSession {
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
         userDefaults.removeObject(forKey: StorageKey.profileImageURL)
+        userDefaults.removeObject(forKey: StorageKey.lastValidatedAt)
 
         // Drop cached per-channel emote/badge/cheermote catalogs so a new
         // session starts clean rather than reusing the prior viewer's caches.
@@ -182,12 +195,15 @@ final class TwitchAuthSession {
     }
 
     func clearStoredAuthState() {
+        validationTask?.cancel()
+        validationTask = nil
         accessToken = nil
         refreshToken = nil
         userID = nil
         userLogin = nil
         userDisplayName = nil
         profileImageURL = nil
+        lastValidatedAt = nil
         isAuthenticated = false
         isAuthenticating = false
 
@@ -198,10 +214,13 @@ final class TwitchAuthSession {
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
         userDefaults.removeObject(forKey: StorageKey.profileImageURL)
+        userDefaults.removeObject(forKey: StorageKey.lastValidatedAt)
     }
 
     func percentEncode(_ text: String) -> String {
-        text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
+        let unreserved = CharacterSet(
+            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        return text.addingPercentEncoding(withAllowedCharacters: unreserved) ?? text
     }
 
     func normalizedOAuthMessage(_ message: String?) -> String? {
@@ -257,7 +276,8 @@ final class TwitchAuthSession {
         do {
             return try await operation(accessToken)
         } catch let error as TwitchAuthHTTPError where error.status == 401 {
-            let refreshedAccessToken = try await refreshAccessTokenIfNeeded(force: true)
+            let refreshedAccessToken = try await recoverAccessToken(
+                afterUnauthorized: accessToken)
             return try await operation(refreshedAccessToken)
         }
     }

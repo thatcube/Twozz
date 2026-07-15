@@ -28,6 +28,7 @@ enum PersistenceKey {
   static let twitchUserLogin = "twitch.auth.userLogin"
   static let twitchUserDisplayName = "twitch.auth.userDisplayName"
   static let twitchProfileImageURL = "twitch.auth.profileImageURL"
+  static let twitchLastValidatedAt = "twitch.auth.lastValidatedAt"
 
   // MARK: YouTube auth — shared App Group suite (`TopShelf.appGroupID`)
 

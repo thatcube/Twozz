@@ -159,12 +159,8 @@ struct StreamChannelCard: View {
     .twozzLiquidGlassCard(
       cornerRadius: layout.cardCornerRadius,
       isFocused: isFocused,
-      palette: palette,
-      glassWhenUnfocused: false
+      palette: palette
     )
-    // Flatten clips, overlays, and the media rim without rasterizing the live
-    // AVPlayer preview, which must stay in the compositor.
-    .compositingGroup()
     .shadow(
       color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? focusedShadowOpacity : 0),
       radius: layout.usesFocusedShadow ? CardMetrics.focusShadowRadius : 0,

@@ -18,6 +18,24 @@ struct TwozzLiquidGlassCardModifier: ViewModifier {
   /// everywhere else in the app.
   var glassWhenUnfocused: Bool = true
 
+  /// tvOS 27 can hang SwiftUI's main thread when `.glassEffect` wraps focusable
+  /// card content containing async images and text. Drawing glass on a clear
+  /// background underlay avoids that layout loop while preserving real refraction.
+  @available(tvOS 26.0, *)
+  private func glassUnderlay() -> some View {
+    let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    return Color.clear
+      .glassEffect(
+        isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
+        in: .rect(cornerRadius: cornerRadius)
+      )
+      .background {
+        if isFocused && palette.isLight {
+          shape.fill(palette.cardOpaqueSurface)
+        }
+      }
+  }
+
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
@@ -31,20 +49,13 @@ struct TwozzLiquidGlassCardModifier: ViewModifier {
           shape.strokeBorder(isFocused ? Color.clear : palette.cardOpaqueBorder, lineWidth: 1)
         }
         .clipShape(shape)
-    } else if #available(tvOS 26.0, *), isFocused || glassWhenUnfocused {
+    } else if #available(tvOS 26.0, *) {
       content
-        .glassEffect(
-          isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
-          in: .rect(cornerRadius: cornerRadius)
-        )
         .background {
-          // A focused card casts a drop shadow. In Light mode the translucent
-          // glass lets that shadow bleed *through* the surface, reading as a
-          // muddy haze inside the card instead of a clean lift. Give the focused
-          // Light-theme card an opaque backing so the shadow stays behind it.
-          // Dark/OLED don't show this, so they keep the pure translucent glass.
-          if isFocused && palette.isLight {
-            shape.fill(palette.cardOpaqueSurface)
+          if isFocused {
+            glassUnderlay()
+          } else if glassWhenUnfocused {
+            shape.fill(.ultraThinMaterial)
           }
         }
         .clipShape(shape)

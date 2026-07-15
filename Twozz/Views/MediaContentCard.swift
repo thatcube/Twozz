@@ -46,10 +46,8 @@ struct MediaContentCard: View {
     .twozzLiquidGlassCard(
       cornerRadius: cardCornerRadius,
       isFocused: isFocused,
-      palette: palette,
-      glassWhenUnfocused: false
+      palette: palette
     )
-    .compositingGroup()
     .shadow(
       color: Color.black.opacity(isFocused ? CardMetrics.focusShadowOpacity : 0),
       radius: CardMetrics.focusShadowRadius,

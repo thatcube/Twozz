@@ -41,10 +41,8 @@ struct CategoryCardView: View {
     .twozzLiquidGlassCard(
       cornerRadius: outerCornerRadius,
       isFocused: isFocused,
-      palette: palette,
-      glassWhenUnfocused: false
+      palette: palette
     )
-    .compositingGroup()
     .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
     .animation(AppLayout.focusScaleAnimation, value: isFocused)
     .accessibilityElement(children: .ignore)

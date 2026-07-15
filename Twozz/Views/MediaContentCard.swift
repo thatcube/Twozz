@@ -49,9 +49,11 @@ struct MediaContentCard: View {
       palette: palette
     )
     .shadow(
-      color: Color.black.opacity(isFocused ? CardMetrics.focusShadowOpacity : 0),
-      radius: CardMetrics.focusShadowRadius,
-      y: CardMetrics.focusShadowY
+      color: Color.black.opacity(
+        isFocused ? focusedShadowOpacity : CardMetrics.restingShadowOpacity
+      ),
+      radius: isFocused ? CardMetrics.focusShadowRadius : CardMetrics.restingShadowRadius,
+      y: isFocused ? CardMetrics.focusShadowY : CardMetrics.restingShadowY
     )
     .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
     .animation(AppLayout.focusScaleAnimation, value: isFocused)
@@ -151,5 +153,9 @@ struct MediaContentCard: View {
   private var usesLiftFocusedText: Bool {
     presentation == .framed
       && twozzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
+  }
+
+  private var focusedShadowOpacity: Double {
+    palette.isLight ? CardMetrics.focusShadowOpacityLight : CardMetrics.focusShadowOpacity
   }
 }

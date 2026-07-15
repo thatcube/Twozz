@@ -58,6 +58,14 @@ struct TwozzLiquidGlassCardModifier: ViewModifier {
             shape.fill(.ultraThinMaterial)
           }
         }
+        .overlay {
+          if !isFocused && glassWhenUnfocused {
+            shape.strokeBorder(
+              palette.cardOpaqueBorder.opacity(palette.isLight ? 1 : 0.55),
+              lineWidth: 1
+            )
+          }
+        }
         .clipShape(shape)
     } else {
       content

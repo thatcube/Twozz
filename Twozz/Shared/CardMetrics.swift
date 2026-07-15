@@ -105,6 +105,12 @@ enum CardMetrics {
   /// Focus shadow vertical offset.
   static let focusShadowY: CGFloat = 10
 
+  /// Subtle resting-card shadow used by framed cards for depth and Light-theme
+  /// separation. The theme-aware outer hairline provides Dark/OLED definition.
+  static let restingShadowOpacity: CGFloat = 0.15
+  static let restingShadowRadius: CGFloat = 8
+  static let restingShadowY: CGFloat = 4
+
   // MARK: - Avatars
 
   /// Channel avatar diameter in rail cards.

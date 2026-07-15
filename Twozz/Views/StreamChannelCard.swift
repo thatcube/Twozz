@@ -162,9 +162,9 @@ struct StreamChannelCard: View {
       palette: palette
     )
     .shadow(
-      color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? focusedShadowOpacity : 0),
-      radius: layout.usesFocusedShadow ? CardMetrics.focusShadowRadius : 0,
-      y: layout.usesFocusedShadow ? CardMetrics.focusShadowY : 0
+      color: Color.black.opacity(framedShadowOpacity),
+      radius: framedShadowRadius,
+      y: framedShadowY
     )
     .scaleEffect(isFocused ? focusScale : 1)
     .animation(AppLayout.focusScaleAnimation, value: isFocused)
@@ -308,6 +308,27 @@ struct StreamChannelCard: View {
   /// darkening tint, so the lift reads as a smudge rather than a float.
   private var focusedShadowOpacity: Double {
     palette.isLight ? CardMetrics.focusShadowOpacityLight : CardMetrics.focusShadowOpacity
+  }
+
+  private var framedShadowOpacity: Double {
+    if isFocused && layout.usesFocusedShadow {
+      return focusedShadowOpacity
+    }
+    return CardMetrics.restingShadowOpacity
+  }
+
+  private var framedShadowRadius: CGFloat {
+    if isFocused && layout.usesFocusedShadow {
+      return CardMetrics.focusShadowRadius
+    }
+    return CardMetrics.restingShadowRadius
+  }
+
+  private var framedShadowY: CGFloat {
+    if isFocused && layout.usesFocusedShadow {
+      return CardMetrics.focusShadowY
+    }
+    return CardMetrics.restingShadowY
   }
 
   @MainActor

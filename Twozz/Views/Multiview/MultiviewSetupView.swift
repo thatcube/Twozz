@@ -191,7 +191,7 @@ struct MultiviewSetupView: View {
         .padding(.horizontal, AppLayout.horizontalPadding)
 
       ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: rail.spacing) {
+        LazyHStack(spacing: rail.spacing) {
           ForEach(section.channels) { channel in
             tile(channel)
               .frame(width: rail.outerCardWidth)

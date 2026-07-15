@@ -553,7 +553,7 @@ struct ChannelPageView: View {
           .padding(.horizontal, AppLayout.horizontalPadding)
 
         ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: 22) {
+          LazyHStack(spacing: 22) {
             ForEach(recommendations) { channel in
               FocusableTile(
                 id: "rec-\(channel.id)",
@@ -653,7 +653,7 @@ struct ChannelPageView: View {
         .padding(.horizontal, AppLayout.horizontalPadding)
 
       ScrollView(.horizontal, showsIndicators: false) {
-        HStack(alignment: .top, spacing: 22) {
+        LazyHStack(alignment: .top, spacing: 22) {
           tiles()
         }
         .padding(.horizontal, AppLayout.horizontalPadding)

@@ -61,10 +61,14 @@ struct HomeView: View {
   @State private var youtubePlayback: YouTubePlaybackTarget?
   @AppStorage(YouTubePreferences.showSubscriptionsKey) private var showYouTubeSubscriptions = true
   @State private var refreshToast: RefreshToastState?
-  /// True once the app has actually been backgrounded, so the launch-time
-  /// `.inactive` → `.active` scene transition doesn't kick off a second load on
-  /// top of the initial `.task`.
-  @State private var hasBeenBackgrounded = false
+  /// True once the initial `.task` load has finished, so the launch-time
+  /// `.inactive` → `.active` scene transition can't race it with a second load.
+  /// Gating on this rather than on "was backgrounded" means every later
+  /// activation refreshes — including the screensaver's `.active` → `.inactive`
+  /// → `.active` cycle, which never reaches `.background` and would otherwise
+  /// leave overnight-stale cards up if the viewer started navigating right away
+  /// (their first move restamps the idle clock, so the watchdog wouldn't fire).
+  @State private var hasCompletedInitialLoad = false
   /// When the viewer last did anything on Home (moved focus, switched tabs,
   /// opened or closed a cover). Drives the idle auto-refresh so the rails never
   /// change under someone who is actually navigating. Held as a reference so
@@ -72,6 +76,9 @@ struct HomeView: View {
   /// without invalidating the view; only the idle watchdog reads it, never
   /// `body`.
   @State private var interactionClock = InteractionClock()
+  /// Serializes the rail refresh chain across all of its entry points. Also a
+  /// reference so tracking the in-flight chain never invalidates the view.
+  @State private var homeRefresh = HomeRefreshCoordinator()
   /// Mirrors `scenePhase` into `@State` so the long-lived idle watchdog reads a
   /// current value: its captured view copy can hold a stale `@Environment`.
   @State private var isForeground = true
@@ -299,27 +306,22 @@ struct HomeView: View {
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
       await youtubeSubscriptions.refresh(using: youtubeAuth)
       await refreshYouTubeSubscriptionLiveness()
+      hasCompletedInitialLoad = true
     }
     .task {
       await runIdleAutoRefreshLoop()
     }
     .onChange(of: scenePhase) { _, phase in
       isForeground = phase == .active
-      if phase == .background {
-        hasBeenBackgrounded = true
-        return
-      }
       guard phase == .active else { return }
       Task {
         await auth.validateSessionIfNeeded()
       }
-      // Coming back from the background — even a day later — must not leave
-      // stale cards on screen. Only after an actual background trip (so the
-      // launch-time `.inactive` → `.active` transition doesn't race the initial
-      // `.task` load), and unforced so each rail's staleness window keeps a
-      // quick app-switch free.
-      guard hasBeenBackgrounded else { return }
-      hasBeenBackgrounded = false
+      // Returning to the app — even a day later — must not leave stale cards on
+      // screen. Only once the initial load has finished (so this can't race it),
+      // and unforced so each rail's staleness window keeps a quick trip away
+      // free.
+      guard hasCompletedInitialLoad else { return }
       Task {
         await refreshHomeSections(force: false)
         await youtubeSubscriptions.refresh(using: youtubeAuth)
@@ -654,6 +656,9 @@ struct HomeView: View {
   /// Refresh button. Ignores taps while a refresh is already running.
   private func performManualRefresh() {
     guard refreshToast == nil else { return }
+    // Pressing an already-focused Refresh button doesn't move focus, so stamp
+    // the idle clock here too — the viewer is plainly present.
+    interactionClock.lastInteractionAt = Date()
     Task {
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = .refreshing }
       await refreshHomeSections(force: true)
@@ -723,11 +728,34 @@ struct HomeView: View {
     return Date().timeIntervalSince(interactionClock.lastInteractionAt) >= idleAutoRefreshDelay
   }
 
-  /// Refreshes every Home rail in one pass: followed channels and (anonymous)
-  /// recommendations concurrently, then personalized recommendations, which read
-  /// the freshly-loaded follows. Unforced, each rail honours its own staleness
-  /// window (`autoRefreshStaleInterval`).
+  /// Refreshes every Home rail, one chain at a time. Four paths can now start a
+  /// refresh — initial load, tab return, foreground, idle watchdog — plus the
+  /// header Refresh button, so overlap is genuinely reachable and each kind is
+  /// harmful: a second unforced chain would skip the in-flight follows fetch (on
+  /// its `isLoading` guard) and then build personalized recommendations from the
+  /// *old* follows, while a forced manual refresh bypasses those guards entirely
+  /// and can race a running fetch — last writer wins, so the older payload can
+  /// land while `lastUpdatedAt` is stamped anyway, suppressing auto-refresh for
+  /// another five minutes.
+  ///
+  /// Queuing rather than dropping keeps this simple and self-limiting: by the
+  /// time a queued chain runs, the one ahead of it has just refreshed, so its
+  /// staleness guards skip everything and it costs nothing.
   private func refreshHomeSections(force: Bool) async {
+    let previous = homeRefresh.inFlight
+    let chain = Task {
+      await previous?.value
+      await runHomeRefreshChain(force: force)
+    }
+    homeRefresh.inFlight = chain
+    await chain.value
+    if homeRefresh.inFlight == chain { homeRefresh.inFlight = nil }
+  }
+
+  /// Followed channels and (anonymous) recommendations are independent, so they
+  /// load concurrently. Personalized recommendations read `follows.channels`, so
+  /// they run only after the followed refresh resolves.
+  private func runHomeRefreshChain(force: Bool) async {
     async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: force)
     async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: force)
     await followedDone
@@ -907,6 +935,13 @@ struct HomeView: View {
 @MainActor
 final class InteractionClock {
   var lastInteractionAt = Date()
+}
+
+/// Serializes Home's rail refreshes. A reference type for the same reason as
+/// `InteractionClock`: `body` never reads it, so it must not invalidate.
+@MainActor
+final class HomeRefreshCoordinator {
+  var inFlight: Task<Void, Never>?
 }
 
 /// One multiview session launch — wraps the chosen roster so the cover can be

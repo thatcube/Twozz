@@ -53,6 +53,10 @@ struct HomeView: View {
   @State private var youtubePlayback: YouTubePlaybackTarget?
   @AppStorage(YouTubePreferences.showSubscriptionsKey) private var showYouTubeSubscriptions = true
   @State private var refreshToast: RefreshToastState?
+  /// True once the app has actually been backgrounded, so the launch-time
+  /// `.inactive` → `.active` scene transition doesn't kick off a second load on
+  /// top of the initial `.task`.
+  @State private var hasBeenBackgrounded = false
   /// "Top streams" — the most-viewed live channels (after the language filter),
   /// in viewer-count order, with only "Not interested" channels removed. Cached
   /// here and recomputed only when the source list or block list changes, so we
@@ -272,24 +276,32 @@ struct HomeView: View {
       goLive.notificationSettings = goLiveSettings
       goLive.start(using: auth)
       promptFirstLaunchSignInIfNeeded()
-      // Followed channels and (anonymous) recommendations are independent, so
-      // load them concurrently. Personalized recs read follows.channels, so they
-      // run after the followed refresh resolves.
-      async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: true)
-      async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: true)
-      await followedDone
-      recomputeLiveFollowed()
-      await recommendationsDone
-      await refreshPersonalizedIfNeeded(force: true)
+      await refreshHomeSections(force: true)
       requestFocusIfPossible(force: true)
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
       await youtubeSubscriptions.refresh(using: youtubeAuth)
       await refreshYouTubeSubscriptionLiveness()
     }
     .onChange(of: scenePhase) { _, phase in
+      if phase == .background {
+        hasBeenBackgrounded = true
+        return
+      }
       guard phase == .active else { return }
       Task {
         await auth.validateSessionIfNeeded()
+      }
+      // Coming back from the background — even a day later — must not leave
+      // stale cards on screen. Only after an actual background trip (so the
+      // launch-time `.inactive` → `.active` transition doesn't race the initial
+      // `.task` load), and unforced so each rail's staleness window keeps a
+      // quick app-switch free.
+      guard hasBeenBackgrounded else { return }
+      hasBeenBackgrounded = false
+      Task {
+        await refreshHomeSections(force: false)
+        await youtubeSubscriptions.refresh(using: youtubeAuth)
+        await refreshYouTubeSubscriptionLiveness()
       }
     }
     .onChange(of: follows.channels) { _, _ in
@@ -320,11 +332,7 @@ struct HomeView: View {
     .onChange(of: selectedSidebarTab) { _, tab in
       guard tab == .home else { return }
       Task {
-        async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: false)
-        async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: false)
-        await followedDone
-        await recommendationsDone
-        await refreshPersonalizedIfNeeded(force: false)
+        await refreshHomeSections(force: false)
       }
     }
     .onChange(of: deepLinkRouter.pendingChannelLogin) { _, login in
@@ -623,17 +631,25 @@ struct HomeView: View {
     guard refreshToast == nil else { return }
     Task {
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = .refreshing }
-      async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: true)
-      async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: true)
-      await followedDone
-      recomputeLiveFollowed()
-      await recommendationsDone
-      await refreshPersonalizedIfNeeded(force: true)
+      await refreshHomeSections(force: true)
       requestFocusIfPossible(force: true)
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = .done }
       try? await Task.sleep(for: .seconds(1.6))
       withAnimation(.easeOut(duration: 0.25)) { refreshToast = nil }
     }
+  }
+
+  /// Refreshes every Home rail in one pass: followed channels and (anonymous)
+  /// recommendations concurrently, then personalized recommendations, which read
+  /// the freshly-loaded follows. Unforced, each rail honours its own staleness
+  /// window (`autoRefreshStaleInterval`).
+  private func refreshHomeSections(force: Bool) async {
+    async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: force)
+    async let recommendationsDone: Void = refreshRecommendationsIfNeeded(force: force)
+    await followedDone
+    recomputeLiveFollowed()
+    await recommendationsDone
+    await refreshPersonalizedIfNeeded(force: force)
   }
 
   private func refreshFollowedChannelsIfNeeded(force: Bool) async {

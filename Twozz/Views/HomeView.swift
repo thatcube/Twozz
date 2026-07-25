@@ -8,6 +8,14 @@ struct HomeView: View {
   private var cardCornerRadius: CGFloat { CardMetrics.cardCornerRadius }
   private var mediaCornerRadius: CGFloat { CardMetrics.mediaCornerRadius }
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
+  /// How long Home must sit completely untouched — no focus movement, nothing
+  /// presented — before it refreshes itself. Deliberately much longer than
+  /// `autoRefreshStaleInterval` so browsing is never interrupted; the staleness
+  /// window then caps how often the idle refresh actually hits the network.
+  private let idleAutoRefreshDelay: TimeInterval = 10 * 60
+  /// How often the idle watchdog wakes to evaluate those conditions. Cheap (a
+  /// few comparisons); the real cadence comes from the two intervals above.
+  private let idleAutoRefreshTick: Duration = .seconds(60)
 
   @State private var selectedSidebarTab: SidebarTab = .home
 
@@ -57,6 +65,16 @@ struct HomeView: View {
   /// `.inactive` → `.active` scene transition doesn't kick off a second load on
   /// top of the initial `.task`.
   @State private var hasBeenBackgrounded = false
+  /// When the viewer last did anything on Home (moved focus, switched tabs,
+  /// opened or closed a cover). Drives the idle auto-refresh so the rails never
+  /// change under someone who is actually navigating. Held as a reference so
+  /// recording an interaction — which happens on every focus move — mutates it
+  /// without invalidating the view; only the idle watchdog reads it, never
+  /// `body`.
+  @State private var interactionClock = InteractionClock()
+  /// Mirrors `scenePhase` into `@State` so the long-lived idle watchdog reads a
+  /// current value: its captured view copy can hold a stale `@Environment`.
+  @State private var isForeground = true
   /// "Top streams" — the most-viewed live channels (after the language filter),
   /// in viewer-count order, with only "Not interested" channels removed. Cached
   /// here and recomputed only when the source list or block list changes, so we
@@ -282,7 +300,11 @@ struct HomeView: View {
       await youtubeSubscriptions.refresh(using: youtubeAuth)
       await refreshYouTubeSubscriptionLiveness()
     }
+    .task {
+      await runIdleAutoRefreshLoop()
+    }
     .onChange(of: scenePhase) { _, phase in
+      isForeground = phase == .active
       if phase == .background {
         hasBeenBackgrounded = true
         return
@@ -303,6 +325,9 @@ struct HomeView: View {
         await youtubeSubscriptions.refresh(using: youtubeAuth)
         await refreshYouTubeSubscriptionLiveness()
       }
+    }
+    .onChange(of: interactionSignature) { _, _ in
+      interactionClock.lastInteractionAt = Date()
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)
@@ -639,6 +664,65 @@ struct HomeView: View {
     }
   }
 
+  /// True while any full-screen cover is up (player, channel page, multiview,
+  /// sign-in). The idle watchdog stays out of the way while one is presented,
+  /// and dismissing one counts as an interaction.
+  private var isPresentingCover: Bool {
+    selectedChannel != nil || channelPageTarget != nil || multiviewLaunch != nil
+      || youtubePlayback != nil || showSignIn || showYouTubeSignIn
+  }
+
+  /// Everything that means the viewer is actively using Home. Any change resets
+  /// the idle clock, so browsing — even slowly — always defers the auto-refresh.
+  /// A small `Equatable` value rather than a joined string: this is evaluated on
+  /// every body pass, so it must not allocate.
+  private struct InteractionSignature: Equatable {
+    let focus: String?
+    let tab: SidebarTab
+    let depth: Int
+    let presentingCover: Bool
+    let presentingDirectory: Bool
+  }
+
+  private var interactionSignature: InteractionSignature {
+    InteractionSignature(
+      focus: focusedItemID,
+      tab: selectedSidebarTab,
+      depth: homePath.count,
+      presentingCover: isPresentingCover,
+      presentingDirectory: showingFollowingDirectory)
+  }
+
+  /// Keeps a long-idle Home from going stale in place. Once nothing has been
+  /// touched for `idleAutoRefreshDelay`, refreshes unforced — so
+  /// `autoRefreshStaleInterval` decides whether a network call is actually
+  /// needed and caps how often one happens while the idle continues. Silent by
+  /// design: no toast and no focus restore, so the only visible effect is cards
+  /// quietly becoming current.
+  ///
+  /// The one-minute tick costs a handful of comparisons and does not keep the
+  /// Apple TV awake (only `isIdleTimerDisabled` and active playback do that);
+  /// tvOS suspends the app — and this loop with it — when it sleeps, and the
+  /// `scenePhase` handler covers the resume.
+  private func runIdleAutoRefreshLoop() async {
+    while !Task.isCancelled {
+      try? await Task.sleep(for: idleAutoRefreshTick)
+      guard !Task.isCancelled else { return }
+      guard canIdleAutoRefresh else { continue }
+      await refreshHomeSections(force: false)
+      await refreshYouTubeSubscriptionLiveness()
+    }
+  }
+
+  private var canIdleAutoRefresh: Bool {
+    guard isForeground else { return false }
+    guard selectedSidebarTab == .home, homePath.isEmpty else { return false }
+    guard !isPresentingCover, !showingFollowingDirectory else { return false }
+    // A manual refresh is already running.
+    guard refreshToast == nil else { return false }
+    return Date().timeIntervalSince(interactionClock.lastInteractionAt) >= idleAutoRefreshDelay
+  }
+
   /// Refreshes every Home rail in one pass: followed channels and (anonymous)
   /// recommendations concurrently, then personalized recommendations, which read
   /// the freshly-loaded follows. Unforced, each rail honours its own staleness
@@ -816,6 +900,14 @@ struct HomeView: View {
 }
 
 // MARK: - Home presentation helpers
+
+/// Records when Home was last touched, for the idle auto-refresh. A reference
+/// type so `HomeView` can stamp it on every focus move without triggering a
+/// SwiftUI invalidation — nothing in `body` reads it.
+@MainActor
+final class InteractionClock {
+  var lastInteractionAt = Date()
+}
 
 /// One multiview session launch — wraps the chosen roster so the cover can be
 /// presented with `fullScreenCover(item:)`, which (unlike `isPresented` plus a

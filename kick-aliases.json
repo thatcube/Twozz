@@ -1,14 +1,9 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-01T09:46:48.195Z",
+  "generatedAt": "2026-08-01T08:19:57.453Z",
   "source": "ci-models",
-  "aliasCount": 6,
+  "aliasCount": 1,
   "map": {
-    "happytamatyan": "tamachan",
-    "shuteye_orange": "shuteye",
-    "sneakylol": "sneaky",
-    "takemi_tv": "takemikazuchi",
-    "whynomental": "whynot",
     "zackrawrr": "asmongold"
   }
 }

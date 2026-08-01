@@ -1,19 +1,9 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-01T09:38:32.828Z",
+  "generatedAt": "2026-08-01T08:10:40.925Z",
   "source": "ci-models",
-  "streamerCount": 186,
+  "streamerCount": 48,
   "map": {
-    "9qoq": [
-      "ubica",
-      "redcs",
-      "hypedcs_",
-      "shaker",
-      "sbolttt",
-      "fissure_cs_b",
-      "fringplays",
-      "zec4w"
-    ],
     "aceu": [
       "iitztimmy",
       "tsm_imperialhal"
@@ -29,67 +19,9 @@
       "tubbo",
       "ranboo"
     ],
-    "alderiate": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "alfrea": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "aloneleet": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "alveussanctuary": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
     "amouranth": [
       "xqc",
       "trainwreckstv"
-    ],
-    "anastaze": [
-      "redcs",
-      "hypedcs_",
-      "shaker",
-      "sbolttt",
-      "fissure_cs_b",
-      "9qoq",
-      "fringplays",
-      "zec4w"
-    ],
-    "artuux2": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "kiilanie",
-      "benjamin_bucks"
     ],
     "austinshow": [
       "ludwig",
@@ -98,174 +30,10 @@
       "nmplol",
       "willneff"
     ],
-    "autodestruction": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "awfdota": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "bbbb87": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "bebahan": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "benjamin_bucks": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "blslan": [
-      "leenza522",
-      "kingdefender_",
-      "rprx",
-      "zark",
-      "lina_meow_girl",
-      "cxrngee"
-    ],
-    "bolt_ru": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "brizz94": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "cabramaravilla": [
-      "jankos",
-      "kaysan",
-      "dantes",
-      "riotgames",
-      "lolesportstw",
-      "lolesportsla",
-      "stylishnoob4",
-      "theburntpeanut_247"
-    ],
-    "caedrel": [
-      "jankos",
-      "kaysan",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "brizz94",
-      "mfreak00"
-    ],
-    "chopperinho": [
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "haemhype",
-      "szelioficjalnie",
-      "zonixxcs",
-      "redcs",
-      "fissure_cs_a"
-    ],
     "clix": [
       "ninja",
       "sypherpk",
       "nickeh30"
-    ],
-    "crayator": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "croissantstrike": [
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie",
-      "zonixxcs",
-      "redcs"
-    ],
-    "crystalst": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "cxrngee": [
-      "leenza522",
-      "kingdefender_",
-      "blslan",
-      "rprx",
-      "zark",
-      "lina_meow_girl"
-    ],
-    "davideeez": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "des0ut": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
     ],
     "disguisedtoast": [
       "pokimane",
@@ -274,153 +42,17 @@
       "fuslie",
       "quarterjade"
     ],
-    "dracon": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "dragneel_fh": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "dumble_jay": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "eccobladee2k": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47",
-      "takemi_tv"
-    ],
-    "editedbyhaz": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "el_yuste": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "emily_parr1": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
     "emiru": [
       "mizkif",
       "ludwig",
       "qtcinderella",
       "pokimane"
     ],
-    "enc": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "entych": [
-      "jankos",
-      "kaysan",
-      "dantes",
-      "riotgames",
-      "lolesportstw",
-      "lolesportsla",
-      "stylishnoob4",
-      "theburntpeanut_247"
-    ],
     "esfandtv": [
       "mizkif",
       "xqc",
       "nmplol",
       "sodapoppin"
-    ],
-    "f1ashko": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "fissure_cs_a": [
-      "hypetried",
-      "kaysan",
-      "jerry256cs2",
-      "never_loses"
-    ],
-    "fissure_cs_b": [
-      "ubica",
-      "redcs",
-      "hypedcs_",
-      "shaker",
-      "sbolttt",
-      "9qoq",
-      "fringplays",
-      "zec4w"
-    ],
-    "forsexs": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "fringplays": [
-      "ubica",
-      "redcs",
-      "hypedcs_",
-      "shaker",
-      "sbolttt",
-      "fissure_cs_b",
-      "9qoq",
-      "zec4w"
     ],
     "fuslie": [
       "pokimane",
@@ -429,155 +61,16 @@
       "quarterjade",
       "disguisedtoast"
     ],
-    "g0bbba": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "ghostik": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47",
-      "takemi_tv"
-    ],
-    "gohamedia": [
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie",
-      "benjamin_bucks"
-    ],
-    "gundi_abi": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "haemhype": [
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "croissantstrike",
-      "szelioficjalnie",
-      "zonixxcs",
-      "redcs"
-    ],
     "hasanabi": [
       "xqc",
       "ludwig",
       "austinshow",
       "willneff"
     ],
-    "hello_kiko": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "honeyliciousss": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "hypedcs_": [
-      "ubica",
-      "redcs",
-      "shaker",
-      "sbolttt",
-      "fissure_cs_b",
-      "9qoq",
-      "fringplays",
-      "zec4w"
-    ],
-    "hypetried": [
-      "fissure_cs_a",
-      "kaysan",
-      "jerry256cs2",
-      "never_loses"
-    ],
-    "ibai": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "icebergdoto": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
     "iitztimmy": [
       "aceu",
       "tsm_imperialhal",
       "genburten"
-    ],
-    "jankos": [
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "japanesekoreanug": [
-      "k4sen",
-      "theburntpeanut_247",
-      "lolesportstw",
-      "riotgames",
-      "cabramaravilla",
-      "dantes",
-      "lolesportsla",
-      "stylishnoob4"
-    ],
-    "jerry256cs2": [
-      "hypetried",
-      "fissure_cs_a",
-      "kaysan",
-      "never_loses"
-    ],
-    "joeykaotyk": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
     ],
     "jschlatt": [
       "ludwig",
@@ -586,181 +79,15 @@
       "slimecicle",
       "charborg"
     ],
-    "justhatemeeecatq": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "rxnexus",
-      "noctisak47",
-      "takemi_tv"
-    ],
-    "jynxzi": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "karsalol": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "kaysan": [
-      "hypetried",
-      "fissure_cs_a",
-      "jerry256cs2",
-      "never_loses"
-    ],
-    "kiilanie": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "benjamin_bucks"
-    ],
-    "kingdefender_": [
-      "leenza522",
-      "blslan",
-      "rprx",
-      "zark",
-      "lina_meow_girl",
-      "cxrngee"
-    ],
-    "kingmemo": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "kirali_neon": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "knig04ei": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "kotvsapogege": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "kuchentv": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
     "kyedae": [
       "tenz",
       "tarik",
       "valkyrae"
     ],
-    "lakelzth": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "lapizarradeandres": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "leenza522": [
-      "kingdefender_",
-      "blslan",
-      "rprx",
-      "zark",
-      "lina_meow_girl",
-      "cxrngee"
-    ],
-    "lina_meow_girl": [
-      "leenza522",
-      "kingdefender_",
-      "blslan",
-      "rprx",
-      "zark",
-      "cxrngee"
-    ],
     "lirik": [
       "summit1g",
       "sodapoppin",
       "anthonyz"
-    ],
-    "lolesportsla": [
-      "riotgames",
-      "lolesportstw",
-      "jankos",
-      "skyyart",
-      "caedrel",
-      "otplol_",
-      "never_loses"
-    ],
-    "lolesportstw": [
-      "riotgames",
-      "lolesportsla",
-      "jankos",
-      "skyyart",
-      "caedrel",
-      "otplol_",
-      "never_loses"
-    ],
-    "lota": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
     ],
     "ludwig": [
       "squeex",
@@ -771,48 +98,10 @@
       "aimsey",
       "mizkif"
     ],
-    "m3wsu": [
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie",
-      "zonixxcs",
-      "redcs",
-      "fissure_cs_a"
-    ],
-    "mahoune": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
     "masayoshi": [
       "quarterjade",
       "sykkuno",
       "fuslie"
-    ],
-    "mfreak00": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin"
-    ],
-    "mikasa_th": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
     ],
     "mizkif": [
       "xqc",
@@ -827,44 +116,6 @@
       "ludwig",
       "charlie"
     ],
-    "mrdaburud": [
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47",
-      "takemi_tv"
-    ],
-    "nenormova": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "nervarien": [
-      "jankos",
-      "kaysan",
-      "dantes",
-      "riotgames",
-      "lolesportstw",
-      "lolesportsla",
-      "stylishnoob4",
-      "theburntpeanut_247"
-    ],
-    "never_loses": [
-      "caedrel",
-      "otplol_",
-      "jankos",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
     "nickeh30": [
       "sypherpk",
       "ninja",
@@ -876,100 +127,12 @@
       "nickeh30",
       "clix"
     ],
-    "nitenightkid": [
-      "jankos",
-      "kaysan",
-      "dantes",
-      "riotgames",
-      "lolesportstw",
-      "lolesportsla",
-      "stylishnoob4",
-      "theburntpeanut_247"
-    ],
-    "nkt_01": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
     "nmplol": [
       "mizkif",
       "xqc",
       "sodapoppin",
       "malena",
       "esfandtv"
-    ],
-    "noctisak47": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "takemi_tv"
-    ],
-    "os_new": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "otplol_": [
-      "caedrel",
-      "jankos",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00",
-      "brizz94"
-    ],
-    "pablogaming13": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "pandorelol": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "pepe_the_rarest": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "santinght",
-      "artuux2",
-      "kiilanie",
-      "benjamin_bucks"
-    ],
-    "pgl_dota2": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
     ],
     "ph1lza": [
       "wilbursoot",
@@ -985,26 +148,6 @@
       "fuslie",
       "quarterjade",
       "emiru"
-    ],
-    "qbaxa": [
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "croissantstrike",
-      "haemhype",
-      "szelioficjalnie",
-      "zonixxcs"
-    ],
-    "qrushcsgo": [
-      "m3wsu",
-      "titaanitv",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie",
-      "zonixxcs",
-      "redcs",
-      "fissure_cs_a"
     ],
     "qtcinderella": [
       "ludwig",
@@ -1033,186 +176,11 @@
       "ph1lza",
       "wilbursoot"
     ],
-    "redcs": [
-      "ubica",
-      "hypedcs_",
-      "shaker",
-      "sbolttt",
-      "fissure_cs_b",
-      "9qoq",
-      "fringplays",
-      "zec4w"
-    ],
-    "riotgames": [
-      "lolesportstw",
-      "lolesportsla",
-      "jankos",
-      "skyyart",
-      "caedrel",
-      "otplol_",
-      "never_loses"
-    ],
-    "roman": [
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "croissantstrike",
-      "haemhype",
-      "szelioficjalnie",
-      "qbaxa"
-    ],
-    "rprx": [
-      "leenza522",
-      "kingdefender_",
-      "blslan",
-      "zark",
-      "lina_meow_girl",
-      "cxrngee"
-    ],
-    "ru_top": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "rxnexus": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "noctisak47",
-      "takemi_tv"
-    ],
-    "samueletienne": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "santadoto": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "santinght": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "artuux2",
-      "kiilanie",
-      "benjamin_bucks"
-    ],
-    "sbolttt": [
-      "ubica",
-      "redcs",
-      "hypedcs_",
-      "shaker",
-      "fissure_cs_b",
-      "9qoq",
-      "fringplays",
-      "zec4w"
-    ],
-    "sebo": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "seucreysonreborn": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "shaker": [
-      "ubica",
-      "redcs",
-      "hypedcs_",
-      "sbolttt",
-      "fissure_cs_b",
-      "9qoq",
-      "fringplays",
-      "zec4w"
-    ],
-    "shantaeedag": [
-      "gohamedia",
-      "wizzy1232",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie",
-      "benjamin_bucks"
-    ],
-    "shredr": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
     "shroud": [
       "summit1g",
       "tarik",
       "tenz",
       "pokimane"
-    ],
-    "shuteye_orange": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "skyyart": [
-      "caedrel",
-      "otplol_",
-      "jankos",
-      "never_loses",
-      "tolkin",
-      "mfreak00"
-    ],
-    "slayproxx": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
     ],
     "slime": [
       "ludwig",
@@ -1227,35 +195,6 @@
       "wilbursoot",
       "tubbo",
       "charborg"
-    ],
-    "slipix": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
-    "sneakylol": [
-      "jankos",
-      "kaysan",
-      "dantes",
-      "riotgames",
-      "lolesportstw",
-      "lolesportsla",
-      "stylishnoob4",
-      "theburntpeanut_247"
-    ],
-    "snessh": [
-      "mrdaburud",
-      "whynomental",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47",
-      "takemi_tv"
     ],
     "sodapoppin": [
       "mizkif",
@@ -1272,29 +211,11 @@
       "willneff",
       "aimsey"
     ],
-    "starkycast": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
     "summit1g": [
       "shroud",
       "lirik",
       "sodapoppin",
       "anthonyz"
-    ],
-    "syaruru3": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
     ],
     "sykkuno": [
       "pokimane",
@@ -1308,46 +229,6 @@
       "ninja",
       "nickeh30",
       "clix"
-    ],
-    "syslov171": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "szelioficjalnie": [
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "croissantstrike",
-      "haemhype",
-      "zonixxcs",
-      "redcs"
-    ],
-    "tabula": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "takemi_tv": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
     ],
     "tarik": [
       "tenz",
@@ -1366,44 +247,6 @@
       "shroud",
       "sentinels"
     ],
-    "thetremba": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "thijihiguri": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "titaanitv": [
-      "m3wsu",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie",
-      "zonixxcs",
-      "redcs",
-      "fissure_cs_a"
-    ],
-    "tolkin": [
-      "caedrel",
-      "otplol_",
-      "jankos",
-      "never_loses",
-      "skyyart",
-      "mfreak00"
-    ],
     "tommyinnit": [
       "tubbo",
       "ranboo",
@@ -1417,15 +260,6 @@
       "mizkif",
       "sodapoppin"
     ],
-    "traytonlol": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
     "tubbo": [
       "tommyinnit",
       "ranboo",
@@ -1434,56 +268,16 @@
       "quackity",
       "slimecicle"
     ],
-    "tupa_b0r0v": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
     "tyler1": [
       "yassuo",
       "loltyler1",
       "iwilldominate"
-    ],
-    "ubica": [
-      "redcs",
-      "hypedcs_",
-      "shaker",
-      "sbolttt",
-      "fissure_cs_b",
-      "9qoq",
-      "fringplays",
-      "zec4w"
     ],
     "valkyrae": [
       "pokimane",
       "sykkuno",
       "fuslie",
       "disguisedtoast"
-    ],
-    "vanotica_": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "benjamin_bucks"
-    ],
-    "whynomental": [
-      "mrdaburud",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47",
-      "takemi_tv"
     ],
     "wilbursoot": [
       "ph1lza",
@@ -1499,35 +293,6 @@
       "slime",
       "austinshow"
     ],
-    "wizzy1232": [
-      "gohamedia",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie",
-      "benjamin_bucks"
-    ],
-    "wxcdota": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
-    "xnapycz": [
-      "jankos",
-      "caedrel",
-      "otplol_",
-      "never_loses",
-      "skyyart",
-      "tolkin",
-      "mfreak00"
-    ],
     "xqc": [
       "trainwreckstv",
       "nmplol",
@@ -1536,97 +301,9 @@
       "sodapoppin",
       "esfandtv"
     ],
-    "yaneher": [
-      "mrdaburud",
-      "whynomental",
-      "snessh",
-      "ghostik",
-      "eccobladee2k",
-      "justhatemeeecatq",
-      "rxnexus",
-      "noctisak47"
-    ],
     "yassuo": [
       "tyler1",
       "iwilldominate"
-    ],
-    "ynlgeo": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "yulia_pinko": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie",
-      "benjamin_bucks"
-    ],
-    "zark": [
-      "leenza522",
-      "kingdefender_",
-      "blslan",
-      "rprx",
-      "lina_meow_girl",
-      "cxrngee"
-    ],
-    "zawa_prod": [
-      "jynxzi",
-      "jerry256cs2",
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "haemhype",
-      "szelioficjalnie"
-    ],
-    "zec4w": [
-      "ubica",
-      "redcs",
-      "hypedcs_",
-      "shaker",
-      "sbolttt",
-      "fissure_cs_b",
-      "9qoq",
-      "fringplays"
-    ],
-    "zenzonicch1": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
-    ],
-    "zonixxcs": [
-      "m3wsu",
-      "titaanitv",
-      "qrushcsgo",
-      "chopperinho",
-      "croissantstrike",
-      "haemhype",
-      "szelioficjalnie",
-      "qbaxa"
-    ],
-    "zuriisis": [
-      "gohamedia",
-      "wizzy1232",
-      "shantaeedag",
-      "yulia_pinko",
-      "pepe_the_rarest",
-      "santinght",
-      "artuux2",
-      "kiilanie"
     ]
   }
 }

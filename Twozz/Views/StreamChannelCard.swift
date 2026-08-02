@@ -95,6 +95,11 @@ struct StreamChannelCard: View {
   var layout: Layout = .grid()
   var focusScale: CGFloat = AppLayout.focusedCardScale
   var showsGameName: Bool = false
+  /// Optional decoration drawn on the thumbnail itself, sized to its exact frame
+  /// and handed its resolved corner radius. Lets a caller (the multiview picker's
+  /// selection ring and pick-order badge) hug the poster without having to guess
+  /// the card's internal geometry, which differs per presentation.
+  var mediaOverlay: ((CGFloat) -> AnyView)? = nil
   /// When provided, a press-and-hold context menu exposes "Watch".
   var onWatch: ((FollowedChannel) -> Void)? = nil
   /// When provided, a press-and-hold context menu exposes "Go to Channel".
@@ -286,6 +291,11 @@ struct StreamChannelCard: View {
       focusScale: focusScale,
       isFocused: presentation == .poster && isFocused
     )
+    .overlay {
+      if let mediaOverlay {
+        mediaOverlay(activeMediaCornerRadius)
+      }
+    }
     .animation(.easeOut(duration: 0.22), value: livePreviewOpacity)
   }
 

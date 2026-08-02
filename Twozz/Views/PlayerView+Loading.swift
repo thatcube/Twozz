@@ -428,6 +428,33 @@ extension PlayerView {
     lastOfflineProbeAt = Date.distantPast
   }
 
+  /// Catch a live stream back up to the edge when the app returns from the
+  /// background.
+  ///
+  /// tvOS suspends the app moments after you leave it: playback stops where it
+  /// stood and the item's playlist goes stale. Coming back, AVPlayer picks up
+  /// from that same point, so a viewer who was following live is now as far
+  /// behind the broadcast as their trip lasted — while the transport still reads
+  /// LIVE, because `pinnedToLive` (an intent, not a measurement) never changed.
+  /// The drift watchdog can't rescue it either: it measures against the seekable
+  /// tail, which went stale along with the playlist, so the gap it sees stays
+  /// small even minutes behind real live.
+  ///
+  /// A fresh item is the only thing that re-fetches the playlist and lands back
+  /// at the true edge — the same reason scrubbing back to live reloads rather
+  /// than seeks — and the proxy retains history across the swap, so the rewind
+  /// window survives. A viewer who deliberately rewound (not pinned) or paused is
+  /// left exactly where they were.
+  func handleReturnToForeground() {
+    guard let leftAt = backgroundedAt else { return }
+    backgroundedAt = nil
+    guard Date().timeIntervalSince(leftAt) >= liveResumeCatchUpSeconds else { return }
+    guard !isVOD, pinnedToLive, !isUserPaused, !isScrubbing else { return }
+    guard !isLoading, !isOffline, errorMessage == nil, !isUsingAltSource else { return }
+    if showLatencyDiagnostics { logDiagnosticsEvent("live resync (foreground)") }
+    reloadToLiveEdge()
+  }
+
   func triggerRecoveryIfAllowed(reason: String) {
     guard !isRecoveringPlayback else { return }
     let now = Date()

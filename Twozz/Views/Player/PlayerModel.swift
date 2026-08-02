@@ -236,6 +236,11 @@ final class PlayerModel {
   var latencyTask: Task<Void, Never>?
   var playbackWatchdogTask: Task<Void, Never>?
   var rateControlTask: Task<Void, Never>?
+
+  /// When the app last entered the background, or `nil` while it's in the
+  /// foreground. Drives the live-edge catch-up on return; see
+  /// `PlayerView.handleReturnToForeground()`.
+  var backgroundedAt: Date?
 }
 
 extension PlayerView {
@@ -586,5 +591,9 @@ extension PlayerView {
   var rateControlTask: Task<Void, Never>? {
     get { model.rateControlTask }
     nonmutating set { model.rateControlTask = newValue }
+  }
+  var backgroundedAt: Date? {
+    get { model.backgroundedAt }
+    nonmutating set { model.backgroundedAt = newValue }
   }
 }

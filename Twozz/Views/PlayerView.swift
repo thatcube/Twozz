@@ -503,6 +503,10 @@ struct PlayerView: View {
   let liveResyncCooldownSeconds: Double = 6
   /// After this many resync seeks fail to hold the edge, escalate to a full reload.
   let maxLiveResyncAttempts = 3
+  /// A trip out of the app shorter than this leaves the playhead close enough to
+  /// live that catching up isn't worth a rebuffer; anything longer means the
+  /// viewer came back that far behind the broadcast.
+  let liveResumeCatchUpSeconds: Double = 5
   let stallNotificationDebounceSeconds: Double = 2.5
   /// Stream-stability watchdog. It counts destabilizing events — stalls plus
   /// involuntary backward playhead jumps (an AVPlayer rewind we never request) —

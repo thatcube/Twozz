@@ -428,31 +428,27 @@ extension PlayerView {
     lastOfflineProbeAt = Date.distantPast
   }
 
-  /// Catch a live stream back up to the edge when the app returns from the
-  /// background.
+  /// Stop claiming the live edge when the app returns from the background.
   ///
   /// tvOS suspends the app moments after you leave it: playback stops where it
-  /// stood and the item's playlist goes stale. Coming back, AVPlayer picks up
-  /// from that same point, so a viewer who was following live is now as far
-  /// behind the broadcast as their trip lasted — while the transport still reads
-  /// LIVE, because `pinnedToLive` (an intent, not a measurement) never changed.
-  /// The drift watchdog can't rescue it either: it measures against the seekable
-  /// tail, which went stale along with the playlist, so the gap it sees stays
-  /// small even minutes behind real live.
+  /// stood, so you come back exactly as far behind the broadcast as your trip
+  /// lasted. Nothing noticed. `pinnedToLive` is an intent — it stays set while
+  /// the player follows live and only the viewer's own rewinding clears it — so
+  /// the transport kept reading LIVE a minute behind the broadcast.
   ///
-  /// A fresh item is the only thing that re-fetches the playlist and lands back
-  /// at the true edge — the same reason scrubbing back to live reloads rather
-  /// than seeks — and the proxy retains history across the swap, so the rewind
-  /// window survives. A viewer who deliberately rewound (not pinned) or paused is
-  /// left exactly where they were.
+  /// We deliberately do **not** seek forward: coming back to exactly where you
+  /// left off is the useful behaviour (nothing is skipped, and the transport
+  /// offers the catch-up whenever you want it). Dropping the pin is what makes
+  /// the readout honest, and it also keeps the drift watchdog — which only
+  /// chases the edge while pinned — from quietly catching up on its own.
   func handleReturnToForeground() {
     guard let leftAt = backgroundedAt else { return }
     backgroundedAt = nil
-    guard Date().timeIntervalSince(leftAt) >= liveResumeCatchUpSeconds else { return }
+    guard Date().timeIntervalSince(leftAt) >= liveResumeBehindThresholdSeconds else { return }
     guard !isVOD, pinnedToLive, !isUserPaused, !isScrubbing else { return }
-    guard !isLoading, !isOffline, errorMessage == nil, !isUsingAltSource else { return }
-    if showLatencyDiagnostics { logDiagnosticsEvent("live resync (foreground)") }
-    reloadToLiveEdge()
+    if showLatencyDiagnostics { logDiagnosticsEvent("left live edge (resumed behind)") }
+    pinnedToLive = false
+    updateRewindReadout()
   }
 
   func triggerRecoveryIfAllowed(reason: String) {
@@ -1075,7 +1071,12 @@ extension PlayerView {
       return policy.minPlaybackRate + (1.0 - policy.minPlaybackRate) * fraction
     }
 
-    if policy.enablesGentleCatchUp,
+    // Catch-up chases the live edge, so it must only run while the viewer is
+    // actually following it. Off the edge — a deliberate rewind, or a resume
+    // that came back behind the broadcast — the gap is where the viewer wants
+    // to be, and creeping them forward at 1.12× would silently erase it over
+    // the next few minutes. The anti-stall arm above stays unconditional.
+    if policy.enablesGentleCatchUp, pinnedToLive,
       let gap = liveEdgeLatencySeconds, gap > policy.catchUpThresholdSeconds,
       let buffer = bufferAheadSeconds(player.currentItem),
       buffer > policy.catchUpHealthyBufferSeconds {

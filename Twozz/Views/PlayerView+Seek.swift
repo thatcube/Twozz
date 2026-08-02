@@ -66,10 +66,11 @@ extension PlayerView {
   /// in-progress VOD, so the two read as a single continuous timeline.
   private func updateLiveSessionReadout() {
     rewindReadout.isVOD = false
+    let atLive = isFollowingLiveEdge
     guard streamRewindEnabled, let window = currentSeekWindow() else {
       rewindReadout.update(
         positionFraction: 1, behindLiveSeconds: 0, windowSeconds: 0,
-        isPaused: isUserPaused, isAtLiveEdge: true)
+        isPaused: isUserPaused, isAtLiveEdge: atLive)
       return
     }
     // Full-broadcast timeline when the in-progress VOD is known: place the playhead
@@ -85,7 +86,7 @@ extension PlayerView {
         let raw = scrubTargetSeconds ?? CMTimeGetSeconds(player.currentItem?.currentTime() ?? .zero)
         let offset = raw.isFinite ? max(0, raw) : 0
         currentWallClock = broadcastStart.addingTimeInterval(offset)
-      } else if pinnedToLive, !isUserPaused {
+      } else if atLive {
         currentWallClock = now
       } else {
         let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
@@ -93,8 +94,6 @@ extension PlayerView {
       }
       let elapsed = min(max(currentWallClock.timeIntervalSince(broadcastStart), 0), total)
       let behind = max(total - elapsed, 0)
-      // Only the true live edge (playing live and pinned) reads as LIVE.
-      let atLive = !isVOD && pinnedToLive && !isUserPaused
       rewindReadout.update(
         positionFraction: elapsed / total,
         behindLiveSeconds: behind,
@@ -112,7 +111,7 @@ extension PlayerView {
     // the viewer can reach is `liveCap` (a few seconds behind the true edge), so
     // even mid-swipe, once they're back at that cap we show LIVE — it is as live as
     // playback can get — instead of a residual "-0:04".
-    if pinnedToLive, !isUserPaused {
+    if atLive {
       rewindReadout.update(
         positionFraction: 1, behindLiveSeconds: 0, windowSeconds: span,
         isPaused: false, isAtLiveEdge: true)
@@ -129,6 +128,29 @@ extension PlayerView {
       windowSeconds: span,
       isPaused: isUserPaused,
       isAtLiveEdge: false)
+  }
+
+  /// True when the playhead is genuinely at the live edge.
+  ///
+  /// `pinnedToLive` alone is only an *intent*: it says the player is following
+  /// live and is cleared solely by the viewer's own rewinding, so it keeps
+  /// claiming LIVE through anything that strands the playhead behind without
+  /// asking — most obviously the app being suspended in the background, where
+  /// playback simply stops and resumes a trip's worth behind the broadcast. So
+  /// corroborate the intent against the measured distance to the seekable tail,
+  /// and let the transport show the honest "-M:SS" whenever the two disagree.
+  ///
+  /// The measurement uses the same intended position the readout renders
+  /// (`scrubTargetSeconds` while a jog is in flight), so scrubbing back to the
+  /// live cap still reads LIVE immediately rather than flickering the real,
+  /// segment-quantized playhead's residual gap while the seek lands.
+  var isFollowingLiveEdge: Bool {
+    guard !isVOD, pinnedToLive, !isUserPaused else { return false }
+    // No seekable window yet (a stream that hasn't published one, or playback
+    // still starting): nothing to contradict the intent with, so trust it.
+    guard let window = currentSeekWindow() else { return true }
+    let position = scrubTargetSeconds.map { min(max($0, window.start), window.end) } ?? window.now
+    return isNearLiveEdge(position, in: window)
   }
 
   /// True when the playhead/target sits close enough to the live edge to be

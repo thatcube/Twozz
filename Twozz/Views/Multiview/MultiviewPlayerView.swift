@@ -65,8 +65,11 @@ struct MultiviewPlayerView: View {
   }
 
   private var addableChannels: [FollowedChannel] {
-    let present = Set(controller.panes.map(\.id))
-    return availableChannels.filter { $0.isLive && !present.contains($0.id) }
+    // Keyed on `channelKey`, not `id`: a streamer already on screen can appear
+    // in the pool under a different id (see `FollowedChannel.channelKey`) and
+    // would otherwise still be offered.
+    let present = Set(controller.panes.map(\.channel.channelKey))
+    return availableChannels.filter { $0.isLive && !present.contains($0.channelKey) }
   }
 
   var body: some View {

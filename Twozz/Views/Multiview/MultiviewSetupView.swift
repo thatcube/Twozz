@@ -40,12 +40,15 @@ struct MultiviewSetupView: View {
   private var cardSize: StreamCardSize { StreamCardSize.resolve(streamCardSizeRaw) }
 
   /// Live channels per section, deduped so a channel that appears in several
-  /// pools is only offered once (in its highest-priority section).
+  /// pools is only offered once (in its highest-priority section). Keyed on
+  /// `channelKey`, not `id` — the pools carry different kinds of id for the same
+  /// streamer, so keying on `id` offered them twice and let you pick the same
+  /// stream into two panes.
   private var resolvedSections: [MultiviewChannelSection] {
     var seen = Set<String>()
     var result: [MultiviewChannelSection] = []
     for section in sections {
-      let live = section.channels.filter { $0.isLive && seen.insert($0.id).inserted }
+      let live = section.channels.filter { $0.isLive && seen.insert($0.channelKey).inserted }
       if !live.isEmpty {
         result.append(MultiviewChannelSection(id: section.id, title: section.title, channels: live))
       }

@@ -131,7 +131,13 @@ final class MultiviewController {
   private(set) var primaryPaneID: String?
 
   init(channels: [FollowedChannel]) {
-    self.panes = channels.prefix(multiviewPaneLimit).map(MultiviewPane.init)
+    // Dedupe on `channelKey` rather than `id`: the same streamer arrives with a
+    // different `id` depending on which pool they came from (see
+    // `FollowedChannel.channelKey`), so an unfiltered selection could open the
+    // very same stream in two panes.
+    var seen = Set<String>()
+    let unique = channels.filter { seen.insert($0.channelKey).inserted }
+    self.panes = unique.prefix(multiviewPaneLimit).map(MultiviewPane.init)
     self.primaryPaneID = panes.first?.id
   }
 
@@ -199,7 +205,9 @@ final class MultiviewController {
   @discardableResult
   func addPane(_ channel: FollowedChannel) -> String? {
     guard canAddPane else { return nil }
-    guard !panes.contains(where: { $0.id == channel.id }) else { return nil }
+    guard !panes.contains(where: { $0.channel.channelKey == channel.channelKey }) else {
+      return nil
+    }
     let pane = MultiviewPane(channel: channel)
     panes.append(pane)
     load(pane)

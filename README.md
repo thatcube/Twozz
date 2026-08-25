@@ -5,7 +5,7 @@
 <h1 align="center">Twozz</h1>
 
 <p align="center">
-  A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
+  Watch Twitch on your Apple TV, chat and all — a chat-first big-screen viewer with native 7TV, BTTV, and FFZ emotes.
 </p>
 
 <p align="center">
@@ -14,193 +14,159 @@
   <a href="https://github.com/sponsors/thatcube"><img src="https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white" alt="Donate" /></a>
 </p>
 
+Twozz brings Twitch to the living room the way it should be: the stream and the
+chat, side by side, on the big screen. It's built for the Apple TV remote and
+the tvOS focus engine — not a stretched phone app — and it shows chat the way
+your favorite streamers actually look, with the third-party emotes Twitch itself
+doesn't render. It's free, open source, and has no ads, no paywall, and no
+account of its own.
+
 ## Features
 
-Sign in & navigation:
+### Watch
 
-- Sign in with Twitch using the Device Code flow (approve on your phone or browser); tokens are stored securely and refresh automatically.
-- Four tabs: Home, Browse, Search, and Settings.
+- **Chat beside the video.** Live streams play with the video on the left and a
+  chat pane on the right, so you never have to choose between watching and
+  reading along.
+- **Low latency by default.** A low-latency mode closes most of the gap to the
+  live edge, so you're not minutes behind the moment.
+- **Rewind live.** Seek back within the live window (DVR) to catch what you
+  missed without leaving the stream.
+- **Pick your quality.** Choose Auto or an explicit resolution, ordered
+  highest-to-lowest, and Twozz remembers your choice.
+- **Audio-only mode.** Drop to audio with a reactive visualizer — handy for
+  music streams, Just Chatting, or background listening.
+- **Sleep timer.** Set a timer or "end of stream," with a gentle "still
+  watching?" check, a starry sleeping screen, and one press to snap back to the
+  live edge.
+- **VODs and clips.** Watch past broadcasts and top clips from channel pages;
+  VODs include synced chat replay and variable speed (0.5×–2×).
+- **Multi-view.** Watch several live channels at once, picked from your follows
+  and recommendations.
+- **Live captions (beta).** Optional on-device captions for streams, with size,
+  position, and styling controls.
 
-Home & discovery:
+### Chat
 
-- Home shows the channels you follow that are live now, plus recommendations.
-- Optional personalized recommendations built from on-device watch history and your followed categories — or anonymous trending when you're signed out or have it turned off.
-- Browse top categories and the live streams within them.
-- Search channels and categories with live results.
-- Channel pages with top clips, past broadcasts (VODs), and similar channels.
-- Apple TV Top Shelf surfaces your live follows and recommendations on the tvOS home screen.
+- **Third-party emotes, built in.** 7TV, BTTV, and FFZ emotes (global and
+  channel, including animated ones) render right alongside Twitch's native, sub,
+  and channel emotes.
+- **Badges and bits.** Global and channel badges plus cheermotes are shown just
+  like they are on the web.
+- **Read anonymously, or chat when signed in.** Chat connects anonymously by
+  default and auto-reconnects; sign in to send messages.
+- **Make chat yours.** Adjust text and emote size, font (including
+  OpenDyslexic), spacing, width, and layout — side, overlay, or glass.
+- **Live moments surfaced.** Polls, predictions, hype trains, creator goals, and
+  incoming/outgoing raids appear as calm, display-only overlays.
+- **Simulcast chat merge (experimental).** When a streamer you're watching is
+  also live on YouTube or Kick, their chats can be merged into a single pane.
 
-Playback:
+### Discover
 
-- Live playback on real Apple TV hardware, with a side-by-side layout: video on the left, chat pane on the right.
-- Quality picker with persistence (`Auto` + explicit qualities), ordered highest-to-lowest.
-- Low-latency mode (on by default) that closes most of the gap to the live edge.
-- Stream rewind (DVR): seek back within the live window.
-- Audio-only mode with a reactive audio visualizer — handy for music, just-chatting, or background listening.
-- Custom bottom overlay controls built for the tvOS focus engine.
-- Sleep timer tucked inside the quality menu (timed or "end of stream") with a "still watching?" check, an animated starry "Sleeping" screen, and one-press resume that snaps back to the live edge.
-- VOD and clip playback from channel pages; VODs include synced chat replay and variable speed (0.5×–2×).
-- Optional diagnostics overlay for latency and buffer stats.
+- **Home built around your follows.** See the channels you follow that are live
+  now, plus recommendations.
+- **Recommendations you control.** Optional personalized picks built from
+  on-device watch history and your followed categories — or anonymous trending
+  when you're signed out or have it turned off.
+- **Browse and search.** Explore top categories and their live streams, and
+  search channels and categories with live results.
+- **Channel pages.** Top clips, past broadcasts, and similar channels for every
+  channel.
+- **Top Shelf.** Your live follows and recommendations surface on the tvOS home
+  screen above the app icon.
+- **YouTube, too.** Connect a YouTube account to see your subscribed streamers
+  who are live and watch YouTube-only streams; streamers live on both platforms
+  show up as one combined card.
 
-Chat:
+### Make it comfortable
 
-- Anonymous read via Twitch IRC over WebSocket, with auto-reconnect.
-- Send messages when signed in.
-- Twitch badges (global + channel-specific) and cheermotes (bits).
-- Emotes: Twitch native (incl. channel/sub), 7TV, BTTV, and FFZ (global + channel), including animated emotes.
-- Extensive chat appearance controls: text and emote size, font (including OpenDyslexic), spacing, width, and layout (side / overlay / glass).
-- Incoming and outgoing raid banners.
-- Live polls, predictions, hype trains, and creator goals surfaced as passive, display-only overlays.
-- "Just went live" toast for followed channels, with one tap to switch over.
-- Experimental: merge a YouTube live chat into the Twitch chat pane.
+- **Themes.** System, Dark, OLED, and Light.
+- **Night Shift.** An optional warm screen wash that eases in after sunset on a
+  solar or manual schedule.
+- **Tune the grid.** Adjustable stream-card sizes and a stream-language filter.
 
-Appearance:
+## Getting started
 
-- Themes: System, Dark, OLED, and Light.
-- Adjustable stream-card sizes and a stream-language filter.
+Twozz is an early, non-commercial project and isn't on the App Store. To run it
+you'll build it yourself from source with Xcode and your own Twitch developer
+`client_id`. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full setup.
 
-## Tech Stack
+You'll want:
 
-- Swift / SwiftUI targeting tvOS.
-- AVPlayer-backed playback with custom overlay controls and an in-process low-latency HLS proxy.
-- Twitch EventSub / Hermes for real-time raids, polls, predictions, and live events.
-- A Top Shelf app extension for the tvOS home screen.
-- XcodeGen project generation (`project.yml` is source of truth).
+- An Apple TV running **tvOS 18 or newer** (live playback and Top Shelf need
+  real hardware).
+- A Twitch account, if you want to sign in — browsing and anonymous chat work
+  without one.
 
-## Build & Run
+## Reporting bugs & requesting features
 
-Prerequisites:
+Found a bug or have an idea? Please open a
+[GitHub issue](https://github.com/thatcube/Twozz/issues). Including your Apple TV
+model, tvOS version, and the stream where something went wrong helps a lot. See
+**[CONTRIBUTING.md](CONTRIBUTING.md)** for details.
 
-- macOS with Xcode installed.
-- Homebrew tools:
+## Contributing & development
 
-```bash
-brew install xcodegen xcbeautify xcode-build-server
-```
-
-Generate the project:
-
-```bash
-xcodegen generate
-```
-
-Build:
-
-```bash
-xcodebuild \
-	-project Twozz.xcodeproj \
-	-scheme Twozz \
-	-configuration Debug \
-	-destination 'generic/platform=tvOS Simulator' \
-	build | xcbeautify
-```
-
-For real Apple TV deployment, use a valid signing team and a device destination.
-
-## Twitch Auth Setup (No Committed Secrets)
-
-Twitch device auth still needs a Twitch app `client_id`, but you do not need to commit it to this repo.
-
-1. Copy [Config/TwitchSecrets.xcconfig.local.example](Config/TwitchSecrets.xcconfig.local.example) to `Config/TwitchSecrets.xcconfig.local`.
-2. Set your value:
-
-```xcconfig
-TWITCH_CLIENT_ID = your_real_client_id
-```
-
-Important:
-
-- Do not use Twitch's public web client ID (for example `kimne78kx3ncx6brgo4mv6wki5h1ko`).
-- If you do, the consent page will show "Twilight" and followed-channel APIs may fail.
-- Create your own Twitch app in the Twitch Developer Console and use that Client ID.
-
-`Config/TwitchSecrets.xcconfig.local` is gitignored (`*.xcconfig.local`), so your ID stays local.
-
-### Working in git worktrees
-
-Because the secrets file is gitignored, it does **not** exist in freshly created
-worktrees. After making a new worktree, run the bootstrap helper from inside it:
-
-```bash
-./tools/bootstrap-worktree.sh
-```
-
-This copies `Config/TwitchSecrets.xcconfig.local` from your primary checkout and
-regenerates the Xcode project. Without it, builds fail with
-"Missing Twitch client ID".
-
-On Apple TV, sign-in uses Twitch Device Code flow: start sign-in on TV, then complete approval on your phone/browser (including the Twitch mobile app browser flow) using the shown code/link.
-
-## Versioning & Releases
-
-Twozz follows the standard Apple two-number scheme, and both numbers update
-automatically — you should not normally edit version numbers by hand:
-
-- **Marketing version** — `CFBundleShortVersionString`, a semver like `0.2.0`,
-  defined by `MARKETING_VERSION` in `project.yml`. It bumps one **minor** per
-  feature merged into `main`. The [`version-bump`](.github/workflows/version-bump.yml)
-  GitHub Actions workflow runs on every push to `main`, runs
-  [`tools/bump-version.sh`](tools/bump-version.sh) (minor +1, patch → 0), and
-  commits the change back to `main` with a `[skip ci]` marker. Bot pushes don't
-  retrigger Actions, so the bump can't loop.
-- **Build number** — `CFBundleVersion`, a monotonic integer derived from
-  `git rev-list --count HEAD` by the `postBuildScripts` in `project.yml` (the app
-  and the Top Shelf extension are kept in lockstep). It is set at build time and
-  never hand-edited.
-
-Manual bump (e.g. a major release): run `tools/bump-version.sh` or edit
-`MARKETING_VERSION` in `project.yml`, then `xcodegen generate`.
-
-Releases ship to TestFlight with fastlane using an App Store Connect API key:
-
-```bash
-cp .env.fastlane.example .env.fastlane   # fill in ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH
-fastlane beta --env fastlane             # archive a Release build + upload to TestFlight
-```
-
-`.env.fastlane` and the `.p8` key are gitignored — never commit them. Other
-lanes: `fastlane build` (archive only, no upload), `fastlane release`,
-`fastlane metadata`.
-
-## How Playback Works
-
-Apple TV has no official Twitch playback SDK. Twozz resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.
-
-This project is non-commercial and ad-respecting.
-
-## Not Supported: Auto-Redeeming Channel Points
-
-Twozz won't auto-claim channel points (the way the 7TV/FFZ browser extensions do). Twitch's official login that Twozz uses isn't accepted by the private API that claims points — that API only trusts a real twitch.tv web-session login. Supporting it would mean adding a second login where you type your Twitch password into the app and storing a full-account session token, plus fighting Twitch's anti-bot checks. It's also against Twitch's Terms of Service. Not worth the security risk and fragility, so we're not doing it.
-
-## Not Supported: Follow / Unfollow Actions
-
-Twozz can show who you follow, but Twitch now blocks follow/unfollow mutations from this app context with integrity checks. Because of that Twitch-side restriction, Twozz does not expose follow/unfollow controls — use the official Twitch app or website to change follows.
-
-## Ideas & Improvements
-
-A running list of things we're considering but haven't built yet:
-
-- **Multi-view & Picture-in-Picture** — watch two streams at once, or shrink the player to a corner while you browse for the next channel.
-- **SharePlay watch-together** — sync playback (and a shared reaction layer) over FaceTime; a social differentiator unique to the Apple ecosystem.
-- **Moderator mode** — timeout / ban / delete and a mod-action log from the couch for users who mod.
-- **Chat keyword highlights + mention ping** — client-side highlighting for keywords and your username in busy chats.
-- **Freeze-chat-on-focus** — pause autoscroll while you're reading so it doesn't fight you.
-- **Siri & deep search** — "Play _channel_ on Twozz" and system-Search results that jump straight into playback.
-- **Per-channel memory** — remember preferred quality, chat width, and audio-only state per channel.
-- **Deeper accessibility** — VoiceOver labels for chat lines and cards, and a captions toggle where available.
+Build instructions, the Twitch auth setup, how playback is resolved, versioning,
+and release steps all live in **[CONTRIBUTING.md](CONTRIBUTING.md)**. Notes on
+the low-latency playback work are in
+[`docs/low-latency.md`](docs/low-latency.md).
 
 ## Donate
 
-Twozz is free and open source, and it always will be. There's no paywall, no ads, and no obligation to give anything.
+Twozz is free and open source, and it always will be. There's no paywall, no
+ads, and no obligation to give anything.
 
-If the app has been useful to you and you'd like to chip in toward its upkeep — things like the Apple Developer Program fee and time spent maintaining it — donations are welcome and genuinely appreciated. Anything is plenty, and not donating is completely fine too.
+If the app has been useful to you and you'd like to chip in toward its upkeep —
+things like the Apple Developer Program fee and time spent maintaining it —
+donations are welcome and genuinely appreciated. Anything is plenty, and not
+donating is completely fine too.
 
-[![Donate](https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/thatcube)
+**[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time
+or recurring, whatever suits you.
 
-**[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time or recurring, whatever suits you.
+## Credits
+
+Twozz is an unofficial, non-commercial Twitch client. It is **not affiliated
+with, endorsed by, or sponsored by** Twitch Interactive, Inc. or Amazon. Twitch
+is a trademark of its owner.
+
+Third-party emote support is provided through the public [7TV](https://7tv.app),
+[BetterTTV](https://betterttv.com), and [FrankerFaceZ](https://www.frankerfacez.com)
+services, and belongs to them.
 
 ## License
 
 [MIT](LICENSE) © 2026 thatcube
 
-Not affiliated with or endorsed by Twitch Interactive, Inc.
+<!-- app-family:start -->
+<!-- Generated by https://github.com/thatcube/brando — edit apps.json there, not this block. -->
+
+---
+
+<p align="center"><b>More open source from Brandon</b></p>
+
+<p align="center">
+  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/hozz.svg" width="48" height="48" alt="Hozz" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives — iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/mozz.svg" width="48" height="48" alt="Mozz" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" width="48" height="48" alt="Plozz" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/twozz.svg" width="48" height="48" alt="Twozz" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/thatcube/hozz"><b>Hozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Mozz"><b>Mozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Plozz"><b>Plozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Twozz"><b>Twozz</b></a>
+</p>
+
+<p align="center">
+  <a href="https://brando.page">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thatcube/brando/main/logos/brando-white.svg" />
+      <img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/brando-black.svg" height="22" alt="Brandon Moore" />
+    </picture>
+  </a>
+</p>
+<!-- app-family:end -->

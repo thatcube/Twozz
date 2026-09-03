@@ -65,8 +65,11 @@ struct MultiviewPlayerView: View {
   }
 
   private var addableChannels: [FollowedChannel] {
-    let present = Set(controller.panes.map(\.id))
-    return availableChannels.filter { $0.isLive && !present.contains($0.id) }
+    // Keyed on `channelKey`, not `id`: a streamer already on screen can appear
+    // in the pool under a different id (see `FollowedChannel.channelKey`) and
+    // would otherwise still be offered.
+    let present = Set(controller.panes.map(\.channel.channelKey))
+    return availableChannels.filter { $0.isLive && !present.contains($0.channelKey) }
   }
 
   var body: some View {
@@ -621,28 +624,45 @@ private struct MultiviewPaneTile: View {
     .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
   }
 
-  /// Focused-pane metadata: name, game, and the shared live/viewer badge. Sits
-  /// over the video on a dark scrim, so white content stays legible in every
-  /// theme and with Reduce Transparency on (the scrim is opaque, not theme-tinted).
+  /// Focused-pane metadata. Carries the same information, in the same order, as
+  /// a Home card's caption — avatar, streamer, stream title, game, and the
+  /// shared live/viewer badge — so a pane reads like the card the viewer picked
+  /// it from rather than a different, thinner summary. Sits over the video on a
+  /// dark scrim, so white content stays legible in every theme and with Reduce
+  /// Transparency on (the scrim is opaque, not theme-tinted). The filmstrip's
+  /// compact tiles keep only the streamer and the badge — there is no room for
+  /// the rest at that size.
   private var metadataPill: some View {
-    VStack(alignment: .leading, spacing: style == .compact ? 2 : 4) {
-      Text(pane.channel.displayName)
-        .font(style == .compact ? .subheadline.weight(.semibold) : .headline)
-        .foregroundStyle(.white)
-        .lineLimit(1)
+    HStack(alignment: .top, spacing: CardMetrics.avatarTextSpacing) {
+      avatar
 
-      if style == .full, !pane.channel.gameName.isEmpty {
-        Text(pane.channel.gameName)
-          .font(.subheadline)
-          .foregroundStyle(.white.opacity(0.8))
+      VStack(alignment: .leading, spacing: CardMetrics.captionLineSpacing) {
+        Text(pane.channel.displayName)
+          .font(style == .compact ? .subheadline.weight(.semibold) : .headline)
+          .foregroundStyle(.white)
           .lineLimit(1)
-      }
 
-      LiveBadge(
-        isLive: pane.channel.isLive,
-        viewerCount: pane.channel.viewerCount,
-        prominent: style == .full
-      )
+        if style == .full {
+          Text(pane.channel.title.isEmpty ? "No title" : pane.channel.title)
+            .font(.subheadline)
+            .foregroundStyle(.white.opacity(0.85))
+            .lineLimit(1)
+
+          if !pane.channel.gameName.isEmpty {
+            Text(pane.channel.gameName)
+              .font(.footnote)
+              .foregroundStyle(.white.opacity(0.7))
+              .lineLimit(1)
+          }
+        }
+
+        LiveBadge(
+          isLive: pane.channel.isLive,
+          viewerCount: pane.channel.combinedViewerCount,
+          prominent: style == .full
+        )
+        .padding(.top, style == .compact ? 0 : 2)
+      }
     }
     .padding(.horizontal, style == .compact ? 10 : 14)
     .padding(.vertical, style == .compact ? 7 : 10)
@@ -652,6 +672,20 @@ private struct MultiviewPaneTile: View {
         : AnyShapeStyle(.regularMaterial),
       in: RoundedRectangle(cornerRadius: 12, style: .continuous)
     )
+    // Cap the pill so a long stream title truncates instead of stretching it
+    // across the whole pane.
+    .frame(maxWidth: style == .compact ? 260 : 520, alignment: .leading)
+  }
+
+  /// The channel avatar, matching the cards' circular treatment.
+  private var avatar: some View {
+    CachedAsyncImage(url: pane.channel.profileImageURL) { image in
+      image.resizable().scaledToFill()
+    } placeholder: {
+      Circle().fill(Color.white.opacity(0.18))
+    }
+    .frame(width: style == .compact ? 26 : 44, height: style == .compact ? 26 : 44)
+    .clipShape(Circle())
   }
 }
 

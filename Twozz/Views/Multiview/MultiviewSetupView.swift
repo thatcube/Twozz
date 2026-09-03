@@ -40,12 +40,15 @@ struct MultiviewSetupView: View {
   private var cardSize: StreamCardSize { StreamCardSize.resolve(streamCardSizeRaw) }
 
   /// Live channels per section, deduped so a channel that appears in several
-  /// pools is only offered once (in its highest-priority section).
+  /// pools is only offered once (in its highest-priority section). Keyed on
+  /// `channelKey`, not `id` — the pools carry different kinds of id for the same
+  /// streamer, so keying on `id` offered them twice and let you pick the same
+  /// stream into two panes.
   private var resolvedSections: [MultiviewChannelSection] {
     var seen = Set<String>()
     var result: [MultiviewChannelSection] = []
     for section in sections {
-      let live = section.channels.filter { $0.isLive && seen.insert($0.id).inserted }
+      let live = section.channels.filter { $0.isLive && seen.insert($0.channelKey).inserted }
       if !live.isEmpty {
         result.append(MultiviewChannelSection(id: section.id, title: section.title, channels: live))
       }
@@ -218,25 +221,13 @@ struct MultiviewSetupView: View {
       isFocused: isFocused,
       layout: .grid(),
       focusScale: 1,
-      showsGameName: true
-    )
-    .overlay(alignment: .topTrailing) {
-      Group {
-        if let order {
-          selectionBadge(order: order + 1)
-        } else {
-          selectionPlaceholder
-        }
-      }
-      .padding(20)
-    }
-    .overlay {
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .strokeBorder(
-          isSelected ? selectionColor : Color.clear,
-          lineWidth: 4
+      showsGameName: true,
+      mediaOverlay: { cornerRadius in
+        AnyView(
+          selectionDecoration(order: order, isSelected: isSelected, cornerRadius: cornerRadius)
         )
-    }
+      }
+    )
     .opacity(dimmed ? 0.4 : 1)
     .scaleEffect(isFocused ? 1.04 : 1)
     .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -254,6 +245,27 @@ struct MultiviewSetupView: View {
             ? "Selected, position \((order ?? 0) + 1). Click to remove."
             : "Click to add to multiview")
     )
+  }
+
+  /// The pick-order badge and selection ring, drawn on the card's thumbnail so
+  /// they share its exact bounds and corner radius. Hanging them off the whole
+  /// card instead would ring the caption too and, in the borderless "Posters"
+  /// presentation, miss the artwork's radius entirely.
+  private func selectionDecoration(
+    order: Int?, isSelected: Bool, cornerRadius: CGFloat
+  ) -> some View {
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+      .strokeBorder(isSelected ? selectionColor : Color.clear, lineWidth: 4)
+      .overlay(alignment: .topTrailing) {
+        Group {
+          if let order {
+            selectionBadge(order: order + 1)
+          } else {
+            selectionPlaceholder
+          }
+        }
+        .padding(14)
+      }
   }
 
   /// The native tvOS selection/focus color: white on dark and OLED, black on

@@ -428,6 +428,29 @@ extension PlayerView {
     lastOfflineProbeAt = Date.distantPast
   }
 
+  /// Stop claiming the live edge when the app returns from the background.
+  ///
+  /// tvOS suspends the app moments after you leave it: playback stops where it
+  /// stood, so you come back exactly as far behind the broadcast as your trip
+  /// lasted. Nothing noticed. `pinnedToLive` is an intent — it stays set while
+  /// the player follows live and only the viewer's own rewinding clears it — so
+  /// the transport kept reading LIVE a minute behind the broadcast.
+  ///
+  /// We deliberately do **not** seek forward: coming back to exactly where you
+  /// left off is the useful behaviour (nothing is skipped, and the transport
+  /// offers the catch-up whenever you want it). Dropping the pin is what makes
+  /// the readout honest, and it also keeps the drift watchdog — which only
+  /// chases the edge while pinned — from quietly catching up on its own.
+  func handleReturnToForeground() {
+    guard let leftAt = backgroundedAt else { return }
+    backgroundedAt = nil
+    guard Date().timeIntervalSince(leftAt) >= liveResumeBehindThresholdSeconds else { return }
+    guard !isVOD, pinnedToLive, !isUserPaused, !isScrubbing else { return }
+    if showLatencyDiagnostics { logDiagnosticsEvent("left live edge (resumed behind)") }
+    pinnedToLive = false
+    updateRewindReadout()
+  }
+
   func triggerRecoveryIfAllowed(reason: String) {
     guard !isRecoveringPlayback else { return }
     let now = Date()
@@ -1048,7 +1071,12 @@ extension PlayerView {
       return policy.minPlaybackRate + (1.0 - policy.minPlaybackRate) * fraction
     }
 
-    if policy.enablesGentleCatchUp,
+    // Catch-up chases the live edge, so it must only run while the viewer is
+    // actually following it. Off the edge — a deliberate rewind, or a resume
+    // that came back behind the broadcast — the gap is where the viewer wants
+    // to be, and creeping them forward at 1.12× would silently erase it over
+    // the next few minutes. The anti-stall arm above stays unconditional.
+    if policy.enablesGentleCatchUp, pinnedToLive,
       let gap = liveEdgeLatencySeconds, gap > policy.catchUpThresholdSeconds,
       let buffer = bufferAheadSeconds(player.currentItem),
       buffer > policy.catchUpHealthyBufferSeconds {

@@ -47,6 +47,17 @@ struct FollowedChannel: Identifiable, Hashable {
 }
 
 extension FollowedChannel {
+    /// Stable identity for the same channel across pools. `id` is **not**
+    /// comparable between them: the follows path carries the Twitch *user* id
+    /// while the browse / recommendation / similar-channel GraphQL paths carry
+    /// the *stream* id, so one streamer appearing in both (e.g. in Following and
+    /// in Popular right now) reads as two different channels. The login is the
+    /// only value that identifies them as one, so anything deduping or
+    /// preventing duplicates across pools must key on this.
+    var channelKey: String {
+        login.isEmpty ? id : login.lowercased()
+    }
+
     /// Per-platform viewer counts for the platforms this channel is *currently
     /// live on*: Twitch when `isLive`, YouTube when its presence reports `isLive`.
     /// Kick is not part of the Home follow-cards data today, so it never appears

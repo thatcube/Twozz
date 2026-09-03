@@ -109,6 +109,16 @@ extension PlayerView {
       setIdleTimer(disabled: true)
       trackpad.start()
     }
+    .onReceive(
+      NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+    ) { _ in
+      backgroundedAt = Date()
+    }
+    .onReceive(
+      NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+    ) { _ in
+      handleReturnToForeground()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) {
       notification in
       guard let stalledItem = notification.object as? AVPlayerItem else { return }

@@ -4,6 +4,15 @@ import Foundation
 /// loop, command sending, and tokenizing raw IRC frames (PRIVMSG, USERNOTICE,
 /// CAP/JOIN handshake, PING/PONG, raid notices) into `ChatMessage`s.
 extension ChatService {
+  /// The anonymous (`justinfan`) login handshake. Sent on every fresh socket —
+  /// the first connect, an auto-reconnect after a receive error, and the rebuild
+  /// after the app returns from the background.
+  func sendIRCHandshake() {
+    send("PASS SCHMOOPIIE")
+    send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
+    send("CAP REQ :twitch.tv/tags twitch.tv/commands")
+  }
+
   func sendJoinIfNeeded() {
     guard !hasSentJoin, let channel else { return }
     send("JOIN #\(channel)")
@@ -39,9 +48,7 @@ extension ChatService {
         connection.connect(to: endpoint)
         hasSentJoin = false
         hasCapAck = false
-        send("PASS SCHMOOPIIE")
-        send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
-        send("CAP REQ :twitch.tv/tags twitch.tv/commands")
+        sendIRCHandshake()
         // Loop continues — next iteration receives on the new socket.
       }
     }

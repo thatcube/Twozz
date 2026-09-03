@@ -147,12 +147,14 @@ struct HomeView: View {
   }
 
   /// Every live channel the in-session "Add" picker can offer — the union of all
-  /// section pools, deduped, so additions aren't limited to follows.
+  /// section pools, deduped by `channelKey` (see `FollowedChannel`), so
+  /// additions aren't limited to follows and one streamer can't be offered twice
+  /// under two different ids.
   private var multiviewAvailablePool: [FollowedChannel] {
     var seen = Set<String>()
     return multiviewSections
       .flatMap(\.channels)
-      .filter { $0.isLive && seen.insert($0.id).inserted }
+      .filter { $0.isLive && seen.insert($0.channelKey).inserted }
   }
 
   enum SidebarTab: String, CaseIterable, Identifiable {

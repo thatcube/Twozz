@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 enum ChatReadabilityMode: String, CaseIterable {
   case comfortable
@@ -248,6 +249,16 @@ final class ChatService {
   /// clears the chat line caches.
   private static var memoryPressureSource: DispatchSourceMemoryPressure?
 
+  /// App-lifecycle observers, registered while connected so a trip out of the
+  /// app can rebuild the sockets on return. See `handleWillEnterForeground()`.
+  private var lifecycleObservers: [NSObjectProtocol] = []
+  /// When the app last entered the background, or `nil` while it's in the
+  /// foreground. Used to measure how long we were away.
+  private var backgroundedAt: Date?
+  /// Trips shorter than this are treated as a blip (the sockets almost certainly
+  /// survived); anything longer is assumed to have outlived them.
+  private let staleAfterBackgroundSeconds: Double = 1.5
+
   func configureExperimentalYouTubeMerge(enabled: Bool, channelOrURL: String) {
     youtubeMergeEnabled = enabled
     youtubeChannelOrURL = channelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -318,9 +329,8 @@ final class ChatService {
 
     connection.connect(to: endpoint)
 
-    send("PASS SCHMOOPIIE")
-    send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
-    send("CAP REQ :twitch.tv/tags twitch.tv/commands")
+    sendIRCHandshake()
+    installLifecycleObservers()
 
     Task { [weak self] in
       guard let self else { return }
@@ -352,6 +362,7 @@ final class ChatService {
 
   /// Tear down the connection and clear the buffer.
   func disconnect() {
+    removeLifecycleObservers()
     receiveTask?.cancel()
     receiveTask = nil
     connection.cancel()
@@ -380,6 +391,77 @@ final class ChatService {
     channel = nil
     hasSentJoin = false
     hasCapAck = false
+  }
+
+  // MARK: - App lifecycle
+
+  /// Watch the app lifecycle so a trip out of the app can rebuild the sockets on
+  /// return. Registered with the connection and torn down with it, so a
+  /// disconnected service holds no observers.
+  private func installLifecycleObservers() {
+    guard lifecycleObservers.isEmpty else { return }
+    let center = NotificationCenter.default
+    lifecycleObservers = [
+      center.addObserver(
+        forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated { self?.backgroundedAt = Date() }
+      },
+      center.addObserver(
+        forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated { self?.handleWillEnterForeground() }
+      },
+    ]
+  }
+
+  private func removeLifecycleObservers() {
+    for observer in lifecycleObservers {
+      NotificationCenter.default.removeObserver(observer)
+    }
+    lifecycleObservers.removeAll()
+    backgroundedAt = nil
+  }
+
+  /// Rebuild every chat transport when the app returns from the background.
+  ///
+  /// tvOS suspends the app moments after you leave it, and the chat sockets
+  /// don't survive that. Usually the receive loop sees the failure and
+  /// auto-reconnects; but sometimes the socket comes back nominally open, never
+  /// delivers another frame, and `receive()` simply never returns — there is no
+  /// error to recover from, so chat sits frozen for the rest of the session.
+  /// That's the intermittent "chat stops after leaving and coming back". Rather
+  /// than guess which of the two happened, rebuild the transports on every real
+  /// trip away: a fresh anonymous IRC connect costs about a second and is the
+  /// only way to be sure a zombie socket can't strand us.
+  private func handleWillEnterForeground() {
+    guard channel != nil, let leftAt = backgroundedAt else { return }
+    backgroundedAt = nil
+    guard Date().timeIntervalSince(leftAt) >= staleAfterBackgroundSeconds else { return }
+    reconnectTransports()
+  }
+
+  /// Drop and rebuild the live transports, preserving everything the panel is
+  /// already showing: the message buffer, the emote/badge catalogs, and the
+  /// seen-ID sets (so a re-bootstrapped YouTube/Kick feed doesn't re-deliver
+  /// lines that are already on screen).
+  private func reconnectTransports() {
+    receiveTask?.cancel()
+    receiveTask = nil
+    connection.cancel()
+    connection.resetBackoff()
+    isConnected = false
+    hasSentJoin = false
+    hasCapAck = false
+
+    connection.connect(to: endpoint)
+    sendIRCHandshake()
+    receiveTask = Task { [weak self] in await self?.receiveLoop() }
+
+    // The merge paths ride their own transports (Kick's Pusher socket, YouTube's
+    // poll loop) and are just as dead after a suspend, so restart them too.
+    restartYouTubeLoopIfNeeded()
+    restartKickLoopIfNeeded()
   }
 
   // MARK: - Chat line cache lifecycle

@@ -6,20 +6,18 @@ import SwiftUI
 
 // MARK: - Setting row
 
-/// A single preference row: fixed-width label column on the left, a
-/// horizontal run of selectable pills on the right.
+/// A single preference row: its label and optional explanation sit above a
+/// wrapping run of controls so every option remains inside the detail pane.
 struct SettingRow<Content: View>: View {
   let title: String
   let subtitle: String?
   @ViewBuilder var content: () -> Content
 
-  private let labelColumnWidth: CGFloat = 360
-
   var body: some View {
-    HStack(alignment: .center, spacing: 32) {
+    VStack(alignment: .leading, spacing: 18) {
       VStack(alignment: .leading, spacing: 4) {
         Text(title)
-          .font(.system(size: 32, weight: .bold))
+          .font(.title3.weight(.semibold))
         if let subtitle {
           Text(subtitle)
             .font(.callout)
@@ -27,9 +25,9 @@ struct SettingRow<Content: View>: View {
             .fixedSize(horizontal: false, vertical: true)
         }
       }
-      .frame(width: labelColumnWidth, alignment: .leading)
+      .frame(maxWidth: 760, alignment: .leading)
 
-      HStack(spacing: 16) {
+      ChatFlowLayout(itemSpacing: 16, rowSpacing: 14) {
         content()
       }
       .frame(maxWidth: .infinity, alignment: .leading)

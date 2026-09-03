@@ -104,7 +104,7 @@ struct SettingsPreferencesSection: View {
 
   private var streamCardRow: some View {
     SettingRow(
-      title: "Stream card size",
+      title: "Card Size",
       subtitle: nil
     ) {
       ForEach(StreamCardSize.allCases) { size in
@@ -125,7 +125,7 @@ struct SettingsPreferencesSection: View {
 
   private var cardPresentationRow: some View {
     SettingRow(
-      title: "Card style",
+      title: "Card Style",
       subtitle: nil
     ) {
       ForEach(CardPresentation.allCases) { presentation in
@@ -148,7 +148,7 @@ struct SettingsPreferencesSection: View {
 
   private var chatRow: some View {
     SettingRow(
-      title: "Open chat by default",
+      title: "Open Chat by Default",
       subtitle: nil
     ) {
       ForEach([true, false], id: \.self) { on in
@@ -183,8 +183,8 @@ struct SettingsPreferencesSection: View {
 
   private var recommendationsRow: some View {
     SettingRow(
-      title: "Recommendations",
-      subtitle: "Based on who you follow and watch. History stays on this Apple TV."
+      title: "Personalized Recommendations",
+      subtitle: "Uses your follows and watch history. History stays on this Apple TV."
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -240,7 +240,7 @@ struct SettingsPreferencesSection: View {
   private var goLiveAlertsRow: some View {
     SettingRow(
       title: "Go Live Alerts",
-      subtitle: "In-app pop-up on this Apple TV when a channel you follow goes live. Doesn't change Twitch notifications on your other devices."
+      subtitle: "In-app alerts on this Apple TV. Twitch notifications are unchanged."
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -268,8 +268,8 @@ struct SettingsPreferencesSection: View {
   /// picker still lets the viewer switch per stream.
   private var preferYouTubeSourceRow: some View {
     SettingRow(
-      title: "Prefer YouTube source",
-      subtitle: "When a channel is live on YouTube too, start on YouTube for lower latency. You can still switch sources while watching."
+      title: "Prefer YouTube for Simulcasts",
+      subtitle: "Starts on YouTube when available for lower latency. You can switch while watching."
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -287,10 +287,10 @@ struct SettingsPreferencesSection: View {
   /// accessibility setting forces this on regardless of the in-app choice.
   private var reduceTransparencyRow: some View {
     SettingRow(
-      title: "Reduce Transparency",
+      title: "Solid Backgrounds",
       subtitle: reduceTransparency
-        ? "Translucent panels are replaced with solid, high-contrast fills. Forced on by the system Reduce Transparency setting."
-        : "Replace translucent Liquid Glass panels with solid, high-contrast fills for better legibility."
+        ? "Required by the system Reduce Transparency setting."
+        : "Replace translucent panels with solid, high-contrast surfaces."
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {

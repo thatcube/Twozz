@@ -7,6 +7,8 @@ import UIKit
 /// is the way to hand a URL to a phone). Focusable so the tvOS focus engine
 /// can scroll it into view at the bottom of the list.
 struct SettingsAboutSection: View {
+  var showsTitle = true
+
   @FocusState private var isFocused: Bool
   @Environment(\.glassDisabled) private var glassDisabled
 
@@ -29,9 +31,11 @@ struct SettingsAboutSection: View {
           .scaledToFit()
           .frame(width: 72, height: 72)
 
-        Text("About")
-          .font(.system(size: 32, weight: .bold))
-          .accessibilityAddTraits(.isHeader)
+        if showsTitle {
+          Text("About")
+            .font(.system(size: 32, weight: .bold))
+            .accessibilityAddTraits(.isHeader)
+        }
 
         VStack(alignment: .leading, spacing: 10) {
           infoRow("Name", "Twozz")

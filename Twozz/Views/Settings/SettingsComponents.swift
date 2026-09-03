@@ -13,7 +13,7 @@ struct SettingRow<Content: View>: View {
   let subtitle: String?
   @ViewBuilder var content: () -> Content
 
-  private let labelColumnWidth: CGFloat = 500
+  private let labelColumnWidth: CGFloat = 360
 
   var body: some View {
     HStack(alignment: .center, spacing: 32) {

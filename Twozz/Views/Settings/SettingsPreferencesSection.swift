@@ -1,8 +1,16 @@
 import SwiftUI
 
-/// Preferences group: appearance, card presentation, playback defaults,
-/// recommendations, alerts, and accessibility.
+enum SettingsPreferencesGroup {
+  case appearance
+  case homeAndDiscovery
+  case watching
+  case alerts
+}
+
+/// One focused group of global preferences, selected by the Settings category
+/// rail. The underlying values and controls remain shared across categories.
 struct SettingsPreferencesSection: View {
+  let group: SettingsPreferencesGroup
   var onClearWatchHistory: () -> Void = {}
   var onResetNotInterested: () -> Void = {}
 
@@ -33,51 +41,43 @@ struct SettingsPreferencesSection: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      appearanceRow
-        .padding(.vertical, 16)
-
-      groupDivider
-
-      streamCardRow
-        .padding(.vertical, 16)
-
-      groupDivider
-
-      cardPresentationRow
-        .padding(.vertical, 16)
-
-      groupDivider
-
-      chatRow
-        .padding(.vertical, 16)
-
-      groupDivider
-
-      languageRow
-        .padding(.vertical, 16)
-
-      groupDivider
-
-      recommendationsRow
-        .padding(.vertical, 16)
-
-      groupDivider
-
-      goLiveAlertsRow
-        .padding(.vertical, 16)
-
-      groupDivider
-
-      preferYouTubeSourceRow
-        .padding(.vertical, 16)
-
-      groupDivider
-
-      reduceTransparencyRow
-        .padding(.vertical, 16)
+      preferenceRows
     }
     .padding(.horizontal, 28)
     .settingsGlassPanel(disabled: glassDisabled)
+  }
+
+  @ViewBuilder
+  private var preferenceRows: some View {
+    switch group {
+    case .appearance:
+      appearanceRow
+        .padding(.vertical, 16)
+      groupDivider
+      streamCardRow
+        .padding(.vertical, 16)
+      groupDivider
+      cardPresentationRow
+        .padding(.vertical, 16)
+      groupDivider
+      reduceTransparencyRow
+        .padding(.vertical, 16)
+    case .homeAndDiscovery:
+      languageRow
+        .padding(.vertical, 16)
+      groupDivider
+      recommendationsRow
+        .padding(.vertical, 16)
+    case .watching:
+      chatRow
+        .padding(.vertical, 16)
+      groupDivider
+      preferYouTubeSourceRow
+        .padding(.vertical, 16)
+    case .alerts:
+      goLiveAlertsRow
+        .padding(.vertical, 16)
+    }
   }
 
   private var groupDivider: some View {
@@ -87,7 +87,7 @@ struct SettingsPreferencesSection: View {
 
   private var appearanceRow: some View {
     SettingRow(
-      title: "Appearance",
+      title: "Theme",
       subtitle: nil
     ) {
       ForEach(AppTheme.allCases) { theme in

@@ -479,15 +479,4 @@ extension PlayerView {
       delaySeconds: chatSyncDelaySeconds ?? 0
     )
   }
-
-  /// Human-readable explanation shown under the Stream Sync toggle.
-  var chatSyncStatusDescription: String {
-    guard chatSyncToStream else {
-      return "Chat shows in real time, so it runs ahead of the delayed video."
-    }
-    if let seconds = chatSyncDelaySeconds, seconds >= 0.75 {
-      return "Holding chat ~\(formatLatencySeconds(seconds)) to match the video."
-    }
-    return "Measuring stream delay… chat will sync once latency is known."
-  }
 }

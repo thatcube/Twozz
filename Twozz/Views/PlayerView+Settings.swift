@@ -154,7 +154,7 @@ extension PlayerView {
         settingsSectionHeader("Stream Delay")
 
         settingsPill(
-          title: chatSyncToStream ? "Match Stream Delay On" : "Match Stream Delay Off",
+          title: "Sync Chat to Stream Delay",
           isSelected: chatSyncToStream,
           focusTag: .chatSyncToggle
         ) {
@@ -162,11 +162,6 @@ extension PlayerView {
           applyChatSyncSettings()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-
-        Text("Holds chat back to line up with the broadcast delay, so messages appear as the moment they react to plays on screen.")
-          .font(.caption2)
-          .foregroundStyle(chatSettingsForeground.opacity(0.6))
-          .fixedSize(horizontal: false, vertical: true)
       }
 
       settingsDisclosureRow(

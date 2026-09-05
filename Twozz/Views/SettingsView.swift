@@ -104,6 +104,7 @@ private enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
 private struct SettingsPaneRail: View {
   @Binding var selection: SettingsPane
   @FocusState private var focusedPane: SettingsPane?
+  @State private var focusInDetail = false
   @Namespace private var focusScope
 
   var body: some View {
@@ -134,6 +135,7 @@ private struct SettingsPaneRail: View {
             .focusEffectDisabled()
             .prefersDefaultFocus(pane == selection, in: focusScope)
             .accessibilityAddTraits(selection == pane ? .isSelected : [])
+            .disabled(focusInDetail && selection != pane)
           }
         }
         .padding(.horizontal, 12)
@@ -143,8 +145,12 @@ private struct SettingsPaneRail: View {
       .focusScope(focusScope)
     }
     .onChange(of: focusedPane) { _, pane in
-      guard let pane else { return }
-      selection = pane
+      if let pane {
+        focusInDetail = false
+        selection = pane
+      } else {
+        focusInDetail = true
+      }
     }
     .focusSection()
   }

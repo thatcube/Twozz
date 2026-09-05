@@ -67,7 +67,7 @@ private enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
     switch self {
     case .theme: "Theme"
     case .cards: "Cards"
-    case .nightShift: "Night Shift"
+    case .nightShift: "Circadian Mode"
     case .streamLanguage: "Stream Language"
     case .recommendations: "Recommendations"
     case .watching: "Watching"
@@ -84,7 +84,7 @@ private enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
     case .cards:
       "Control how stream cards are sized and presented."
     case .nightShift:
-      "Warm and dim the picture automatically at night."
+      "Warms and dims the display at night to help you sleep."
     case .streamLanguage:
       "Only show live streams in the language you choose."
     case .recommendations:

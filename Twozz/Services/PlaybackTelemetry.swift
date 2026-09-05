@@ -349,14 +349,31 @@ final class PlaybackTelemetryRecorder {
     }
     for index in errorStart..<errors.count {
       let event = errors[index]
+      var counters = ["status_code": event.errorStatusCode]
+      if let status = Self.httpStatus(inErrorComment: event.errorComment) {
+        counters["http_status"] = status
+      }
       emit(kind: "error_log", name: "avplayer_error_log", level: .error,
            attributes: ["error_domain": event.errorDomain, "host": Self.host(event.uri),
                         "error_entry": String(index)],
-           counters: ["status_code": event.errorStatusCode])
+           counters: counters)
     }
     errorCount = errors.count
     // Never persist localizedDescription, errorComment, userInfo, headers or
     // playbackSessionID: AVFoundation may include signed URLs/credentials there.
+  }
+
+  private static let httpStatusPattern = try! NSRegularExpression(
+    pattern: #"\bHTTP(?:/[0-9.]+)?\s+([1-5][0-9]{2})\b"#,
+    options: .caseInsensitive
+  )
+
+  /// Only the explicit HTTP status escapes SDK prose, never its URLs or text.
+  static func httpStatus(inErrorComment comment: String?) -> Int? {
+    guard let comment,
+      let match = httpStatusPattern.firstMatch(in: comment, range: NSRange(comment.startIndex..., in: comment)),
+      let range = Range(match.range(at: 1), in: comment) else { return nil }
+    return Int(comment[range])
   }
 
   static func errorAttributes(_ error: Error?) -> [String: String] {

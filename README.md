@@ -157,8 +157,20 @@ The cache retains at most eight 4 MiB files across all sessions (about 32 MiB)
 and tvOS may reclaim it. It does not contain OAuth credentials, full URLs,
 request headers, server IP addresses, AVPlayer session IDs, SDK localized error
 prose, or error comments. Failures retain only structured evidence such as
-error domain/code or AVPlayer error-log status code. Public channel names and
+error domain/code, AVPlayer error-log status code, and an explicit HTTP status
+when AVFoundation includes one. YouTube resolution records the client/version
+and sanitized failure category, never visitor context or response bodies. Public channel names and
 viewing timestamps do appear. The tool reads locally and never uploads logs.
+
+YouTube simulcasts use the native-HLS client shared with YouTube-only playback
+and captions. The obsolete Android VR client and silent web-manifest fallback
+are not used. A terminal media error (even when the item still reports ready),
+or 20 seconds without clock progress while playback is intended, triggers one
+fresh YouTube resolution. Automatic attempts are at least 10 seconds apart.
+If that attempt also fails, the player refreshes the Twitch source and shows a
+brief, non-focusable notice. It does not change the saved YouTube preference or
+automatically switch back during that channel visit; the source picker remains
+available for a deliberate retry.
 
 Interpret summaries cautiously. Proxy timings cover playlist/master requests,
 not media segment transfers; AVPlayer access-log throughput is a coarse

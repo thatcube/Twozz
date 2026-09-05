@@ -197,6 +197,10 @@ extension PlayerView {
         attributes: PlaybackTelemetryRecorder.errorAttributes(error)
       )
       recordCurrentErrorLog()
+      if isUsingAltSource, let master = altYouTubeMasterURL, currentSourceURL == master {
+        model.altRecovery.noteTerminalFailure()
+        recoverAltSourceIfNeeded(reason: "failed_to_play_to_end")
+      }
     }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) {
       notification in
@@ -219,6 +223,7 @@ extension PlayerView {
       chatHoldTask?.cancel()
       trackpad.stop()
       sleepTimerTask?.cancel()
+      resetAltSourceWork()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
       stopScrubInput()
@@ -489,6 +494,7 @@ extension PlayerView {
       youtubeAutoResolvedTarget = ""
       // The alternate (YouTube) source is per-channel; drop it on a channel
       // change so a stale simulcast URL can't leak into the next stream.
+      model.didFallbackFromYouTube = false
       isUsingAltSource = false
       altYouTubeMasterURL = nil
       altSourceStatus = nil

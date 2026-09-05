@@ -904,6 +904,10 @@ struct PlayerView: View {
         sleepingOverlay
           .transition(.opacity)
       }
+
+      if model.showAltSourceFallbackNotice {
+        altSourceFallbackNotice
+      }
     }
   }
 
@@ -1015,4 +1019,3 @@ struct PlayerView: View {
   /// row: the bar's own height (~68pt) plus the control VStack's 18pt spacing.
   let scrubBarClusterHeight: CGFloat = 86
 }
-

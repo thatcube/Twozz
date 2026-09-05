@@ -103,7 +103,7 @@ extension PlayerView {
     snapshot.flags["scrubbing"] = isScrubbing || scrubTargetSeconds != nil
     snapshot.flags["background"] = backgroundedAt != nil
     snapshot.flags["pinned_to_live"] = pinnedToLive
-    snapshot.flags["recovering"] = isRecoveringPlayback
+    snapshot.flags["recovering"] = isRecoveringPlayback || model.altRecoveryTask != nil
     snapshot.flags["stream_unstable"] = isStreamUnstable
     snapshot.flags["decode_frozen"] = videoDecodeFrozenSince.map {
       Date().timeIntervalSince($0) >= 4

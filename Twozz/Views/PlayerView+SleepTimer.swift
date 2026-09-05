@@ -126,7 +126,13 @@ extension PlayerView {
     // and the cached playlist may be stale, so resuming in place leaves us stuck
     // far "behind live" or stalled. Reload from scratch to snap back to the live
     // edge and guarantee playback actually restarts.
-    Task { await load(maxAttempts: 2, reason: "wake from sleep", resetMetadata: false) }
+    Task {
+      if isUsingAltSource {
+        await switchToAltYouTubeSource()
+      } else {
+        await load(maxAttempts: 2, reason: "wake from sleep", resetMetadata: false)
+      }
+    }
   }
 
   /// Dim full-screen "Sleeping" scene shown after a sleep timer fires. Pressing

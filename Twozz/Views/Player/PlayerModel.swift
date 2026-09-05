@@ -126,9 +126,10 @@ final class PlayerModel {
   /// failing googlevideo URL is refreshed without hammering YouTube.
   var lastAltResolveAt = Date.distantPast
   var altResolveInFlight = false
-  /// Caps automatic alt-source retries after a 403 so a blocked manifest doesn't
-  /// trigger an endless re-resolve loop that gets the IP flagged by YouTube.
-  var altFailedRetries = 0
+  @ObservationIgnored var altRecovery = AltSourceRecoveryState()
+  @ObservationIgnored var altRecoveryTask: Task<Void, Never>?
+  var didFallbackFromYouTube = false
+  var showAltSourceFallbackNotice = false
   /// Whether the active channel actually has a resolvable YouTube simulcast.
   /// Probed on channel load; gates the Stream Source picker in the quality menu.
   var youtubeSourceAvailable = false
@@ -332,10 +333,6 @@ extension PlayerView {
   var altResolveInFlight: Bool {
     get { model.altResolveInFlight }
     nonmutating set { model.altResolveInFlight = newValue }
-  }
-  var altFailedRetries: Int {
-    get { model.altFailedRetries }
-    nonmutating set { model.altFailedRetries = newValue }
   }
   var youtubeSourceAvailable: Bool {
     get { model.youtubeSourceAvailable }

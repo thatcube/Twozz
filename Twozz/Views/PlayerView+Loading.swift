@@ -37,6 +37,7 @@ extension PlayerView {
       return
     }
     let telemetrySessionID = model.playbackTelemetry.sessionID
+    let sourceGeneration = model.altRecovery.generation
     let loadingChannel = activeChannel
     recordPlaybackEvent(
       "load_started",
@@ -55,7 +56,7 @@ extension PlayerView {
     var lastError: Error?
     for attempt in 1...maxAttempts {
       guard telemetrySessionID == model.playbackTelemetry.sessionID,
-        loadingChannel == activeChannel else { return }
+        loadingChannel == activeChannel, sourceGeneration == model.altRecovery.generation else { return }
       let attemptStartedAt = ProcessInfo.processInfo.systemUptime
       recordPlaybackEvent(
         "load_attempt_started",
@@ -65,7 +66,7 @@ extension PlayerView {
       do {
         let resolved = try await resolvePlaybackWithTimeout()
         guard telemetrySessionID == model.playbackTelemetry.sessionID,
-          loadingChannel == activeChannel else { return }
+          loadingChannel == activeChannel, sourceGeneration == model.altRecovery.generation else { return }
         recordPlaybackEvent(
           "playback_resolved",
           metrics: ["resolve_duration_seconds": ProcessInfo.processInfo.systemUptime - attemptStartedAt],
@@ -109,7 +110,7 @@ extension PlayerView {
 
         let started = await waitForPlaybackStart()
         guard telemetrySessionID == model.playbackTelemetry.sessionID,
-          loadingChannel == activeChannel else { return }
+          loadingChannel == activeChannel, sourceGeneration == model.altRecovery.generation else { return }
         if !started {
           throw LoadTimeoutError.noPlaybackProgress
         }
@@ -134,7 +135,7 @@ extension PlayerView {
         return
       } catch {
         guard telemetrySessionID == model.playbackTelemetry.sessionID,
-          loadingChannel == activeChannel else { return }
+          loadingChannel == activeChannel, sourceGeneration == model.altRecovery.generation else { return }
         lastError = error
         recordPlaybackEvent(
           "load_attempt_failed",
@@ -164,7 +165,8 @@ extension PlayerView {
     if resolvedOffline || lastError == nil || lastError is LoadTimeoutError {
       let status = await PlaybackService.streamLiveStatus(for: activeChannel)
       guard telemetrySessionID == model.playbackTelemetry.sessionID,
-        loadingChannel == activeChannel else { return }
+        loadingChannel == activeChannel, sourceGeneration == model.altRecovery.generation,
+        !isUsingAltSource else { return }
       if status == .offline || (resolvedOffline && status != .live) {
         presentOfflineState()
         return
@@ -409,7 +411,7 @@ extension PlayerView {
   }
 
   func startLatencyMonitor() {
-    stopLatencyMonitor()
+    stopLatencyMonitor(clearPlaybackIntent: false)
     latencyTask = Task {
       while !Task.isCancelled {
         await MainActor.run {
@@ -427,7 +429,7 @@ extension PlayerView {
         try? await Task.sleep(for: .seconds(1))
       }
     }
-    startRateController()
+    if !isUsingAltSource { startRateController() }
   }
 
   /// Runs the adaptive playback-rate controller on its own fast cadence so the
@@ -449,7 +451,7 @@ extension PlayerView {
     rateControlTask = nil
   }
 
-  func stopLatencyMonitor() {
+  func stopLatencyMonitor(clearPlaybackIntent: Bool = true) {
     latencyTask?.cancel()
     latencyTask = nil
     stopRateController()
@@ -460,7 +462,9 @@ extension PlayerView {
     latencySampleCount = 0
     latencyStableCount = 0
     isPlaybackActive = false
-    didRequestPlayback = false
+    if clearPlaybackIntent {
+      didRequestPlayback = false
+    }
     edgeLatencyLowConfidenceStreak = 0
     wallClockLowConfidenceStreak = 0
     lastPlaybackDateSample = nil
@@ -1021,6 +1025,7 @@ extension PlayerView {
     // auto-follow take precedence over the offline empty state.
     guard !isFollowingOutgoingRaid else { return }
     recordPlaybackEvent("offline_state_presented", level: .warning)
+    resetAltSourceWork()
     stopPlaybackWatchdog()
     stopLatencyMonitor()
     audioLevelMonitor.stop()

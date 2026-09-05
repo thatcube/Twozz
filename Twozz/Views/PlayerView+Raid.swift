@@ -101,6 +101,8 @@ extension PlayerView {
     chat.pendingRaid = nil
     clearOutgoingRaidState()
     stopPlaybackTelemetry(reason: "channel_switch")
+    resetAltSourceWork()
+    isUsingAltSource = false
     stopPlaybackWatchdog()
     stopLatencyMonitor()
     player.pause()

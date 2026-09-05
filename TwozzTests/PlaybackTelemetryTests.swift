@@ -106,6 +106,14 @@ final class PlaybackTelemetryTests: XCTestCase {
     XCTAssertEqual(PlaybackTelemetryRecorder.host("https://[2001:db8::1]/path"), "<address>")
   }
 
+  func testHTTPStatusExtractionKeepsOnlyExplicitStatusCodes() {
+    XCTAssertEqual(PlaybackTelemetryRecorder.httpStatus(inErrorComment: "HTTP 403: Forbidden"), 403)
+    XCTAssertEqual(PlaybackTelemetryRecorder.httpStatus(inErrorComment: "HTTP/1.1 503 https://example.com/?token=private"), 503)
+    XCTAssertNil(PlaybackTelemetryRecorder.httpStatus(inErrorComment: "https://example.com/403?token=private"))
+    XCTAssertNil(PlaybackTelemetryRecorder.httpStatus(inErrorComment: "segment exceeds variant BANDWIDTH"))
+    XCTAssertNil(PlaybackTelemetryRecorder.httpStatus(inErrorComment: nil))
+  }
+
   func testStallEpisodesAndCounterResets() async throws {
     let directory = temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }

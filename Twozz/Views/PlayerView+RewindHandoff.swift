@@ -158,6 +158,7 @@ extension PlayerView {
   /// don't fight VOD playback (latency rate-forcing, stall watchdog, EventSub,
   /// Hermes, IRC chat). Chat replay + the VOD time observer take over.
   private func teardownLiveForHandoff() {
+    resetAltSourceWork()
     stopLatencyMonitor()
     stopPlaybackWatchdog()
     eventSub.stop()

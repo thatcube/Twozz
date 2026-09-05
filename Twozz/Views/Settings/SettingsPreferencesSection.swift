@@ -13,6 +13,7 @@ enum SettingsPreferencesGroup {
 /// rail. The underlying values and controls remain shared across categories.
 struct SettingsPreferencesSection: View {
   let group: SettingsPreferencesGroup
+  var focusRequest = 0
   var onClearWatchHistory: () -> Void = {}
   var onResetNotInterested: () -> Void = {}
 
@@ -25,9 +26,19 @@ struct SettingsPreferencesSection: View {
 
   @State private var showClearHistoryConfirm = false
   @State private var showResetNotInterestedConfirm = false
-  @FocusState private var focusedTheme: AppTheme?
-  @FocusState private var focusedCardSize: StreamCardSize?
-  @FocusState private var focusedCardPresentation: CardPresentation?
+  @FocusState private var focusedControl: PreferenceFocus?
+
+  private enum PreferenceFocus: Hashable {
+    case theme(AppTheme)
+    case cardSize(StreamCardSize)
+    case cardStyle(CardPresentation)
+    case language
+    case recommendations(Bool)
+    case chat(Bool)
+    case streamSource(Bool)
+    case alerts(Bool)
+    case solidBackgrounds(Bool)
+  }
 
   @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
   @AppStorage(CardPresentation.storageKey) private var cardPresentationRaw = CardPresentation.fallback.rawValue
@@ -47,6 +58,9 @@ struct SettingsPreferencesSection: View {
     }
     .padding(.horizontal, 28)
     .settingsGlassPanel(disabled: glassDisabled)
+    .onChange(of: focusRequest) { _, _ in
+      requestEntryFocus()
+    }
   }
 
   @ViewBuilder
@@ -99,7 +113,7 @@ struct SettingsPreferencesSection: View {
           SettingPill(title: theme.displayName, isSelected: themeManager.theme == theme)
         }
         .settingPillStyle(isSelected: themeManager.theme == theme)
-        .focused($focusedTheme, equals: theme)
+        .focused($focusedControl, equals: .theme(theme))
       }
     }
   }
@@ -120,7 +134,7 @@ struct SettingsPreferencesSection: View {
           )
         }
         .settingPillStyle(isSelected: StreamCardSize.resolve(streamCardSizeRaw) == size)
-        .focused($focusedCardSize, equals: size)
+        .focused($focusedControl, equals: .cardSize(size))
       }
     }
   }
@@ -143,7 +157,7 @@ struct SettingsPreferencesSection: View {
         .settingPillStyle(
           isSelected: CardPresentation.resolve(cardPresentationRaw) == presentation
         )
-        .focused($focusedCardPresentation, equals: presentation)
+        .focused($focusedControl, equals: .cardStyle(presentation))
       }
     }
   }
@@ -160,6 +174,7 @@ struct SettingsPreferencesSection: View {
           SettingPill(title: on ? "On" : "Off", isSelected: showChatByDefault == on)
         }
         .settingPillStyle(isSelected: showChatByDefault == on)
+        .focused($focusedControl, equals: .chat(on))
       }
     }
   }
@@ -180,6 +195,7 @@ struct SettingsPreferencesSection: View {
         SettingPill(title: StreamLanguagePreference.displayName(streamLanguage), isSelected: false, showsMenuIndicator: true)
       }
       .settingsProminentActionButtonStyle()
+      .focused($focusedControl, equals: .language)
     }
   }
 
@@ -195,6 +211,7 @@ struct SettingsPreferencesSection: View {
           SettingPill(title: on ? "On" : "Off", isSelected: personalizedRecommendationsEnabled == on)
         }
         .settingPillStyle(isSelected: personalizedRecommendationsEnabled == on)
+        .focused($focusedControl, equals: .recommendations(on))
       }
 
       Button {
@@ -251,6 +268,7 @@ struct SettingsPreferencesSection: View {
           SettingPill(title: on ? "On" : "Off", isSelected: goLiveAlertsEnabled == on)
         }
         .settingPillStyle(isSelected: goLiveAlertsEnabled == on)
+        .focused($focusedControl, equals: .alerts(on))
       }
 
       NavigationLink {
@@ -280,6 +298,7 @@ struct SettingsPreferencesSection: View {
           SettingPill(title: on ? "On" : "Off", isSelected: preferYouTubeSource == on)
         }
         .settingPillStyle(isSelected: preferYouTubeSource == on)
+        .focused($focusedControl, equals: .streamSource(on))
       }
     }
   }
@@ -303,6 +322,27 @@ struct SettingsPreferencesSection: View {
         .settingPillStyle(isSelected: disableLiquidGlass == on)
         .disabled(reduceTransparency)
         .opacity(reduceTransparency ? 0.4 : 1)
+        .focused($focusedControl, equals: .solidBackgrounds(on))
+      }
+    }
+  }
+
+  private func requestEntryFocus() {
+    Task { @MainActor in
+      await Task.yield()
+      switch group {
+      case .theme:
+        focusedControl = .theme(themeManager.theme)
+      case .cards:
+        focusedControl = .cardSize(StreamCardSize.resolve(streamCardSizeRaw))
+      case .streamLanguage:
+        focusedControl = .language
+      case .recommendations:
+        focusedControl = .recommendations(personalizedRecommendationsEnabled)
+      case .watching:
+        focusedControl = .chat(showChatByDefault)
+      case .alerts:
+        focusedControl = .alerts(goLiveAlertsEnabled)
       }
     }
   }

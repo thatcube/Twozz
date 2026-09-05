@@ -3,6 +3,7 @@ import SwiftUI
 /// Twitch account panel: shows the signed-in user with a sign-out action, or a
 /// sign-in prompt when not authenticated.
 struct SettingsAccountSection: View {
+  var focusRequest = 0
   var onRequestSignIn: () -> Void = {}
   var onAccountChanged: () -> Void = {}
 
@@ -10,6 +11,7 @@ struct SettingsAccountSection: View {
   private var auth: TwitchAuthSession { environment.auth }
 
   @State private var showSignOutConfirm = false
+  @FocusState private var actionFocused: Bool
   @Environment(\.glassDisabled) private var glassDisabled
 
   var body: some View {
@@ -41,6 +43,7 @@ struct SettingsAccountSection: View {
           .font(.headline)
           .settingsProminentActionButtonStyle()
           .tint(.red)
+          .focused($actionFocused)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -79,11 +82,18 @@ struct SettingsAccountSection: View {
           }
           .font(.headline)
           .settingsProminentActionButtonStyle()
+          .focused($actionFocused)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .settingsGlassPanel(disabled: glassDisabled)
         .focusSection()
+      }
+    }
+    .onChange(of: focusRequest) { _, _ in
+      Task { @MainActor in
+        await Task.yield()
+        actionFocused = true
       }
     }
   }

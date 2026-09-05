@@ -12,6 +12,7 @@ struct SettingsView: View {
 
   @Environment(\.themePalette) private var palette
   @State private var selectedPane = SettingsPane.theme
+  @State private var detailFocusRequest = 0
 
   var body: some View {
     NavigationStack {
@@ -25,7 +26,13 @@ struct SettingsView: View {
 
         GeometryReader { proxy in
           HStack(alignment: .top, spacing: 0) {
-            SettingsPaneRail(selection: $selectedPane)
+            SettingsPaneRail(selection: $selectedPane) { pane in
+              selectedPane = pane
+              Task { @MainActor in
+                await Task.yield()
+                detailFocusRequest &+= 1
+              }
+            }
               .frame(width: min(600, max(500, proxy.size.width * 0.33)))
 
             Divider()
@@ -34,6 +41,7 @@ struct SettingsView: View {
 
             SettingsPaneDetail(
               pane: selectedPane,
+              focusRequest: detailFocusRequest,
               onRequestSignIn: onRequestSignIn,
               onRequestYouTubeSignIn: onRequestYouTubeSignIn,
               onClearWatchHistory: onClearWatchHistory,
@@ -103,6 +111,7 @@ private enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
 
 private struct SettingsPaneRail: View {
   @Binding var selection: SettingsPane
+  let onEnterDetail: (SettingsPane) -> Void
   @FocusState private var focusedPane: SettingsPane?
   @Namespace private var focusScope
 
@@ -134,6 +143,11 @@ private struct SettingsPaneRail: View {
             .focusEffectDisabled()
             .prefersDefaultFocus(pane == selection, in: focusScope)
             .accessibilityAddTraits(selection == pane ? .isSelected : [])
+            .onMoveCommand { direction in
+              if direction == .right {
+                onEnterDetail(pane)
+              }
+            }
           }
         }
         .padding(.horizontal, 12)
@@ -146,6 +160,7 @@ private struct SettingsPaneRail: View {
       guard let pane else { return }
       selection = pane
     }
+    .focusSection()
   }
 }
 
@@ -203,6 +218,7 @@ private struct SettingsPaneButtonBody: View {
 
 private struct SettingsPaneDetail: View {
   let pane: SettingsPane
+  let focusRequest: Int
   let onRequestSignIn: () -> Void
   let onRequestYouTubeSignIn: () -> Void
   let onClearWatchHistory: () -> Void
@@ -228,28 +244,32 @@ private struct SettingsPaneDetail: View {
         switch pane {
         case .theme:
           SettingsPreferencesSection(
-            group: .theme
+            group: .theme,
+            focusRequest: focusRequest
           )
         case .cards:
-          SettingsPreferencesSection(group: .cards)
+          SettingsPreferencesSection(group: .cards, focusRequest: focusRequest)
         case .nightShift:
-          SettingsNightShiftSection()
+          SettingsNightShiftSection(focusRequest: focusRequest)
         case .streamLanguage:
           SettingsPreferencesSection(
-            group: .streamLanguage
+            group: .streamLanguage,
+            focusRequest: focusRequest
           )
         case .recommendations:
           SettingsPreferencesSection(
             group: .recommendations,
+            focusRequest: focusRequest,
             onClearWatchHistory: onClearWatchHistory,
             onResetNotInterested: onResetNotInterested
           )
         case .watching:
-          SettingsPreferencesSection(group: .watching)
+          SettingsPreferencesSection(group: .watching, focusRequest: focusRequest)
         case .goLiveAlerts:
-          SettingsPreferencesSection(group: .alerts)
+          SettingsPreferencesSection(group: .alerts, focusRequest: focusRequest)
         case .accounts:
           SettingsAccountSection(
+            focusRequest: focusRequest,
             onRequestSignIn: onRequestSignIn,
             onAccountChanged: onAccountChanged
           )
@@ -258,7 +278,7 @@ private struct SettingsPaneDetail: View {
             onAccountChanged: onAccountChanged
           )
         case .about:
-          SettingsAboutSection(showsTitle: false)
+          SettingsAboutSection(showsTitle: false, focusRequest: focusRequest)
         }
       }
       .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -268,5 +288,6 @@ private struct SettingsPaneDetail: View {
     }
     .id(pane)
     .scrollClipDisabled()
+    .focusSection()
   }
 }

@@ -8,7 +8,7 @@ struct SettingsNightShiftSection: View {
   private var nightShift: NightShiftManager { environment.nightShift }
 
   private let controlHeight: CGFloat = 44
-  private let rowLabelWidth: CGFloat = 150
+  private let rowLabelWidth: CGFloat = 210
 
   private enum NSControl: Hashable {
     case location
@@ -32,12 +32,14 @@ struct SettingsNightShiftSection: View {
     case off
     case auto
     case manual
+    case alwaysOn
 
     var title: LocalizedStringResource {
       switch self {
       case .off: "Off"
       case .auto: "Auto"
       case .manual: "Manual"
+      case .alwaysOn: "Always On"
       }
     }
 
@@ -46,6 +48,7 @@ struct SettingsNightShiftSection: View {
       case .off: "The picture is never dimmed or warmed."
       case .auto: "Follows sunset and sunrise for your selected location."
       case .manual: "Runs between the times you choose each day."
+      case .alwaysOn: "Keeps the configured warmth and darkness on at full strength."
       }
     }
   }
@@ -55,7 +58,11 @@ struct SettingsNightShiftSection: View {
 
   private var mode: CircadianMode {
     guard nightShift.isEnabled else { return .off }
-    return nightShift.scheduleMode == .solar ? .auto : .manual
+    switch nightShift.scheduleMode {
+    case .solar: return .auto
+    case .manual: return .manual
+    case .alwaysOn: return .alwaysOn
+    }
   }
 
   private var describedMode: CircadianMode {
@@ -63,9 +70,9 @@ struct SettingsNightShiftSection: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 54) {
+    VStack(alignment: .leading, spacing: 46) {
       VStack(alignment: .leading, spacing: 18) {
-        ChatFlowLayout(itemSpacing: 14, rowSpacing: 12) {
+        HStack(spacing: 0) {
           ForEach(CircadianMode.allCases, id: \.self) { option in
             Button {
               selectMode(option)
@@ -78,11 +85,21 @@ struct SettingsNightShiftSection: View {
                 }
               }
             }
-            .settingPillStyle(isSelected: mode == option)
+            .buttonStyle(CircadianModeButtonStyle(isSelected: mode == option))
+            .focusEffectDisabled()
             .focused($focusedMode, equals: option)
           }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(5)
+        .background(
+          Capsule(style: .continuous)
+            .fill(Color.primary.opacity(0.035))
+        )
+        .overlay(
+          Capsule(style: .continuous)
+            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+        )
+        .fixedSize(horizontal: true, vertical: false)
         .focusSection()
 
         Text(describedMode.detail)
@@ -94,15 +111,13 @@ struct SettingsNightShiftSection: View {
       }
 
       if nightShift.isEnabled {
-        VStack(alignment: .leading, spacing: 24) {
-          sectionHeader("Schedule")
-
+        VStack(alignment: .leading, spacing: 38) {
           if nightShift.scheduleMode == .solar {
             controlRow("Location") {
               locationMenu
             }
           } else {
-            controlRow("Turns On") {
+            controlRow("Turns on") {
               timeStepper(
                 minutes: nightShift.manualOnMinutes,
                 down: .onDown,
@@ -110,7 +125,7 @@ struct SettingsNightShiftSection: View {
                 commit: { nightShift.manualOnMinutes = $0 }
               )
             }
-            controlRow("Turns Off") {
+            controlRow("Turns off") {
               timeStepper(
                 minutes: nightShift.manualOffMinutes,
                 down: .offDown,
@@ -120,21 +135,19 @@ struct SettingsNightShiftSection: View {
             }
           }
 
-          controlRow("Fade") {
-            stepper(
-              levels: NightShiftManager.fadeOptions,
-              selected: clampedFade,
-              display: { NightShiftManager.fadeLabel(minutes: $0) },
-              down: .fadeDown,
-              up: .fadeUp,
-              valueWidth: 90,
-              commit: { nightShift.fadeMinutes = $0 }
-            )
+          if nightShift.scheduleMode != .alwaysOn {
+            controlRow("Fade") {
+              stepper(
+                levels: NightShiftManager.fadeOptions,
+                selected: clampedFade,
+                display: { circadianFadeLabel(minutes: $0) },
+                down: .fadeDown,
+                up: .fadeUp,
+                valueWidth: 190,
+                commit: { nightShift.fadeMinutes = $0 }
+              )
+            }
           }
-        }
-
-        VStack(alignment: .leading, spacing: 24) {
-          sectionHeader("Appearance")
 
           controlRow("Darkness") {
             stepper(
@@ -143,6 +156,7 @@ struct SettingsNightShiftSection: View {
               display: { $0.displayName },
               down: .dimnessDown,
               up: .dimnessUp,
+              valueWidth: 190,
               commit: { nightShift.dimness = $0 }
             )
           }
@@ -154,6 +168,7 @@ struct SettingsNightShiftSection: View {
               display: { $0.displayName },
               down: .warmthDown,
               up: .warmthUp,
+              valueWidth: 190,
               commit: { nightShift.warmth = $0 }
             )
           }
@@ -194,6 +209,9 @@ struct SettingsNightShiftSection: View {
     case .manual:
       nightShift.isEnabled = true
       nightShift.scheduleMode = .manual
+    case .alwaysOn:
+      nightShift.isEnabled = true
+      nightShift.scheduleMode = .alwaysOn
     }
   }
 
@@ -205,16 +223,29 @@ struct SettingsNightShiftSection: View {
     }) ?? 90
   }
 
+  private func circadianFadeLabel(minutes: Int) -> String {
+    guard minutes >= 60 else { return "\(minutes) min" }
+    let hours = minutes / 60
+    let remainingMinutes = minutes % 60
+    if remainingMinutes == 0 {
+      return "\(hours) hr"
+    }
+    return "\(hours) hr, \(remainingMinutes) min"
+  }
+
   /// Compact "fast-forward a day" trigger; the simulated clock replaces the label
   /// while a sweep is running.
   private var previewButton: some View {
     Button {
       nightShift.runDayNightPreview()
     } label: {
-      Text(nightShift.previewProgress == nil ? "Preview a day" : nightShift.previewClockText)
-        .font(.body.weight(.medium))
-        .monospacedDigit()
-        .frame(height: controlHeight)
+      HStack(spacing: 10) {
+        Icon(glyph: .clock, size: 24)
+        Text(nightShift.previewProgress == nil ? "Preview a day" : nightShift.previewClockText)
+          .font(.body.weight(.medium))
+          .monospacedDigit()
+      }
+      .frame(height: controlHeight)
     }
     .settingPillStyle(isSelected: false)
     .focused($focusedControl, equals: .preview)
@@ -247,11 +278,11 @@ struct SettingsNightShiftSection: View {
   ) -> some View {
     let index = levels.firstIndex(of: selected) ?? 0
     return HStack(spacing: 14) {
-      stepArrow(.chevronLeft, focus: down, enabled: index > 0) {
+      stepArrow(.minus, focus: down, enabled: index > 0) {
         if index > 0 { commit(levels[index - 1]) }
       }
       stepperValue(display(selected), width: valueWidth)
-      stepArrow(.chevronRight, focus: up, enabled: index < levels.count - 1) {
+      stepArrow(.plus, focus: up, enabled: index < levels.count - 1) {
         if index < levels.count - 1 { commit(levels[index + 1]) }
       }
     }
@@ -265,11 +296,11 @@ struct SettingsNightShiftSection: View {
   ) -> some View {
     let step = NightShiftManager.manualStepMinutes
     return HStack(spacing: 14) {
-      stepArrow(.chevronLeft, focus: down, enabled: true) {
+      stepArrow(.minus, focus: down, enabled: true) {
         commit(wrappedMinutes(minutes - step))
       }
       stepperValue(nightShift.clockLabel(minutes: minutes), width: 150)
-      stepArrow(.chevronRight, focus: up, enabled: true) {
+      stepArrow(.plus, focus: up, enabled: true) {
         commit(wrappedMinutes(minutes + step))
       }
     }
@@ -296,20 +327,13 @@ struct SettingsNightShiftSection: View {
     action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      Icon(glyph: glyph, size: 36)
+      Icon(glyph: glyph, size: 28)
         .frame(width: 40, height: controlHeight)
         .opacity(enabled ? 1 : 0.3)
     }
     .settingPillStyle(isSelected: false)
+    .buttonBorderShape(.circle)
     .focused($focusedControl, equals: focus)
-  }
-
-  private func sectionHeader(_ title: LocalizedStringResource) -> some View {
-    Text(title)
-      .font(.subheadline.weight(.bold))
-      .foregroundStyle(.secondary)
-      .textCase(.uppercase)
-      .tracking(1.6)
   }
 
   private func controlRow<Content: View>(
@@ -318,7 +342,9 @@ struct SettingsNightShiftSection: View {
   ) -> some View {
     HStack(alignment: .center, spacing: 28) {
       Text(title)
-        .font(.headline)
+        .font(.callout.weight(.semibold))
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
         .frame(width: rowLabelWidth, alignment: .leading)
 
       content()
@@ -343,6 +369,46 @@ struct SettingsNightShiftSection: View {
       get: { nightShift.regionID },
       set: { nightShift.regionID = $0 }
     )
+  }
+}
+
+private struct CircadianModeButtonStyle: ButtonStyle {
+  let isSelected: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    CircadianModeButtonBody(configuration: configuration, isSelected: isSelected)
+  }
+}
+
+private struct CircadianModeButtonBody: View {
+  let configuration: ButtonStyle.Configuration
+  let isSelected: Bool
+
+  @Environment(\.isFocused) private var isFocused
+  @Environment(\.colorScheme) private var colorScheme
+
+  private var focusFill: Color {
+    colorScheme == .dark ? .white : .black
+  }
+
+  private var focusForeground: Color {
+    colorScheme == .dark ? .black : .white
+  }
+
+  var body: some View {
+    configuration.label
+      .foregroundStyle(isFocused ? focusForeground : Color.primary)
+      .padding(.horizontal, 24)
+      .padding(.vertical, 11)
+      .background(
+        Capsule(style: .continuous)
+          .fill(
+            isFocused
+              ? focusFill
+              : Color.primary.opacity(isSelected ? 0.13 : 0)
+          )
+      )
+      .opacity(configuration.isPressed ? 0.84 : 1)
   }
 }
 

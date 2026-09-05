@@ -108,10 +108,12 @@ enum NightShiftDimness: String, CaseIterable, Identifiable, Codable {
 
 /// How the on/off schedule is decided. `solar` follows the chosen region's
 /// sunset/sunrise (the original behaviour); `manual` uses two fixed clock times
-/// the viewer picks, in the device's local time zone.
+/// the viewer picks, in the device's local time zone; `alwaysOn` applies the
+/// configured look at full strength around the clock.
 enum NightShiftScheduleMode: String, CaseIterable, Identifiable, Codable {
   case solar
   case manual
+  case alwaysOn
 
   var id: String { rawValue }
 
@@ -119,6 +121,7 @@ enum NightShiftScheduleMode: String, CaseIterable, Identifiable, Codable {
     switch self {
     case .solar: return "Auto"
     case .manual: return "Manual"
+    case .alwaysOn: return "Always On"
     }
   }
 }
@@ -234,7 +237,7 @@ final class NightShiftManager {
   var activeTimeZone: TimeZone {
     switch scheduleMode {
     case .solar: return region.timeZone
-    case .manual: return .current
+    case .manual, .alwaysOn: return .current
     }
   }
 
@@ -365,6 +368,9 @@ final class NightShiftManager {
   func scheduleSummary(now: Date = Date()) -> String {
     let fade = fadeDescription
     switch scheduleMode {
+    case .alwaysOn:
+      return isEnabled ? "Always on at full strength." : "Off. Always On selected."
+
     case .manual:
       let on = clockLabel(minutes: manualOnMinutes)
       let off = clockLabel(minutes: manualOffMinutes)
@@ -408,6 +414,8 @@ final class NightShiftManager {
 
   private func intensity(at date: Date) -> Double {
     switch scheduleMode {
+    case .alwaysOn:
+      return 1
     case .manual:
       return manualIntensity(at: date)
     case .solar:

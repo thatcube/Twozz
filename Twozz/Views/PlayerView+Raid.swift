@@ -100,12 +100,13 @@ extension PlayerView {
     raidBannerDismissTask?.cancel()
     chat.pendingRaid = nil
     clearOutgoingRaidState()
-    activeChannel = login
+    stopPlaybackTelemetry(reason: "channel_switch")
     stopPlaybackWatchdog()
     stopLatencyMonitor()
     player.pause()
-    player.replaceCurrentItem(with: nil)
+    replacePlaybackItem(with: nil)
     currentSourceURL = nil
+    activeChannel = login
     chat.disconnect()
     // Restart the outgoing-raid listener for the new channel so a stale
     // subscription from the previous channel never lingers.
@@ -119,6 +120,9 @@ extension PlayerView {
     streamTitle = ""
     channelDisplayName = ""
     channelAvatarURL = nil
+    isRecoveringPlayback = false
+    altResolveInFlight = false
+    beginPlaybackTelemetry()
     chat.connect(to: login)
     Task {
       async let metadataTask: Void = refreshChannelMetadata()

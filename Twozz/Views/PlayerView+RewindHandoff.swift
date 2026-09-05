@@ -121,7 +121,7 @@ extension PlayerView {
       url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders])
     currentSourceURL = url
     let item = AVPlayerItem(asset: asset)
-    player.replaceCurrentItem(with: item)
+    replacePlaybackItem(with: item)
     await seekReadyItem(item, to: offset)
     installVODTimeObserver()
     replay.start(vodID: broadcast.id, channelLogin: channel.isEmpty ? nil : channel)
@@ -191,6 +191,9 @@ extension PlayerView {
     }
     let time = CMTime(seconds: max(0, offset), preferredTimescale: 600)
     let tolerance = CMTime(seconds: 1, preferredTimescale: 600)
-    await item.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+    let telemetrySeek = model.playbackTelemetry.beginSeek(target: offset, kind: "vod_handoff")
+    let finished = await item.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+    model.playbackTelemetry.finishSeek(
+      telemetrySeek, finished: finished, actual: CMTimeGetSeconds(item.currentTime()))
   }
 }

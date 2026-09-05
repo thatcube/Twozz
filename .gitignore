@@ -53,3 +53,6 @@ AGENTS.local.md
 # Apple sysdiagnose captures (never commit)
 sysdiagnose_*/
 sysdiagnose_*.tar.gz
+
+# Locally pulled playback telemetry
+playback-diagnostics/

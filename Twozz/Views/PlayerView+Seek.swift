@@ -167,6 +167,16 @@ extension PlayerView {
     let liveCap = isVOD ? window.end : max(window.end - targetLiveEdgeSeconds, window.start)
     let base = scrubTargetSeconds ?? window.now
     let target = min(max(base + delta, window.start), liveCap)
+    recordPlaybackEvent(
+      "seek_step_requested",
+      metrics: [
+        "delta_seconds": delta,
+        "from_seconds": base,
+        "target_seconds": target,
+        "window_start_seconds": window.start,
+        "window_end_seconds": window.end,
+      ]
+    )
     if !isVOD { pinnedToLive = target >= liveCap - 0.5 }
     scrubTargetSeconds = target
     updateRewindReadout()
@@ -179,6 +189,10 @@ extension PlayerView {
   /// Resumes playback at the correct rate: the selected speed for VODs, normal
   /// 1.0 for live. Centralizes resume so pause/seek/scrub all honor VOD speed.
   func resumePlayback() {
+    recordPlaybackEvent(
+      "playback_resumed",
+      metrics: ["rate": isVOD ? Double(vodPlaybackRate) : 1.0]
+    )
     if isVOD {
       player.rate = vodPlaybackRate
     } else {
@@ -199,6 +213,13 @@ extension PlayerView {
       isUserPaused = true
       player.pause()
     }
+    recordPlaybackEvent(
+      isUserPaused ? "playback_paused" : "playback_resumed",
+      flags: [
+        "user_paused": isUserPaused,
+        "pinned_to_live": pinnedToLive,
+      ]
+    )
     updateRewindReadout()
     scheduleHide()
   }
@@ -240,6 +261,15 @@ extension PlayerView {
     hideTask?.cancel()
     if scrubTargetSeconds == nil { scrubTargetSeconds = window.now }
     if !isUserPaused { player.pause() }
+    recordPlaybackEvent(
+      "scrub_started",
+      metrics: [
+        "playhead_seconds": window.now,
+        "window_start_seconds": window.start,
+        "window_end_seconds": window.end,
+      ],
+      flags: ["user_paused": isUserPaused]
+    )
   }
 
   /// The swipe (and any momentum tail) has finished: commit a frame-accurate seek
@@ -252,6 +282,11 @@ extension PlayerView {
       resumePlayback()
     }
     scheduleHide()
+    recordPlaybackEvent(
+      "scrub_ended",
+      metrics: ["target_seconds": scrubTargetSeconds ?? -1],
+      flags: ["user_paused": isUserPaused]
+    )
   }
 
   /// Applies one frame of swipe/momentum displacement: convert the raw finger
@@ -317,21 +352,30 @@ extension PlayerView {
     // edge (~the pre-rewind latency). The proxy keeps `retainHistory` on across
     // the swap, so the DVR/rewind window survives the reload.
     if !isVOD, pinnedToLive {
+      recordPlaybackEvent(
+        "seek_promoted_to_live_reload",
+        metrics: ["requested_seconds": seconds]
+      )
       reloadToLiveEdge()
       return
     }
     let time = CMTime(seconds: seconds, preferredTimescale: 600)
+    let telemetrySeek = model.playbackTelemetry.beginSeek(target: seconds, kind: isVOD ? "vod" : "live_dvr")
     player.currentItem?.seek(to: time, completionHandler: { [self] finished in
-      // A frame-accurate live seek can take a second or two to land. If the
-      // viewer swipes again in the meantime, that gesture's seek supersedes this
-      // one (AVPlayer fires this completion with `finished == false`) or a fresh
-      // scrub is already underway. Either way a newer gesture now owns the
-      // playhead, so bailing here keeps its accumulated `scrubTargetSeconds`
-      // intact instead of wiping it back to the pre-seek position.
-      guard finished, !isScrubbing else { return }
-      scrubTargetSeconds = nil
-      if !isUserPaused { resumePlayback() }
-      updateRewindReadout()
+      Task { @MainActor in
+        guard model.playbackTelemetry.finishSeek(
+          telemetrySeek, finished: finished, actual: CMTimeGetSeconds(player.currentTime())) else { return }
+        // A frame-accurate live seek can take a second or two to land. If the
+        // viewer swipes again in the meantime, that gesture's seek supersedes this
+        // one (AVPlayer fires this completion with `finished == false`) or a fresh
+        // scrub is already underway. Either way a newer gesture now owns the
+        // playhead, so bailing here keeps its accumulated `scrubTargetSeconds`
+        // intact instead of wiping it back to the pre-seek position.
+        guard finished, !isScrubbing else { return }
+        scrubTargetSeconds = nil
+        if !isUserPaused { resumePlayback() }
+        updateRewindReadout()
+      }
     })
   }
 
@@ -346,17 +390,31 @@ extension PlayerView {
       if let window = currentSeekWindow() {
         let time = CMTime(seconds: max(window.end - targetLiveEdgeSeconds, window.start),
                           preferredTimescale: 600)
-        player.currentItem?.seek(to: time, completionHandler: { [self] _ in
-          scrubTargetSeconds = nil
-          if !isUserPaused { resumePlayback() }
-          updateRewindReadout()
+        let telemetrySeek = model.playbackTelemetry.beginSeek(
+          target: CMTimeGetSeconds(time), kind: "live_edge_fallback")
+        player.currentItem?.seek(to: time, completionHandler: { [self] finished in
+          Task { @MainActor in
+            guard model.playbackTelemetry.finishSeek(
+              telemetrySeek, finished: finished, actual: CMTimeGetSeconds(player.currentTime())) else { return }
+            scrubTargetSeconds = nil
+            if !isUserPaused { resumePlayback() }
+            updateRewindReadout()
+          }
         })
+        recordPlaybackEvent(
+          "live_edge_seek_fallback",
+          metrics: ["target_seconds": CMTimeGetSeconds(time)]
+        )
       }
       return
     }
+    recordPlaybackEvent(
+      "live_edge_reload_started",
+      attributes: ["source_host": source.host ?? "unknown"]
+    )
     scrubTargetSeconds = nil
     pinnedToLive = true
-    player.replaceCurrentItem(with: makeItem(url: source))
+    replacePlaybackItem(with: makeItem(url: source))
     applyQualityPreference(preferredQuality)
     if !isUserPaused { startPlayback() }
     updateRewindReadout()

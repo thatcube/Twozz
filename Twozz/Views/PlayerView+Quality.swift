@@ -21,8 +21,26 @@ extension PlayerView {
   /// Applies the active policy to the live item without swapping the source —
   /// used when only the profile changes (the master URL stays the same).
   func applyActiveLivePlaybackPolicy() {
-    player.currentItem?.preferredForwardBufferDuration =
-      activeLivePlaybackPolicy.preferredForwardBufferDuration
+    let policy = activeLivePlaybackPolicy
+    player.currentItem?.preferredForwardBufferDuration = policy.preferredForwardBufferDuration
+    recordPlaybackEvent(
+      "playback_policy_applied",
+      attributes: [
+        "profile": isStreamUnstable ? "stability_fallback" : livePlaybackProfile.rawValue,
+        "quality": preferredQuality,
+      ],
+      metrics: [
+        "forward_buffer_seconds": policy.preferredForwardBufferDuration,
+        "min_playback_rate": Double(policy.minPlaybackRate),
+        "max_catch_up_rate": Double(policy.maxCatchUpRate),
+        "slowdown_buffer_floor_seconds": policy.slowdownBufferFloorSeconds,
+        "catch_up_buffer_floor_seconds": policy.catchUpHealthyBufferSeconds,
+      ],
+      flags: [
+        "gentle_catch_up_enabled": policy.enablesGentleCatchUp,
+        "pinned_quality": preferredQuality != "Auto",
+      ]
+    )
     applyLiveLatencyCorrection()
   }
 
@@ -138,6 +156,8 @@ extension PlayerView {
   func selectQuality(at index: Int) {
     guard qualityOptions.indices.contains(index) else { return }
     let option = qualityOptions[index]
+    let previousQuality = preferredQuality
+    let previousProfile = livePlaybackProfile.rawValue
     if let profile = LivePlaybackProfile.allCases.first(where: { $0.pickerLabel == option }) {
       // One of the two Auto rows: stay on the adaptive master, just switch the
       // latency-vs-quality profile and re-apply its buffer/catch-up policy.
@@ -153,6 +173,16 @@ extension PlayerView {
       applyQualityPreference(option)
     }
     updateResolvedQuality()
+    recordPlaybackEvent(
+      "quality_selected",
+      attributes: [
+        "selection": option,
+        "previous_quality": previousQuality,
+        "previous_profile": previousProfile,
+        "current_quality": preferredQuality,
+        "current_profile": livePlaybackProfile.rawValue,
+      ]
+    )
     focus = .quality
     scheduleHide()
   }

@@ -79,7 +79,7 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         return URLSession(configuration: config)
     }()
 
-    private var tasks: [ObjectIdentifier: URLSessionDataTask] = [:]
+    private var tasks: [ObjectIdentifier: (task: URLSessionDataTask, telemetryID: TelemetryRequest)] = [:]
 
     // MARK: - Predictive instability detection (tuning)
 
@@ -193,6 +193,51 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         return DVRStats(retainedSeconds: dvrStatsRetainedSeconds, keyCount: dvrStatsKeyCount)
     }
 
+    /// Aggregated proxy/network evidence sampled by the persistent playback
+    /// telemetry recorder. URLs are reduced to a host name so signed query
+    /// parameters and playback tokens never enter diagnostics.
+    struct TelemetrySnapshot: Sendable {
+        var requestCount = 0
+        var failedRequestCount = 0
+        var cancelledRequestCount = 0
+        var activeRequestCount = 0
+        var lastStatusCode = 0
+        var lastRequestDurationMilliseconds = 0.0
+        var lastResponseBytes = 0
+        var lastHost = ""
+        var lastFailureStatusCode = 0
+        var lastFailureErrorCode = 0
+        var lastFailureUptime = 0.0
+        var mediaPlaylistRefreshes = 0
+        var lastMediaSequence = 0
+        var lastTailSequence = 0
+        var lastSegmentCount = 0
+        var lastPrefetchCount = 0
+        var lastPromotedPrefetchCount = 0
+        var lastTargetDurationSeconds = 0.0
+        var lastDiscontinuityCount = 0
+        var retainedSegmentCount = 0
+        var retainedSeconds = 0.0
+        var promotesPrefetch = false
+        var retainsHistory = false
+    }
+
+    private let telemetryLock = NSLock()
+    private var telemetryState = TelemetrySnapshot()
+    private var telemetryRequests: [UUID: Double] = [:]
+    private var telemetryGeneration = UUID()
+
+    struct TelemetryRequest: Sendable {
+        let id: UUID
+        let generation: UUID
+    }
+
+    var telemetrySnapshot: TelemetrySnapshot {
+        telemetryLock.lock()
+        defer { telemetryLock.unlock() }
+        return telemetryState
+    }
+
     /// One parsed HLS segment (a real `#EXTINF` segment or a promoted prefetch),
     /// kept as its full text block so per-segment tags (PROGRAM-DATE-TIME,
     /// DISCONTINUITY, …) survive into the rewritten playlist verbatim.
@@ -273,9 +318,17 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             self.promotePrefetch = promotePrefetch
             if self.retainHistory != retainHistory {
                 self.dvrBuffers.removeAll()
+                self.updateTelemetry {
+                    $0.retainedSegmentCount = 0
+                    $0.retainedSeconds = 0
+                }
             }
             self.retainHistory = retainHistory
             self.dvrWindowSeconds = windowSeconds
+            self.updateTelemetry {
+                $0.promotesPrefetch = promotePrefetch
+                $0.retainsHistory = retainHistory
+            }
         }
     }
 
@@ -287,6 +340,10 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             guard let self else { return }
             self.dvrBuffers.removeAll()
             self.clearInstabilityState()
+            self.updateTelemetry {
+                $0.retainedSegmentCount = 0
+                $0.retainedSeconds = 0
+            }
         }
     }
 
@@ -314,6 +371,55 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         delegateQueue.async { [weak self] in
             self?.clearInstabilityState()
         }
+    }
+
+    func resetTelemetry() {
+        telemetryLock.lock()
+        telemetryRequests.removeAll()
+        telemetryGeneration = UUID()
+        telemetryState = TelemetrySnapshot(
+            promotesPrefetch: telemetryState.promotesPrefetch,
+            retainsHistory: telemetryState.retainsHistory
+        )
+        telemetryLock.unlock()
+    }
+
+    func beginTelemetryRequest(host: String, uptime: Double = ProcessInfo.processInfo.systemUptime) -> TelemetryRequest {
+        telemetryLock.lock()
+        defer { telemetryLock.unlock() }
+        let id = UUID()
+        telemetryRequests[id] = uptime
+        telemetryState.requestCount += 1
+        telemetryState.activeRequestCount = telemetryRequests.count
+        telemetryState.lastHost = host
+        return TelemetryRequest(id: id, generation: telemetryGeneration)
+    }
+
+    /// Completion and cancellation compete for the same token. Removing it once
+    /// prevents double-decrements, and a reset invalidates callbacks from old items.
+    @discardableResult
+    func finishTelemetryRequest(
+        _ request: TelemetryRequest, status: Int = 0, errorCode: Int = 0, responseBytes: Int = 0,
+        cancelled: Bool = false, uptime: Double = ProcessInfo.processInfo.systemUptime
+    ) -> Bool {
+        telemetryLock.lock()
+        defer { telemetryLock.unlock() }
+        guard let started = telemetryRequests.removeValue(forKey: request.id) else { return false }
+        telemetryState.activeRequestCount = telemetryRequests.count
+        if cancelled {
+            telemetryState.cancelledRequestCount += 1
+        } else {
+            telemetryState.lastStatusCode = status
+            telemetryState.lastRequestDurationMilliseconds = max(0, uptime - started) * 1_000
+            telemetryState.lastResponseBytes = responseBytes
+            if errorCode != 0 || !(200...299).contains(status) {
+                telemetryState.failedRequestCount += 1
+                telemetryState.lastFailureStatusCode = status
+                telemetryState.lastFailureErrorCode = errorCode
+                telemetryState.lastFailureUptime = uptime
+            }
+        }
+        return true
     }
 
     /// Must be called on `delegateQueue`.
@@ -351,10 +457,16 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         for (key, value) in upstreamHeaders { req.setValue(value, forHTTPHeaderField: key) }
 
         let key = ObjectIdentifier(loadingRequest)
+        let telemetryID = beginTelemetryRequest(host: realURL.host ?? "")
         let task = session.dataTask(with: req) { [weak self] data, response, error in
             guard let self else { return }
             self.delegateQueue.async {
                 self.tasks[key] = nil
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let errorCode = (error as NSError?)?.code ?? 0
+                self.finishTelemetryRequest(
+                    telemetryID, status: status, errorCode: errorCode, responseBytes: data?.count ?? 0,
+                    cancelled: loadingRequest.isCancelled || errorCode == NSURLErrorCancelled)
                 if loadingRequest.isFinished || loadingRequest.isCancelled { return }
 
                 guard let data, error == nil else {
@@ -362,19 +474,19 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
                     return
                 }
 
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 200
                 guard (200...299).contains(status) else {
                     loadingRequest.finishLoading(with: PlaybackError.http(status))
                     return
                 }
 
                 let text = String(decoding: data, as: UTF8.self)
-                let rewritten = self.rewrite(playlist: text, sourceURL: realURL)
+                let rewritten = self.rewrite(playlist: text, sourceURL: realURL,
+                                             telemetryGeneration: telemetryID.generation)
                 self.fulfill(loadingRequest, with: rewritten)
             }
         }
         delegateQueue.async { [weak self] in
-            self?.tasks[key] = task
+            self?.tasks[key] = (task, telemetryID)
         }
         task.resume()
         return true
@@ -386,19 +498,20 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     ) {
         let key = ObjectIdentifier(loadingRequest)
         delegateQueue.async { [weak self] in
-            self?.tasks[key]?.cancel()
-            self?.tasks[key] = nil
+            guard let self, let request = self.tasks.removeValue(forKey: key) else { return }
+            self.finishTelemetryRequest(request.telemetryID, cancelled: true)
+            request.task.cancel()
         }
     }
 
     // MARK: - Playlist rewriting
 
     /// Dispatches to the master- or media-playlist rewriter based on content.
-    private func rewrite(playlist text: String, sourceURL: URL) -> Data {
+    private func rewrite(playlist text: String, sourceURL: URL, telemetryGeneration: UUID? = nil) -> Data {
         if text.contains(Self.streamInfTag) {
             return rewriteMasterPlaylist(text)
         }
-        return rewriteMediaPlaylist(text, sourceURL: sourceURL)
+        return rewriteMediaPlaylist(text, sourceURL: sourceURL, telemetryGeneration: telemetryGeneration)
     }
 
     /// Reroutes variant + alternate-media (`URI="..."`) playlist URLs onto the
@@ -437,8 +550,28 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     ///   `dvrWindowSeconds`; the `#EXT-X-MEDIA-SEQUENCE` /
     ///   `#EXT-X-DISCONTINUITY-SEQUENCE` headers are rewritten to stay consistent
     ///   as the window slides.
-    private func rewriteMediaPlaylist(_ text: String, sourceURL: URL) -> Data {
+    private func rewriteMediaPlaylist(_ text: String, sourceURL: URL, telemetryGeneration: UUID? = nil) -> Data {
         let parsed = parseMediaPlaylist(text)
+        let targetDuration = targetDurationSeconds(parsed)
+        let discontinuities =
+            parsed.discontinuitySequence + parsed.segments.filter { $0.isDiscontinuity }.count
+        updateTelemetry(generation: telemetryGeneration) {
+            $0.mediaPlaylistRefreshes += 1
+            $0.lastMediaSequence = parsed.mediaSequence
+            $0.lastTailSequence = parsed.mediaSequence + parsed.segments.count
+            $0.lastSegmentCount = parsed.segments.count
+            $0.lastPrefetchCount = parsed.prefetch.count
+            $0.lastPromotedPrefetchCount = promotePrefetch ? parsed.prefetch.count : 0
+            $0.lastTargetDurationSeconds = targetDuration
+            $0.lastDiscontinuityCount = discontinuities
+            $0.lastHost = sourceURL.host ?? ""
+            $0.promotesPrefetch = promotePrefetch
+            $0.retainsHistory = retainHistory
+            if !retainHistory {
+                $0.retainedSegmentCount = 0
+                $0.retainedSeconds = 0
+            }
+        }
 
         // Observe every refresh for predictive instability before any rewriting.
         recordInstabilitySignals(parsed, sourceURL: sourceURL)
@@ -492,6 +625,12 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         dvrStatsRetainedSeconds = buf.totalDuration
         dvrStatsKeyCount = dvrBuffers.count
         dvrStatsLock.unlock()
+        updateTelemetry(generation: telemetryGeneration) {
+            $0.retainedSegmentCount = buf.segments.count
+            $0.retainedSeconds = buf.totalDuration
+            $0.lastPromotedPrefetchCount = promotePrefetch
+                ? parsed.prefetch.filter { !buf.seenURLs.contains($0.url) }.count : 0
+        }
 
         let header = rebuildHeader(
             parsed.header,
@@ -762,6 +901,13 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         instabilityLock.lock()
         instabilitySnapshot = snapshot
         instabilityLock.unlock()
+    }
+
+    private func updateTelemetry(generation: UUID? = nil, _ update: (inout TelemetrySnapshot) -> Void) {
+        telemetryLock.lock()
+        defer { telemetryLock.unlock() }
+        guard generation == nil || generation == telemetryGeneration else { return }
+        update(&telemetryState)
     }
 
     /// `#EXT-X-TARGETDURATION` if present, else the median listed segment duration.

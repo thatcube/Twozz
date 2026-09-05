@@ -112,6 +112,72 @@ and release steps all live in **[CONTRIBUTING.md](CONTRIBUTING.md)**. Notes on
 the low-latency playback work are in
 [`docs/low-latency.md`](docs/low-latency.md).
 
+### Playback diagnostics
+
+Twozz keeps a bounded, local JSONL playback log in its app cache so lag reports
+can be examined after the fact. Logging samples playback state about every two
+seconds and records noteworthy state changes, stalls, access/error-log updates,
+seeks, and recovery actions. It is diagnostic observation only; enabling it does
+not change playback tuning.
+
+Pull the retained logs from the paired Apple TV and summarize the current or
+most recent session:
+
+```bash
+python3 tools/playback-diagnostics.py pull --device <device-id>
+```
+
+Select a paired Apple TV with `--device` or the `TWOZZ_DEVICE_ID` environment
+variable. The default bundle is `com.thatcube.Twozz`. Every pull goes into a new
+UTC-stamped directory under the gitignored `playback-diagnostics/` directory:
+
+```bash
+python3 tools/playback-diagnostics.py pull \
+  --device <device-id> --bundle com.thatcube.Twozz
+python3 tools/playback-diagnostics.py pull --device <device-id> --session <session-uuid> --json
+```
+
+Previously pulled data can be analyzed without Xcode or a connected device:
+
+```bash
+python3 tools/playback-diagnostics.py analyze playback-diagnostics/<timestamp>
+python3 tools/playback-diagnostics.py analyze <file.jsonl> --session <session-uuid>
+python3 tools/playback-diagnostics.py analyze playback-diagnostics/<timestamp> --all --json
+```
+
+By default, analysis uses `latest-session.json`, or the session containing the
+newest record when no manifest is available. `--all` reports retained sessions
+separately; sessions are never silently combined. A copied, incomplete final
+JSON line is warned about and ignored, while completed corrupt lines and unknown
+schema versions fail analysis. Sequence gaps, dropped telemetry, reclaimed
+rotation parts, bounded native access/error-log backlog skips, and sessions that
+are still active are marked as partial evidence.
+
+The cache retains at most eight 4 MiB files across all sessions (about 32 MiB)
+and tvOS may reclaim it. It does not contain OAuth credentials, full URLs,
+request headers, server IP addresses, AVPlayer session IDs, SDK localized error
+prose, or error comments. Failures retain only structured evidence such as
+error domain/code or AVPlayer error-log status code. Public channel names and
+viewing timestamps do appear. The tool reads locally and never uploads logs.
+
+Interpret summaries cautiously. Proxy timings cover playlist/master requests,
+not media segment transfers; AVPlayer access-log throughput is a coarse
+cumulative estimate, not an instantaneous network test. Low buffer, bitrate
+differences, dropped frames, healthy-buffer waits, decode freezes, controller
+interventions, and thermal state can support hypotheses but do not prove a root
+cause. Rates cover the retained record window; initial cumulative values in a
+partial tail are treated as baselines, so its counter deltas are lower bounds.
+`recovery_completed` describes the recovery task returning
+(`load_returned`, `load_failed`, or `offline`); later clock/frame progress is the
+health evidence. `first_clock_progress` confirms clock movement.
+`first_video_output_frame` is currently native-Twitch-only, may be up to one
+watchdog interval late, and records an observed pixel buffer rather than proof
+that a picture was rendered on screen. A seek callback arriving after the
+15-second `seek_deadline_exceeded` event confirms only that the target callback
+landed, not that a picture rendered. The proxy's last failure status, error code,
+and monotonic uptime remain in samples after a later success so the failure is
+not mistaken for the latest request.
+
 ## Donate
 
 Twozz is free and open source, and it always will be. There's no paywall, no

@@ -413,6 +413,9 @@ extension PlayerView {
     lines.append("Chat hold: \(chatHold)")
     lines.append(
       "Stalls: \(diagStallCount) · Jumps: \(diagJumpCount) · Reloads: \(diagReloadCount)")
+    if let sessionID = model.playbackTelemetry.shortSessionID {
+      lines.append("Telemetry session: \(sessionID)")
+    }
 
     return lines
   }

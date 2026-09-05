@@ -9,6 +9,53 @@ final class LowLatencyHLSProxyTests: XCTestCase {
 
   private let source = URL(string: "https://video.example/chunked.m3u8")!
 
+  func testTelemetryCancellationIsCountedExactlyOnce() {
+    let proxy = makeProxy()
+    let cancelled = proxy.beginTelemetryRequest(host: "video.example", uptime: 0)
+    let active = proxy.beginTelemetryRequest(host: "video.example", uptime: 1)
+    XCTAssertTrue(proxy.finishTelemetryRequest(cancelled, cancelled: true, uptime: 2))
+    XCTAssertFalse(proxy.finishTelemetryRequest(cancelled, errorCode: -999, uptime: 3))
+    XCTAssertEqual(proxy.telemetrySnapshot.activeRequestCount, 1)
+    XCTAssertEqual(proxy.telemetrySnapshot.cancelledRequestCount, 1)
+    XCTAssertEqual(proxy.telemetrySnapshot.failedRequestCount, 0)
+    proxy.finishTelemetryRequest(active, status: 200, responseBytes: 1_024, uptime: 4)
+    XCTAssertEqual(proxy.telemetrySnapshot.activeRequestCount, 0)
+    XCTAssertEqual(proxy.telemetrySnapshot.lastRequestDurationMilliseconds, 3_000)
+  }
+
+  func testTelemetryResetRejectsStaleCallbacksAndKeepsFailureEvidence() {
+    let proxy = makeProxy()
+    let stale = proxy.beginTelemetryRequest(host: "old.example", uptime: 0)
+    proxy.resetTelemetry()
+    let failed = proxy.beginTelemetryRequest(host: "new.example", uptime: 1)
+    XCTAssertFalse(proxy.finishTelemetryRequest(stale, status: 500, uptime: 2))
+    proxy.finishTelemetryRequest(failed, status: 503, uptime: 3)
+    let succeeded = proxy.beginTelemetryRequest(host: "new.example", uptime: 4)
+    proxy.finishTelemetryRequest(succeeded, status: 200, uptime: 5)
+    let snapshot = proxy.telemetrySnapshot
+    XCTAssertEqual(snapshot.requestCount, 2)
+    XCTAssertEqual(snapshot.failedRequestCount, 1)
+    XCTAssertEqual(snapshot.lastStatusCode, 200)
+    XCTAssertEqual(snapshot.lastFailureStatusCode, 503)
+    XCTAssertEqual(snapshot.lastFailureUptime, 3)
+    XCTAssertEqual(snapshot.activeRequestCount, 0)
+  }
+
+  func testPlaylistTelemetryCountsPromotionAndClearsRetention() {
+    let proxy = makeProxy()
+    let playlist = mediaPlaylist(mediaSequence: 100, segments: [("a", 2), ("b", 2)], prefetch: ["c"])
+    _ = proxy.rewriteMediaPlaylistForTesting(
+      playlist, sourceURL: source, promotePrefetch: true, retainHistory: true)
+    XCTAssertEqual(proxy.telemetrySnapshot.lastPromotedPrefetchCount, 1)
+    XCTAssertEqual(proxy.telemetrySnapshot.retainedSeconds, 4)
+    _ = proxy.rewriteMediaPlaylistForTesting(
+      playlist, sourceURL: source, promotePrefetch: false, retainHistory: false)
+    XCTAssertEqual(proxy.telemetrySnapshot.lastPromotedPrefetchCount, 0)
+    XCTAssertEqual(proxy.telemetrySnapshot.retainedSeconds, 0)
+    XCTAssertEqual(proxy.telemetrySnapshot.retainedSegmentCount, 0)
+    XCTAssertEqual(proxy.telemetrySnapshot.mediaPlaylistRefreshes, 2)
+  }
+
   /// A minimal Twitch-style live media playlist with two real segments and one
   /// prefetch tag. `durations` sets each real segment's `#EXTINF`.
   private func mediaPlaylist(

@@ -54,6 +54,10 @@ final class PlayerModel {
   /// loader delegate weakly, so the proxy must be owned here to stay alive.
   let lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
 
+  /// Always-on structured playback recorder. It mirrors key events to OSLog and
+  /// persists a bounded JSONL session for agent-driven postmortem analysis.
+  let playbackTelemetry = PlaybackTelemetryRecorder()
+
   // MARK: Monitoring boxes
   // Plain (non-`@Observable`) reference boxes for the once-per-second / per-frame
   // bookkeeping written by the latency, watchdog and scrub loops. Mutating their
@@ -236,6 +240,7 @@ final class PlayerModel {
   var latencyTask: Task<Void, Never>?
   var playbackWatchdogTask: Task<Void, Never>?
   var rateControlTask: Task<Void, Never>?
+  var playbackTelemetryTask: Task<Void, Never>?
 
   /// When the app last entered the background, or `nil` while it's in the
   /// foreground. Drives the live-edge catch-up on return; see

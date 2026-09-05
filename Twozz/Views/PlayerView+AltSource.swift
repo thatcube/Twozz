@@ -44,6 +44,7 @@ extension PlayerView {
   /// latency monitor keeps running so the Diagnostics readout still measures.
   func switchToAltYouTubeSource() async {
     guard !isVOD else { return }
+    recordPlaybackEvent("source_switch_started", attributes: ["to_source": "youtube"])
     isUsingAltSource = true
     altFailedRetries = 0
     lastAltResolveAt = Date.distantPast
@@ -59,11 +60,31 @@ extension PlayerView {
   /// soft-flagged by YouTube's anti-bot).
   func resolveAndPlayAltSource(reason: String) async {
     guard isUsingAltSource, !isVOD else { return }
-    guard !altResolveInFlight else { return }
-    guard Date().timeIntervalSince(lastAltResolveAt) >= 10 else { return }
+    guard !altResolveInFlight else {
+      recordPlaybackEvent(
+        "alternate_resolve_suppressed",
+        attributes: ["reason": reason, "cause": "already_in_flight"]
+      )
+      return
+    }
+    guard Date().timeIntervalSince(lastAltResolveAt) >= 10 else {
+      recordPlaybackEvent(
+        "alternate_resolve_suppressed",
+        attributes: ["reason": reason, "cause": "cooldown"]
+      )
+      return
+    }
     altResolveInFlight = true
     lastAltResolveAt = Date()
-    defer { altResolveInFlight = false }
+    let telemetrySessionID = model.playbackTelemetry.sessionID
+    defer {
+      if telemetrySessionID == model.playbackTelemetry.sessionID { altResolveInFlight = false }
+    }
+    let resolveStartedAt = ProcessInfo.processInfo.systemUptime
+    recordPlaybackEvent(
+      "alternate_resolve_started",
+      attributes: ["reason": reason, "source": "youtube"]
+    )
 
     let login = activeChannel
     altSourceStatus = "Resolving YouTube simulcast…"
@@ -72,37 +93,60 @@ extension PlayerView {
     if target.isEmpty {
       target = await Self.resolveYouTubeTarget(forTwitchLogin: login)
     }
-    guard login == activeChannel, isUsingAltSource else { return }
+    guard login == activeChannel, isUsingAltSource,
+      telemetrySessionID == model.playbackTelemetry.sessionID else { return }
     guard !target.isEmpty else {
       altSourceStatus = "No YouTube link for this channel."
+      recordPlaybackEvent(
+        "alternate_resolve_failed",
+        level: .warning,
+        attributes: ["reason": reason, "cause": "no_channel_mapping"]
+      )
       return
     }
     youtubeAutoResolvedTarget = target
 
     let resolved = await AltSourceService.youtubeLive(forTarget: target)
-    guard login == activeChannel, isUsingAltSource else { return }
+    guard login == activeChannel, isUsingAltSource,
+      telemetrySessionID == model.playbackTelemetry.sessionID else { return }
     youtubeViewerCount = resolved.concurrentViewers
     guard let master = resolved.hlsMaster else {
       altSourceStatus = "YouTube simulcast not live / not found."
+      recordPlaybackEvent(
+        "alternate_resolve_failed",
+        level: .warning,
+        attributes: ["reason": reason, "cause": "not_live_or_not_found"],
+        metrics: ["resolve_duration_seconds": ProcessInfo.processInfo.systemUptime - resolveStartedAt]
+      )
       return
     }
 
     altYouTubeMasterURL = master
-    player.replaceCurrentItem(with: makeAltSourceItem(url: master))
+    replacePlaybackItem(with: makeAltSourceItem(url: master))
     startPlayback()
     altSourceStatus = "Playing YouTube simulcast"
+    recordPlaybackEvent(
+      "source_switch_completed",
+      attributes: [
+        "to_source": "youtube",
+        "source_host": master.host ?? "unknown",
+      ],
+      metrics: ["resolve_duration_seconds": ProcessInfo.processInfo.systemUptime - resolveStartedAt]
+    )
   }
 
   /// Restores the proxied Twitch source and its control loops.
   func switchToTwitchSource() {
+    recordPlaybackEvent("source_switch_started", attributes: ["to_source": "twitch"])
     isUsingAltSource = false
     altSourceStatus = nil
     guard let playback else { return }
-    player.replaceCurrentItem(with: makeItem(url: playback.master))
+    replacePlaybackItem(with: makeItem(url: playback.master))
     applyQualityPreference(preferredQuality)
     startPlayback()
     startRateController()
     startPlaybackWatchdog()
+    recordPlaybackEvent("source_switch_completed", attributes: ["to_source": "twitch"])
   }
 
   // MARK: - Stream source selection (quality-menu picker)
@@ -215,6 +259,16 @@ extension PlayerView {
           + " · YouTube is blocking the live segments (403, proof-of-origin token "
           + "required). Re-select YouTube to retry."
       }
+      recordPlaybackEvent(
+        "alternate_item_failed",
+        level: .error,
+        attributes: [
+          "source_host": host,
+          "error_domain": (item.error as NSError?)?.domain ?? "unknown",
+          "error_code": String((item.error as NSError?)?.code ?? 0),
+        ],
+        counters: ["retry_count": altFailedRetries]
+      )
     case .unknown:
       altSourceStatus = "\(srcTag) · loading manifest…"
     case .readyToPlay:

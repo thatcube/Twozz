@@ -47,6 +47,12 @@ extension PlayerView {
     if !diagWasStalled {
       diagWasStalled = true
       diagStallCount += 1
+      recordPlaybackEvent(
+        "stall_detected",
+        level: .warning,
+        attributes: ["reason": reason],
+        counters: ["stall_count": diagStallCount]
+      )
       if showLatencyDiagnostics {
         logDiagnosticsEvent("stall (\(reason))")
       }
@@ -83,8 +89,15 @@ extension PlayerView {
     guard !isUserPaused, !isScrubbing else { return }
     guard lowLatencyProxy.predictedUnstable else { return }
     streamUnstableWasPredicted = true
+    let snap = lowLatencyProxy.instabilityDiagnostics
+    recordPlaybackEvent(
+      "proxy_predicted_instability",
+      level: .warning,
+      attributes: ["reason": snap.detail],
+      metrics: ["score": snap.score],
+      counters: ["refreshes": snap.refreshes]
+    )
     if showLatencyDiagnostics {
-      let snap = lowLatencyProxy.instabilityDiagnostics
       logDiagnosticsEvent(
         "predicted unstable (\(snap.detail), score \(diagFormat(snap.score, decimals: 1)))")
     }
@@ -126,6 +139,14 @@ extension PlayerView {
     // would seek the alt item backward or reload it into Twitch.
     guard !isUsingAltSource else { return }
     streamUnstableSince = Date()
+    recordPlaybackEvent(
+      "stability_mode_entered",
+      level: .warning,
+      attributes: [
+        "trigger": streamUnstableWasPredicted ? "predictive" : "observed",
+      ],
+      flags: ["low_latency_proxy_enabled": lowLatencyProxyEnabled]
+    )
     if showLatencyDiagnostics {
       logDiagnosticsEvent("stream unstable -> stability mode")
     }
@@ -150,12 +171,17 @@ extension PlayerView {
     let startSeconds = start.map { CMTimeGetSeconds($0) } ?? 0
     let target = max(edge - stabilityTargetBehindEdgeSeconds, startSeconds)
     let tolerance = CMTime(seconds: 1.0, preferredTimescale: 600)
+    let telemetrySeek = model.playbackTelemetry.beginSeek(target: target, kind: "stability_buffer")
     item.seek(
       to: CMTime(seconds: target, preferredTimescale: 600),
       toleranceBefore: tolerance,
       toleranceAfter: tolerance
-    ) { [self] _ in
-      player.playImmediately(atRate: 1.0)
+    ) { [self] finished in
+      Task { @MainActor in
+        guard model.playbackTelemetry.finishSeek(
+          telemetrySeek, finished: finished, actual: CMTimeGetSeconds(item.currentTime())) else { return }
+        player.playImmediately(atRate: 1.0)
+      }
     }
   }
 
@@ -164,8 +190,6 @@ extension PlayerView {
   /// skip-to-live shows up as several seconds of unexplained forward advance.
   func sampleDiagnostics() {
     guard showLatencyDiagnostics else {
-      // Diagnostics is off by default; only write when there's something to
-      // clear so this per-second call doesn't invalidate the player each tick.
       if diagLastPlayheadSeconds != nil { diagLastPlayheadSeconds = nil }
       if diagLastSampleAt != nil { diagLastSampleAt = nil }
       return
@@ -188,10 +212,28 @@ extension PlayerView {
 
       if forwardDrift >= diagJumpForwardThresholdSeconds {
         diagJumpCount += 1
-        logDiagnosticsEvent("jump +\(diagFormat(forwardDrift, decimals: 1))s forward")
+        recordPlaybackEvent(
+          "playhead_jump",
+          level: .warning,
+          attributes: ["direction": "forward"],
+          metrics: ["delta_seconds": forwardDrift],
+          counters: ["jump_count": diagJumpCount]
+        )
+        if showLatencyDiagnostics {
+          logDiagnosticsEvent("jump +\(diagFormat(forwardDrift, decimals: 1))s forward")
+        }
       } else if advanced <= -diagJumpBackwardThresholdSeconds {
         diagJumpCount += 1
-        logDiagnosticsEvent("jump \(diagFormat(advanced, decimals: 1))s back")
+        recordPlaybackEvent(
+          "playhead_jump",
+          level: .warning,
+          attributes: ["direction": "backward"],
+          metrics: ["delta_seconds": advanced],
+          counters: ["jump_count": diagJumpCount]
+        )
+        if showLatencyDiagnostics {
+          logDiagnosticsEvent("jump \(diagFormat(advanced, decimals: 1))s back")
+        }
       }
 
       if advanced >= 0.05 {
@@ -252,7 +294,8 @@ extension PlayerView {
     if output.hasNewPixelBuffer(forItemTime: itemTime) {
       // Consume the frame so the next poll's freshness check is meaningful, then
       // clear the freeze timer — the picture is genuinely advancing.
-      _ = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil)
+      let frame = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil)
+      if frame != nil { model.playbackTelemetry.videoFrameObserved() }
       videoDecodeFrozenSince = nil
       return
     }
@@ -266,6 +309,15 @@ extension PlayerView {
       diagFrozenSince = videoDecodeFrozenSince
     }
     if frozenFor >= videoDecodeFreezeRecoverySeconds {
+      recordPlaybackEvent(
+        "video_decode_freeze",
+        level: .error,
+        metrics: [
+          "frozen_seconds": frozenFor,
+          "clock_advanced_seconds": clockAdvanced,
+          "buffer_ahead_seconds": bufferAheadSeconds(item) ?? -1,
+        ]
+      )
       if showLatencyDiagnostics {
         logDiagnosticsEvent("video frozen (clock running) -> reload")
       }

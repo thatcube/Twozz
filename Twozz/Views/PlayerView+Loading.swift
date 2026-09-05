@@ -29,7 +29,21 @@ extension PlayerView {
     // would clobber the alt item (and the loops then seek it backward). Ignore
     // reloads — from proxy/rewind toggles, stability mode, or stall recovery —
     // until the user switches back to Twitch (`switchToTwitchSource`).
-    guard !isUsingAltSource else { return }
+    guard !isUsingAltSource else {
+      recordPlaybackEvent(
+        "load_suppressed",
+        attributes: ["reason": reason, "cause": "alternate_source_active"]
+      )
+      return
+    }
+    let telemetrySessionID = model.playbackTelemetry.sessionID
+    let loadingChannel = activeChannel
+    recordPlaybackEvent(
+      "load_started",
+      attributes: ["reason": reason],
+      counters: ["max_attempts": maxAttempts],
+      flags: ["reset_metadata": resetMetadata]
+    )
     isLoading = true
     errorMessage = nil
     isOffline = false
@@ -40,15 +54,39 @@ extension PlayerView {
 
     var lastError: Error?
     for attempt in 1...maxAttempts {
+      guard telemetrySessionID == model.playbackTelemetry.sessionID,
+        loadingChannel == activeChannel else { return }
+      let attemptStartedAt = ProcessInfo.processInfo.systemUptime
+      recordPlaybackEvent(
+        "load_attempt_started",
+        attributes: ["reason": reason],
+        counters: ["attempt": attempt]
+      )
       do {
         let resolved = try await resolvePlaybackWithTimeout()
+        guard telemetrySessionID == model.playbackTelemetry.sessionID,
+          loadingChannel == activeChannel else { return }
+        recordPlaybackEvent(
+          "playback_resolved",
+          metrics: ["resolve_duration_seconds": ProcessInfo.processInfo.systemUptime - attemptStartedAt],
+          counters: [
+            "attempt": attempt,
+            "quality_count": resolved.qualities.count,
+          ]
+        )
         // The view was dismissed (its `.task` cancelled) while we were resolving.
         // Bail out instead of resurrecting playback on an orphaned AVPlayer, which
         // would keep audio running off-screen — and double up if the user reopens
         // the stream.
         if Task.isCancelled {
+          recordPlaybackEvent(
+            "load_cancelled",
+            level: .warning,
+            attributes: ["reason": reason],
+            counters: ["attempt": attempt]
+          )
           player.pause()
-          player.replaceCurrentItem(with: nil)
+          replacePlaybackItem(with: nil)
           return
         }
         // A "prefer YouTube" auto-default (or a manual pick) may have promoted
@@ -56,19 +94,32 @@ extension PlayerView {
         // before swapping in the Twitch item / re-arming the Twitch-only control
         // loops, so we don't clobber the alt source or cause a visible flap.
         if isUsingAltSource {
+          recordPlaybackEvent(
+            "load_cancelled",
+            attributes: ["reason": reason, "cause": "alternate_source_promoted"],
+            counters: ["attempt": attempt]
+          )
           isLoading = false
           return
         }
         playback = resolved
-        player.replaceCurrentItem(with: makeItem(url: resolved.master))
+        replacePlaybackItem(with: makeItem(url: resolved.master))
         applyQualityPreference(preferredQuality)
         startPlayback()
 
         let started = await waitForPlaybackStart()
+        guard telemetrySessionID == model.playbackTelemetry.sessionID,
+          loadingChannel == activeChannel else { return }
         if !started {
           throw LoadTimeoutError.noPlaybackProgress
         }
 
+        recordPlaybackEvent(
+          "playback_started",
+          attributes: ["reason": reason],
+          metrics: ["startup_duration_seconds": ProcessInfo.processInfo.systemUptime - attemptStartedAt],
+          counters: ["attempt": attempt]
+        )
         startLatencyMonitor()
         startPlaybackWatchdog()
         consecutiveLoadFailures = 0
@@ -82,9 +133,18 @@ extension PlayerView {
         }
         return
       } catch {
+        guard telemetrySessionID == model.playbackTelemetry.sessionID,
+          loadingChannel == activeChannel else { return }
         lastError = error
+        recordPlaybackEvent(
+          "load_attempt_failed",
+          level: .warning,
+          attributes: PlaybackTelemetryRecorder.errorAttributes(error).merging(["reason": reason]) { _, new in new },
+          metrics: ["attempt_duration_seconds": ProcessInfo.processInfo.systemUptime - attemptStartedAt],
+          counters: ["attempt": attempt]
+        )
         player.pause()
-        player.replaceCurrentItem(with: nil)
+        replacePlaybackItem(with: nil)
         currentSourceURL = nil
         if attempt < maxAttempts {
           try? await Task.sleep(for: .seconds(Double(attempt)))
@@ -103,6 +163,8 @@ extension PlayerView {
     let resolvedOffline = (lastError as? PlaybackError) == .offline
     if resolvedOffline || lastError == nil || lastError is LoadTimeoutError {
       let status = await PlaybackService.streamLiveStatus(for: activeChannel)
+      guard telemetrySessionID == model.playbackTelemetry.sessionID,
+        loadingChannel == activeChannel else { return }
       if status == .offline || (resolvedOffline && status != .live) {
         presentOfflineState()
         return
@@ -112,6 +174,12 @@ extension PlayerView {
     let fallback = "Failed to load stream (\(reason))."
     errorMessage = lastError?.localizedDescription ?? fallback
     isLoading = false
+    recordPlaybackEvent(
+      "load_failed",
+      level: .error,
+      attributes: PlaybackTelemetryRecorder.errorAttributes(lastError).merging(["reason": reason]) { _, new in new },
+      counters: ["attempts": maxAttempts]
+    )
   }
 
   func resolvePlaybackWithTimeout() async throws -> StreamPlayback {
@@ -192,7 +260,7 @@ extension PlayerView {
   /// comparing against the real (pre-proxy) source URL.
   func switchToSourceIfNeeded(_ url: URL) {
     guard currentSourceURL != url else { return }
-    player.replaceCurrentItem(with: makeItem(url: url))
+    replacePlaybackItem(with: makeItem(url: url))
     startPlayback()
   }
 
@@ -328,10 +396,15 @@ extension PlayerView {
     // Always minimize stalling. Disabling this starves the buffer and caused
     // hard freezes on-device; the latency win comes from the proxy instead.
     player.automaticallyWaitsToMinimizeStalling = true
+    recordPlaybackEvent(
+      "player_configured",
+      flags: ["automatically_waits_to_minimize_stalling": true]
+    )
   }
 
   func startPlayback() {
     didRequestPlayback = true
+    recordPlaybackEvent("play_requested", metrics: ["rate": 1.0])
     player.playImmediately(atRate: 1.0)
   }
 
@@ -444,21 +517,49 @@ extension PlayerView {
   func handleReturnToForeground() {
     guard let leftAt = backgroundedAt else { return }
     backgroundedAt = nil
-    guard Date().timeIntervalSince(leftAt) >= liveResumeBehindThresholdSeconds else { return }
+    let backgroundDuration = Date().timeIntervalSince(leftAt)
+    guard backgroundDuration >= liveResumeBehindThresholdSeconds else { return }
     guard !isVOD, pinnedToLive, !isUserPaused, !isScrubbing else { return }
     if showLatencyDiagnostics { logDiagnosticsEvent("left live edge (resumed behind)") }
+    recordPlaybackEvent(
+      "left_live_edge_after_resume",
+      metrics: ["background_duration_seconds": backgroundDuration]
+    )
     pinnedToLive = false
     updateRewindReadout()
   }
 
   func triggerRecoveryIfAllowed(reason: String) {
-    guard !isRecoveringPlayback else { return }
+    guard !isRecoveringPlayback else {
+      recordPlaybackEvent(
+        "recovery_suppressed",
+        attributes: ["reason": reason, "cause": "already_recovering"]
+      )
+      return
+    }
     let now = Date()
     guard now.timeIntervalSince(lastRecoveryAttemptAt) >= recoveryCooldownSeconds else {
+      recordPlaybackEvent(
+        "recovery_suppressed",
+        attributes: ["reason": reason, "cause": "cooldown"],
+        metrics: [
+          "seconds_since_last_recovery": now.timeIntervalSince(lastRecoveryAttemptAt),
+          "cooldown_seconds": recoveryCooldownSeconds,
+        ]
+      )
       return
     }
     lastRecoveryAttemptAt = now
-    Task { await recoverFromPlaybackStall(reason: reason) }
+    recordPlaybackEvent(
+      "recovery_requested",
+      level: .warning,
+      attributes: ["reason": reason]
+    )
+    let telemetrySessionID = model.playbackTelemetry.sessionID
+    Task {
+      guard telemetrySessionID == model.playbackTelemetry.sessionID else { return }
+      await recoverFromPlaybackStall(reason: reason)
+    }
   }
 
   /// Seconds value of the live seekable edge (end of the last seekable range),
@@ -491,12 +592,27 @@ extension PlayerView {
     let target = max(edge - targetLiveEdgeSeconds, 0)
     let tolerance = CMTime(seconds: 0.6, preferredTimescale: 600)
     if showLatencyDiagnostics { logDiagnosticsEvent("live resync (edge drift)") }
+    recordPlaybackEvent(
+      "live_edge_resync_started",
+      level: .warning,
+      metrics: [
+        "edge_seconds": edge,
+        "target_seconds": target,
+        "gap_seconds": max(edge - CMTimeGetSeconds(item.currentTime()), 0),
+      ],
+      counters: ["attempt": liveResyncAttempts]
+    )
+    let telemetrySeek = model.playbackTelemetry.beginSeek(target: target, kind: "live_edge_resync")
     item.seek(
       to: CMTime(seconds: target, preferredTimescale: 600),
       toleranceBefore: tolerance,
       toleranceAfter: tolerance
-    ) { [self] _ in
-      player.playImmediately(atRate: 1.0)
+    ) { [self] finished in
+      Task { @MainActor in
+        guard model.playbackTelemetry.finishSeek(telemetrySeek, finished: finished,
+                                                actual: CMTimeGetSeconds(item.currentTime())) else { return }
+        player.playImmediately(atRate: 1.0)
+      }
     }
   }
 
@@ -711,6 +827,15 @@ extension PlayerView {
       {
         lastSoftStallNudgeAt = now
         player.playImmediately(atRate: desiredLivePlaybackRate(policy: activeLivePlaybackPolicy))
+        recordPlaybackEvent(
+          "playback_nudged",
+          level: .warning,
+          attributes: ["reason": "soft_stall_deadlock"],
+          metrics: [
+            "stuck_seconds": stuckFor,
+            "buffer_ahead_seconds": bufferAheadSeconds(item) ?? -1,
+          ]
+        )
         if showLatencyDiagnostics {
           let buf = bufferAheadSeconds(item).map { diagFormat($0, decimals: 1) } ?? "—"
           logDiagnosticsEvent("soft-stall nudge (buf \(buf)s)")
@@ -745,6 +870,15 @@ extension PlayerView {
       {
         lastFrozenPlayheadNudgeAt = now
         player.playImmediately(atRate: desiredLivePlaybackRate(policy: activeLivePlaybackPolicy))
+        recordPlaybackEvent(
+          "playback_nudged",
+          level: .warning,
+          attributes: ["reason": "frozen_playhead"],
+          metrics: [
+            "frozen_seconds": frozenFor,
+            "buffer_ahead_seconds": bufferAheadSeconds(item) ?? -1,
+          ]
+        )
         if showLatencyDiagnostics {
           let buf = bufferAheadSeconds(item).map { diagFormat($0, decimals: 1) } ?? "—"
           logDiagnosticsEvent("frozen nudge (buf \(buf)s)")
@@ -805,13 +939,41 @@ extension PlayerView {
   func recoverFromPlaybackStall(reason: String) async {
     guard !isRecoveringPlayback else { return }
     guard !isOffline else { return }
+    recordPlaybackTelemetrySnapshot()
+    let recoverySessionID = model.playbackTelemetry.sessionID
+    let recoveryStartedAt = ProcessInfo.processInfo.systemUptime
+    let recoveryID = UUID().uuidString
     isRecoveringPlayback = true
-    defer { isRecoveringPlayback = false }
+    recordPlaybackEvent(
+      "recovery_started",
+      level: .warning,
+      attributes: ["reason": reason, "recovery_id": recoveryID]
+    )
+    defer {
+      if recoverySessionID == model.playbackTelemetry.sessionID {
+        isRecoveringPlayback = false
+        recordPlaybackEvent(
+          "recovery_completed",
+          attributes: [
+            "reason": reason, "recovery_id": recoveryID,
+            "outcome": isOffline ? "offline" : (errorMessage != nil ? "load_failed" : "load_returned"),
+          ],
+          metrics: ["duration_seconds": ProcessInfo.processInfo.systemUptime - recoveryStartedAt]
+        )
+        recordPlaybackTelemetrySnapshot()
+      }
+    }
     // Before blindly reloading (which can loop forever on a frozen last frame
     // once a broadcast ends), authoritatively check whether the channel is still
     // live. Only act on a definitive `.offline`; `.live`/`.unknown` fall through
     // to the normal reload-based recovery for genuine transient stalls.
-    if await PlaybackService.streamLiveStatus(for: activeChannel) == .offline {
+    let liveStatus = await PlaybackService.streamLiveStatus(for: activeChannel)
+    guard recoverySessionID == model.playbackTelemetry.sessionID else { return }
+    if liveStatus == .offline {
+      recordPlaybackEvent(
+        "recovery_aborted",
+        attributes: ["reason": reason, "cause": "stream_offline"]
+      )
       presentOfflineState()
       return
     }
@@ -829,6 +991,12 @@ extension PlayerView {
 
     diagReloadCount += 1
     if showLatencyDiagnostics { logDiagnosticsEvent("reload (\(reason))") }
+    recordPlaybackEvent(
+      "pipeline_reload_started",
+      level: .warning,
+      attributes: ["reason": reason],
+      counters: ["reload_count": diagReloadCount]
+    )
     // A reload restarts the timeline, so clear the jump baseline to avoid
     // counting the discontinuity as a playhead jump.
     diagLastPlayheadSeconds = nil
@@ -852,11 +1020,12 @@ extension PlayerView {
     // Never flash "OFFLINE" while a raid is in flight — the raid banner and its
     // auto-follow take precedence over the offline empty state.
     guard !isFollowingOutgoingRaid else { return }
+    recordPlaybackEvent("offline_state_presented", level: .warning)
     stopPlaybackWatchdog()
     stopLatencyMonitor()
     audioLevelMonitor.stop()
     player.pause()
-    player.replaceCurrentItem(with: nil)
+    replacePlaybackItem(with: nil)
     currentSourceURL = nil
     isRecoveringPlayback = false
     hideTask?.cancel()
@@ -1104,6 +1273,20 @@ extension PlayerView {
     let targetRate = desiredLivePlaybackRate(policy: activeLivePlaybackPolicy)
     guard abs(previousRate - targetRate) > 0.01 else { return }
     player.playImmediately(atRate: targetRate)
+    recordPlaybackEvent(
+      "playback_rate_changed",
+      attributes: [
+        "reason":
+          targetRate < 0.99 ? "buffer_protection"
+          : (targetRate > 1.0 ? "live_catch_up" : "normal"),
+      ],
+      metrics: [
+        "previous_rate": Double(previousRate),
+        "target_rate": Double(targetRate),
+        "buffer_ahead_seconds": bufferAheadSeconds(player.currentItem) ?? -1,
+        "live_edge_gap_seconds": liveEdgeLatencySeconds ?? -1,
+      ]
+    )
 
     // Log only when an arm engages/releases (crosses the 1.0 boundary), not on
     // every small ramp step, so the event log stays readable.

@@ -88,12 +88,14 @@ extension PlayerView {
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
       if isVOD {
+        beginPlaybackTelemetry()
         await startVOD()
       } else {
         // Don't toast the channel we're already watching.
         goLive?.suppressedLogin = activeChannel
-        configurePlayerForLive()
         resetDiagnostics()
+        beginPlaybackTelemetry()
+        configurePlayerForLive()
         applyExperimentalYouTubeSettings()
         applyExperimentalKickSettings()
         chat.connect(to: activeChannel)
@@ -113,11 +115,50 @@ extension PlayerView {
       NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
     ) { _ in
       backgroundedAt = Date()
+      recordPlaybackEvent("app_backgrounded")
+      recordPlaybackTelemetrySnapshot()
+      Task { await model.playbackTelemetry.flush() }
     }
     .onReceive(
       NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
     ) { _ in
+      recordPlaybackEvent(
+        "app_foregrounded",
+        metrics: [
+          "background_duration_seconds":
+            backgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
+        ]
+      )
       handleReturnToForeground()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemNewAccessLogEntry)) {
+      notification in
+      guard let item = notification.object as? AVPlayerItem, item == player.currentItem else {
+        return
+      }
+      recordCurrentAccessLog()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemNewErrorLogEntry)) {
+      notification in
+      guard let item = notification.object as? AVPlayerItem, item == player.currentItem else {
+        return
+      }
+      recordCurrentErrorLog()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemTimeJumped)) {
+      notification in
+      guard let item = notification.object as? AVPlayerItem, item == player.currentItem else {
+        return
+      }
+      recordPlaybackEvent(
+        "avplayer_time_jumped",
+        metrics: ["playhead_seconds": max(CMTimeGetSeconds(item.currentTime()), 0)],
+        flags: [
+          "user_paused": isUserPaused,
+          "scrubbing": isScrubbing,
+          "pinned_to_live": pinnedToLive,
+        ]
+      )
     }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) {
       notification in
@@ -125,6 +166,15 @@ extension PlayerView {
       guard stalledItem == player.currentItem else { return }
       // Ignore stalls while intentionally paused or scrubbing for DVR rewind.
       guard !isUserPaused, !isScrubbing else { return }
+      recordPlaybackEvent(
+        "avplayer_stall_notification",
+        level: .warning,
+        metrics: ["buffer_ahead_seconds": bufferAheadSeconds(stalledItem) ?? -1],
+        flags: [
+          "buffer_empty": stalledItem.isPlaybackBufferEmpty,
+          "likely_to_keep_up": stalledItem.isPlaybackLikelyToKeepUp,
+        ]
+      )
       let now = Date()
       guard now.timeIntervalSince(lastStallNotificationAt) >= stallNotificationDebounceSeconds
       else { return }
@@ -134,6 +184,19 @@ extension PlayerView {
       // usually self-resumes once buffered, but an explicit nudge shortens the
       // gap and helps the player that has stalled without auto-resuming.
       player.playImmediately(atRate: 1.0)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) {
+      notification in
+      guard let item = notification.object as? AVPlayerItem, item == player.currentItem else {
+        return
+      }
+      let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+      recordPlaybackEvent(
+        "failed_to_play_to_end",
+        level: .error,
+        attributes: PlaybackTelemetryRecorder.errorAttributes(error)
+      )
+      recordCurrentErrorLog()
     }
     .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) {
       notification in
@@ -162,8 +225,9 @@ extension PlayerView {
       audioLevelMonitor.stop()
       removeVODTimeObserver()
       replay.stop()
+      stopPlaybackTelemetry(reason: "player_disappeared")
       player.pause()
-      player.replaceCurrentItem(with: nil)
+      replacePlaybackItem(with: nil)
       captionController.stop()
       chat.disconnect()
       eventSub.stop()

@@ -11,7 +11,7 @@ struct SettingsView: View {
   var onRepublishTopShelf: () -> Void = {}
 
   @Environment(\.themePalette) private var palette
-  @State private var selectedCategory = SettingsCategory.appearance
+  @State private var selectedPane = SettingsPane.theme
 
   var body: some View {
     NavigationStack {
@@ -25,16 +25,15 @@ struct SettingsView: View {
 
         GeometryReader { proxy in
           HStack(alignment: .top, spacing: 0) {
-            SettingsCategoryRail(selection: $selectedCategory)
-              .frame(width: min(360, max(300, proxy.size.width * 0.22)))
+            SettingsPaneRail(selection: $selectedPane)
+              .frame(width: min(600, max(500, proxy.size.width * 0.33)))
 
             Divider()
               .overlay(Color.primary.opacity(0.12))
-              .padding(.horizontal, 28)
-              .padding(.vertical, 8)
+              .padding(.horizontal, 32)
 
-            SettingsCategoryDetail(
-              category: selectedCategory,
+            SettingsPaneDetail(
+              pane: selectedPane,
               onRequestSignIn: onRequestSignIn,
               onRequestYouTubeSignIn: onRequestYouTubeSignIn,
               onClearWatchHistory: onClearWatchHistory,
@@ -51,11 +50,14 @@ struct SettingsView: View {
   }
 }
 
-private enum SettingsCategory: String, CaseIterable, Hashable, Identifiable {
-  case appearance
-  case homeAndDiscovery
+private enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
+  case theme
+  case cards
+  case nightShift
+  case streamLanguage
+  case recommendations
   case watching
-  case alerts
+  case goLiveAlerts
   case accounts
   case about
 
@@ -63,70 +65,99 @@ private enum SettingsCategory: String, CaseIterable, Hashable, Identifiable {
 
   var title: LocalizedStringResource {
     switch self {
-    case .appearance: "Appearance"
-    case .homeAndDiscovery: "Home & Discovery"
+    case .theme: "Theme"
+    case .cards: "Cards"
+    case .nightShift: "Night Shift"
+    case .streamLanguage: "Stream Language"
+    case .recommendations: "Recommendations"
     case .watching: "Watching"
-    case .alerts: "Alerts"
+    case .goLiveAlerts: "Go Live Alerts"
     case .accounts: "Accounts"
     case .about: "About"
     }
   }
+
+  var description: LocalizedStringResource? {
+    switch self {
+    case .theme:
+      "Choose the app theme and how translucent surfaces are rendered."
+    case .cards:
+      "Control how stream cards are sized and presented."
+    case .nightShift:
+      "Warm and dim the picture automatically at night."
+    case .streamLanguage:
+      "Only show live streams in the language you choose."
+    case .recommendations:
+      "Personalize Home using follows and watch history stored on this Apple TV."
+    case .watching:
+      "Choose the defaults used when a stream starts."
+    case .goLiveAlerts:
+      "Choose when Twozz alerts you that a followed channel is live."
+    case .accounts:
+      "Manage your Twitch and YouTube connections."
+    case .about:
+      nil
+    }
+  }
 }
 
-private struct SettingsCategoryRail: View {
-  @Binding var selection: SettingsCategory
-  @FocusState private var focusedCategory: SettingsCategory?
+private struct SettingsPaneRail: View {
+  @Binding var selection: SettingsPane
+  @FocusState private var focusedPane: SettingsPane?
   @Namespace private var focusScope
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 22) {
+    VStack(alignment: .leading, spacing: 18) {
       Text("Settings")
-        .font(.system(size: 44, weight: .bold))
+        .font(.title2.weight(.bold))
         .accessibilityAddTraits(.isHeader)
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
 
       ScrollView(.vertical, showsIndicators: false) {
-        VStack(spacing: 8) {
-          ForEach(SettingsCategory.allCases) { category in
+        VStack(spacing: 6) {
+          ForEach(SettingsPane.allCases) { pane in
             Button {
-              selection = category
+              selection = pane
             } label: {
-              Text(category.title)
-                .font(.title3.weight(selection == category ? .semibold : .medium))
-                .lineLimit(1)
+              Text(pane.title)
+                .font(.callout.weight(.medium))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 13)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(SettingsCategoryButtonStyle(isSelected: selection == category))
-            .focused($focusedCategory, equals: category)
-            .prefersDefaultFocus(category == selection, in: focusScope)
-            .accessibilityAddTraits(selection == category ? .isSelected : [])
+            .buttonStyle(SettingsPaneButtonStyle(isSelected: selection == pane))
+            .focused($focusedPane, equals: pane)
+            .focusEffectDisabled()
+            .prefersDefaultFocus(pane == selection, in: focusScope)
+            .accessibilityAddTraits(selection == pane ? .isSelected : [])
           }
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 12)
         .padding(.vertical, 4)
       }
       .scrollClipDisabled()
       .focusScope(focusScope)
     }
-    .onChange(of: focusedCategory) { _, category in
-      guard let category else { return }
-      selection = category
+    .onChange(of: focusedPane) { _, pane in
+      guard let pane else { return }
+      selection = pane
     }
   }
 }
 
-private struct SettingsCategoryButtonStyle: ButtonStyle {
+private struct SettingsPaneButtonStyle: ButtonStyle {
   let isSelected: Bool
 
   func makeBody(configuration: Configuration) -> some View {
-    SettingsCategoryButtonBody(configuration: configuration, isSelected: isSelected)
+    SettingsPaneButtonBody(configuration: configuration, isSelected: isSelected)
   }
 }
 
-private struct SettingsCategoryButtonBody: View {
+private struct SettingsPaneButtonBody: View {
   let configuration: ButtonStyle.Configuration
   let isSelected: Bool
 
@@ -145,14 +176,14 @@ private struct SettingsCategoryButtonBody: View {
     configuration.label
       .foregroundStyle(isFocused ? focusForeground : Color.primary)
       .background {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
           .fill(
             isFocused
               ? focusFill
               : Color.accentColor.opacity(isSelected ? 0.16 : 0)
           )
-          .padding(.horizontal, isFocused ? -10 : 0)
-          .padding(.vertical, isFocused ? -3 : 0)
+          .padding(.horizontal, isFocused ? -12 : 0)
+          .padding(.vertical, isFocused ? -4 : 0)
           .shadow(
             color: .black.opacity(isFocused ? 0.28 : 0),
             radius: isFocused ? 14 : 0,
@@ -170,8 +201,8 @@ private struct SettingsCategoryButtonBody: View {
   }
 }
 
-private struct SettingsCategoryDetail: View {
-  let category: SettingsCategory
+private struct SettingsPaneDetail: View {
+  let pane: SettingsPane
   let onRequestSignIn: () -> Void
   let onRequestYouTubeSignIn: () -> Void
   let onClearWatchHistory: () -> Void
@@ -180,37 +211,43 @@ private struct SettingsCategoryDetail: View {
 
   var body: some View {
     ScrollView(.vertical, showsIndicators: false) {
-      VStack(alignment: .leading, spacing: 28) {
-        Text(category.title)
-          .font(.system(size: 38, weight: .bold))
-          .accessibilityAddTraits(.isHeader)
+      VStack(alignment: .leading, spacing: 38) {
+        VStack(alignment: .leading, spacing: 10) {
+          Text(pane.title)
+            .font(.title2.weight(.bold))
+            .accessibilityAddTraits(.isHeader)
 
-        switch category {
-        case .appearance:
+          if let description = pane.description {
+            Text(description)
+              .font(.callout)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+
+        switch pane {
+        case .theme:
           SettingsPreferencesSection(
-            group: .appearance,
-            onClearWatchHistory: onClearWatchHistory,
-            onResetNotInterested: onResetNotInterested
+            group: .theme
           )
+        case .cards:
+          SettingsPreferencesSection(group: .cards)
+        case .nightShift:
           SettingsNightShiftSection()
-        case .homeAndDiscovery:
+        case .streamLanguage:
           SettingsPreferencesSection(
-            group: .homeAndDiscovery,
+            group: .streamLanguage
+          )
+        case .recommendations:
+          SettingsPreferencesSection(
+            group: .recommendations,
             onClearWatchHistory: onClearWatchHistory,
             onResetNotInterested: onResetNotInterested
           )
         case .watching:
-          SettingsPreferencesSection(
-            group: .watching,
-            onClearWatchHistory: onClearWatchHistory,
-            onResetNotInterested: onResetNotInterested
-          )
-        case .alerts:
-          SettingsPreferencesSection(
-            group: .alerts,
-            onClearWatchHistory: onClearWatchHistory,
-            onResetNotInterested: onResetNotInterested
-          )
+          SettingsPreferencesSection(group: .watching)
+        case .goLiveAlerts:
+          SettingsPreferencesSection(group: .alerts)
         case .accounts:
           SettingsAccountSection(
             onRequestSignIn: onRequestSignIn,
@@ -225,10 +262,11 @@ private struct SettingsCategoryDetail: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .topLeading)
-      .padding(.horizontal, 12)
-      .padding(.bottom, 40)
+      .padding(.top, 8)
+      .padding(.horizontal, 20)
+      .padding(.bottom, 48)
     }
-    .id(category)
+    .id(pane)
     .scrollClipDisabled()
   }
 }

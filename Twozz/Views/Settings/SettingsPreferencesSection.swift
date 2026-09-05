@@ -1,8 +1,10 @@
 import SwiftUI
 
 enum SettingsPreferencesGroup {
-  case appearance
-  case homeAndDiscovery
+  case theme
+  case cards
+  case streamLanguage
+  case recommendations
   case watching
   case alerts
 }
@@ -50,33 +52,33 @@ struct SettingsPreferencesSection: View {
   @ViewBuilder
   private var preferenceRows: some View {
     switch group {
-    case .appearance:
+    case .theme:
       appearanceRow
-        .padding(.vertical, 16)
-      groupDivider
-      streamCardRow
-        .padding(.vertical, 16)
-      groupDivider
-      cardPresentationRow
-        .padding(.vertical, 16)
+        .padding(.vertical, 24)
       groupDivider
       reduceTransparencyRow
-        .padding(.vertical, 16)
-    case .homeAndDiscovery:
-      languageRow
-        .padding(.vertical, 16)
+        .padding(.vertical, 24)
+    case .cards:
+      streamCardRow
+        .padding(.vertical, 24)
       groupDivider
+      cardPresentationRow
+        .padding(.vertical, 24)
+    case .streamLanguage:
+      languageRow
+        .padding(.vertical, 24)
+    case .recommendations:
       recommendationsRow
-        .padding(.vertical, 16)
+        .padding(.vertical, 24)
     case .watching:
       chatRow
-        .padding(.vertical, 16)
+        .padding(.vertical, 24)
       groupDivider
       preferYouTubeSourceRow
-        .padding(.vertical, 16)
+        .padding(.vertical, 24)
     case .alerts:
       goLiveAlertsRow
-        .padding(.vertical, 16)
+        .padding(.vertical, 24)
     }
   }
 
@@ -87,7 +89,7 @@ struct SettingsPreferencesSection: View {
 
   private var appearanceRow: some View {
     SettingRow(
-      title: "Theme",
+      title: "Color Theme",
       subtitle: nil
     ) {
       ForEach(AppTheme.allCases) { theme in
@@ -104,7 +106,7 @@ struct SettingsPreferencesSection: View {
 
   private var streamCardRow: some View {
     SettingRow(
-      title: "Card Size",
+      title: "Size",
       subtitle: nil
     ) {
       ForEach(StreamCardSize.allCases) { size in
@@ -125,7 +127,7 @@ struct SettingsPreferencesSection: View {
 
   private var cardPresentationRow: some View {
     SettingRow(
-      title: "Card Style",
+      title: "Style",
       subtitle: nil
     ) {
       ForEach(CardPresentation.allCases) { presentation in
@@ -148,7 +150,7 @@ struct SettingsPreferencesSection: View {
 
   private var chatRow: some View {
     SettingRow(
-      title: "Open Chat by Default",
+      title: "Chat",
       subtitle: nil
     ) {
       ForEach([true, false], id: \.self) { on in
@@ -164,8 +166,8 @@ struct SettingsPreferencesSection: View {
 
   private var languageRow: some View {
     SettingRow(
-      title: "Stream Language",
-      subtitle: "Only show streams in this language."
+      title: "Language",
+      subtitle: nil
     ) {
       Menu {
         Picker("Stream Language", selection: $streamLanguage) {
@@ -183,8 +185,8 @@ struct SettingsPreferencesSection: View {
 
   private var recommendationsRow: some View {
     SettingRow(
-      title: "Personalized Recommendations",
-      subtitle: "Uses your follows and watch history. History stays on this Apple TV."
+      title: "Personalization",
+      subtitle: nil
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -239,8 +241,8 @@ struct SettingsPreferencesSection: View {
 
   private var goLiveAlertsRow: some View {
     SettingRow(
-      title: "Go Live Alerts",
-      subtitle: "In-app alerts on this Apple TV. Twitch notifications are unchanged."
+      title: "Alerts",
+      subtitle: nil
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -268,8 +270,8 @@ struct SettingsPreferencesSection: View {
   /// picker still lets the viewer switch per stream.
   private var preferYouTubeSourceRow: some View {
     SettingRow(
-      title: "Prefer YouTube for Simulcasts",
-      subtitle: "Starts on YouTube when available for lower latency. You can switch while watching."
+      title: "Stream Source",
+      subtitle: "Prefer YouTube when a simulcast is available."
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -290,7 +292,7 @@ struct SettingsPreferencesSection: View {
       title: "Solid Backgrounds",
       subtitle: reduceTransparency
         ? "Required by the system Reduce Transparency setting."
-        : "Replace translucent panels with solid, high-contrast surfaces."
+        : nil
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {

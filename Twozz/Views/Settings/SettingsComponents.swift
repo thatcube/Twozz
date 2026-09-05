@@ -14,10 +14,10 @@ struct SettingRow<Content: View>: View {
   @ViewBuilder var content: () -> Content
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: 20) {
       VStack(alignment: .leading, spacing: 4) {
         Text(title)
-          .font(.title3.weight(.semibold))
+          .font(.headline.weight(.semibold))
         if let subtitle {
           Text(subtitle)
             .font(.callout)
@@ -55,7 +55,7 @@ struct SettingPill: View {
     HStack(spacing: 12) {
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
-          .font(.headline)
+          .font(.body.weight(.medium))
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
         if let subtitle {

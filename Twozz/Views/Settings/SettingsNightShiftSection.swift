@@ -237,7 +237,6 @@ struct SettingsNightShiftSection: View {
     .focused($focusedControl, equals: .location)
   }
   private func stepper<Level: Hashable>(
-  private func stepper<Level: Hashable>(
     levels: [Level],
     selected: Level,
     display: (Level) -> String,

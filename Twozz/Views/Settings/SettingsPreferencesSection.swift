@@ -13,7 +13,6 @@ enum SettingsPreferencesGroup {
 /// rail. The underlying values and controls remain shared across categories.
 struct SettingsPreferencesSection: View {
   let group: SettingsPreferencesGroup
-  var focusRequest = 0
   var onClearWatchHistory: () -> Void = {}
   var onResetNotInterested: () -> Void = {}
 
@@ -58,9 +57,6 @@ struct SettingsPreferencesSection: View {
     }
     .padding(.horizontal, 28)
     .settingsGlassPanel(disabled: glassDisabled)
-    .onChange(of: focusRequest) { _, _ in
-      requestEntryFocus()
-    }
   }
 
   @ViewBuilder
@@ -327,23 +323,4 @@ struct SettingsPreferencesSection: View {
     }
   }
 
-  private func requestEntryFocus() {
-    Task { @MainActor in
-      await Task.yield()
-      switch group {
-      case .theme:
-        focusedControl = .theme(themeManager.theme)
-      case .cards:
-        focusedControl = .cardSize(StreamCardSize.resolve(streamCardSizeRaw))
-      case .streamLanguage:
-        focusedControl = .language
-      case .recommendations:
-        focusedControl = .recommendations(personalizedRecommendationsEnabled)
-      case .watching:
-        focusedControl = .chat(showChatByDefault)
-      case .alerts:
-        focusedControl = .alerts(goLiveAlertsEnabled)
-      }
-    }
-  }
 }

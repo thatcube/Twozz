@@ -8,7 +8,6 @@ import UIKit
 /// can scroll it into view at the bottom of the list.
 struct SettingsAboutSection: View {
   var showsTitle = true
-  var focusRequest = 0
 
   @FocusState private var isFocused: Bool
   @Environment(\.glassDisabled) private var glassDisabled
@@ -71,12 +70,6 @@ struct SettingsAboutSection: View {
     .focusable()
     .focused($isFocused)
     .animation(.easeOut(duration: 0.15), value: isFocused)
-    .onChange(of: focusRequest) { _, _ in
-      Task { @MainActor in
-        await Task.yield()
-        isFocused = true
-      }
-    }
   }
 
   private func infoRow(_ label: String, _ value: String) -> some View {

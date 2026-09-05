@@ -4,8 +4,6 @@ import SwiftUI
 /// manual schedule. The controls are arranged as compact vertical rows so the
 /// pane stays legible at TV distance and never depends on one very wide line.
 struct SettingsNightShiftSection: View {
-  var focusRequest = 0
-
   @Environment(AppEnvironment.self) private var environment
   private var nightShift: NightShiftManager { environment.nightShift }
 
@@ -203,12 +201,6 @@ struct SettingsNightShiftSection: View {
     }
     .onChange(of: nightShift.isEnabled) { _, enabled in
       if !enabled { nightShift.isPreviewing = false }
-    }
-    .onChange(of: focusRequest) { _, _ in
-      Task { @MainActor in
-        await Task.yield()
-        focusedMode = mode
-      }
     }
     .onDisappear {
       nightShift.isPreviewing = false

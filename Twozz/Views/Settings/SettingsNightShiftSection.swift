@@ -111,77 +111,85 @@ struct SettingsNightShiftSection: View {
       }
 
       if nightShift.isEnabled {
-        VStack(alignment: .leading, spacing: 38) {
-          if nightShift.scheduleMode == .solar {
-            controlRow("Location") {
-              locationMenu
-            }
-          } else {
-            controlRow("Turns on") {
-              timeStepper(
-                minutes: nightShift.manualOnMinutes,
-                down: .onDown,
-                up: .onUp,
-                commit: { nightShift.manualOnMinutes = $0 }
-              )
-            }
-            controlRow("Turns off") {
-              timeStepper(
-                minutes: nightShift.manualOffMinutes,
-                down: .offDown,
-                up: .offUp,
-                commit: { nightShift.manualOffMinutes = $0 }
-              )
-            }
-          }
-
+        VStack(alignment: .leading, spacing: 50) {
           if nightShift.scheduleMode != .alwaysOn {
-            controlRow("Fade") {
-              stepper(
-                levels: NightShiftManager.fadeOptions,
-                selected: clampedFade,
-                display: { circadianFadeLabel(minutes: $0) },
-                down: .fadeDown,
-                up: .fadeUp,
-                valueWidth: 190,
-                commit: { nightShift.fadeMinutes = $0 }
-              )
+            VStack(alignment: .leading, spacing: 32) {
+              sectionHeader("Schedule")
+
+              if nightShift.scheduleMode == .solar {
+                controlRow("Location") {
+                  locationMenu
+                }
+              } else {
+                controlRow("Turns on") {
+                  timeStepper(
+                    minutes: nightShift.manualOnMinutes,
+                    down: .onDown,
+                    up: .onUp,
+                    commit: { nightShift.manualOnMinutes = $0 }
+                  )
+                }
+                controlRow("Turns off") {
+                  timeStepper(
+                    minutes: nightShift.manualOffMinutes,
+                    down: .offDown,
+                    up: .offUp,
+                    commit: { nightShift.manualOffMinutes = $0 }
+                  )
+                }
+              }
+
+              controlRow("Fade") {
+                stepper(
+                  levels: NightShiftManager.fadeOptions,
+                  selected: clampedFade,
+                  display: { circadianFadeLabel(minutes: $0) },
+                  down: .fadeDown,
+                  up: .fadeUp,
+                  valueWidth: 190,
+                  commit: { nightShift.fadeMinutes = $0 }
+                )
+              }
             }
           }
 
-          controlRow("Darkness") {
-            stepper(
-              levels: NightShiftDimness.allCases,
-              selected: nightShift.dimness,
-              display: { $0.displayName },
-              down: .dimnessDown,
-              up: .dimnessUp,
-              valueWidth: 190,
-              commit: { nightShift.dimness = $0 }
-            )
-          }
+          VStack(alignment: .leading, spacing: 32) {
+            sectionHeader("Appearance")
 
-          controlRow("Warmth") {
-            stepper(
-              levels: NightShiftWarmth.allCases,
-              selected: nightShift.warmth,
-              display: { $0.displayName },
-              down: .warmthDown,
-              up: .warmthUp,
-              valueWidth: 190,
-              commit: { nightShift.warmth = $0 }
-            )
-          }
-
-          controlRow("Preview") {
-            HStack(spacing: 24) {
-              DayNightDial(
-                intensity: nightShift.currentIntensity,
-                progress: nightShift.previewProgress
+            controlRow("Darkness") {
+              stepper(
+                levels: NightShiftDimness.allCases,
+                selected: nightShift.dimness,
+                display: { $0.displayName },
+                down: .dimnessDown,
+                up: .dimnessUp,
+                valueWidth: 190,
+                commit: { nightShift.dimness = $0 }
               )
-              .frame(width: 160, height: 84)
+            }
 
-              previewButton
+            controlRow("Warmth") {
+              stepper(
+                levels: NightShiftWarmth.allCases,
+                selected: nightShift.warmth,
+                display: { $0.displayName },
+                down: .warmthDown,
+                up: .warmthUp,
+                valueWidth: 190,
+                commit: { nightShift.warmth = $0 }
+              )
+            }
+
+            controlRow("Preview") {
+              HStack(spacing: 24) {
+                DayNightDial(
+                  intensity: nightShift.currentIntensity,
+                  progress: nightShift.previewProgress
+                )
+                .frame(width: 160, height: 84)
+
+                previewButton
+              }
             }
           }
         }
@@ -334,6 +342,14 @@ struct SettingsNightShiftSection: View {
     .settingPillStyle(isSelected: false)
     .buttonBorderShape(.circle)
     .focused($focusedControl, equals: focus)
+  }
+
+  private func sectionHeader(_ title: LocalizedStringResource) -> some View {
+    Text(title)
+      .font(.subheadline.weight(.bold))
+      .foregroundStyle(.secondary)
+      .textCase(.uppercase)
+      .tracking(1.6)
   }
 
   private func controlRow<Content: View>(

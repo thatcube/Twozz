@@ -54,9 +54,9 @@ fi
 
 # Regenerate the (gitignored) Xcode project for this worktree.
 if command -v xcodegen >/dev/null 2>&1; then
-  ( cd "$repo_root" && xcodegen generate )
+  ( cd "$repo_root" && ./tools/generate-project.sh )
 else
-  echo "WARN   xcodegen not found; run 'brew install xcodegen' then 'xcodegen generate'"
+  echo "WARN   xcodegen not found; run 'brew install xcodegen' then './tools/generate-project.sh'"
 fi
 
 echo "Bootstrap complete."

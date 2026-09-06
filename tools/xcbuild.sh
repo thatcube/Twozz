@@ -41,6 +41,10 @@ fi
 
 _xcbuild_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+source "$_xcbuild_root/tools/lib/apple-build-lease.sh"
+acquire_apple_build_shared_lease "twozz/xcbuild"
+install_apple_build_lease_traps
+
 # Non-fatal secrets sanity check. The app's Config/App.xcconfig pulls local
 # build secrets in via `#include? "<name>.xcconfig.local"` lines (gitignored,
 # per-worktree). When one of those files is missing or empty the include
@@ -75,4 +79,4 @@ if [[ -n "$_xcbuild_build_number" && "$*" != *"CURRENT_PROJECT_VERSION="* ]]; th
   _xcbuild_extra+=("CURRENT_PROJECT_VERSION=$_xcbuild_build_number")
 fi
 
-exec xcodebuild "$@" ${_xcbuild_extra[@]+"${_xcbuild_extra[@]}"}
+xcodebuild "$@" ${_xcbuild_extra[@]+"${_xcbuild_extra[@]}"}

@@ -30,13 +30,13 @@ what you want and why is plenty.
 generate it first:
 
 ```bash
-xcodegen generate
+./tools/generate-project.sh
 ```
 
 Build for the tvOS simulator:
 
 ```bash
-xcodebuild \
+./tools/xcbuild.sh \
 	-project Twozz.xcodeproj \
 	-scheme Twozz \
 	-configuration Debug \
@@ -105,7 +105,7 @@ automatically — you should not normally edit version numbers by hand:
   never hand-edited.
 
 Manual bump (e.g. a major release): run `tools/bump-version.sh` or edit
-`MARKETING_VERSION` in `project.yml`, then `xcodegen generate`.
+`MARKETING_VERSION` in `project.yml`, then `tools/generate-project.sh`.
 
 Releases ship to TestFlight with fastlane using an App Store Connect API key:
 

@@ -11,9 +11,9 @@
 #
 # project.yml (XcodeGen source of truth) holds MARKETING_VERSION under
 # settings.base. This script reads it, increments the MINOR component, resets
-# PATCH to 0, and writes it back. The next `xcodegen generate` propagates the
-# value into the app and TopShelf extension Info.plists (both reference
-# $(MARKETING_VERSION)).
+# PATCH to 0, and writes it back. The next `tools/generate-project.sh` run
+# propagates the value into the app and TopShelf extension Info.plists (both
+# reference $(MARKETING_VERSION)).
 #
 # It resolves project.yml relative to its own location, so it runs correctly
 # from any worktree or working directory.
